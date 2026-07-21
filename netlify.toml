@@ -1,0 +1,11 @@
+[build]
+  base = "frontend"
+  command = "npm run build"
+  publish = "dist"
+
+# SPA: every route falls through to index.html so client-side routing works
+# on deep links (/review/:id) and on the magic-link callback.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
