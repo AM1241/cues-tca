@@ -1,8 +1,8 @@
-/**
+﻿/**
  * Service-role client. Bypasses RLS, so it is used only for pipeline writes
  * after authenticate() has already decided the caller may proceed.
  */
-import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2";
+import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2.110.8";
 
 export function serviceClient(): SupabaseClient {
   const url = Deno.env.get("SUPABASE_URL");

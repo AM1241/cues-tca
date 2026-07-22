@@ -1,0 +1,14 @@
+{
+  "lock": true,
+  "imports": {
+    "@supabase/supabase-js": "jsr:@supabase/supabase-js@2.110.8",
+    "@std/assert": "jsr:@std/assert@1.0.19"
+  },
+  "tasks": {
+    "test": "deno test --allow-env --allow-net ingest/__tests__/",
+    "check": "deno check ingest/index.ts ingest/provider.ts ingest/upsert.ts ingest/runs.ts _shared/auth.ts _shared/db.ts"
+  },
+  "fmt": {
+    "lineWidth": 100
+  }
+}

@@ -455,9 +455,18 @@ enabled = true
 # -----------------------------------------------------------------------------
 # Edge Functions
 # -----------------------------------------------------------------------------
-# verify_jwt = true rejects unauthenticated callers at the platform edge, before
-# any of our code runs. It is not sufficient on its own: a valid JWT only proves
-# somebody signed up. _shared/auth.ts additionally requires membership in
-# public.editors, and (while provider quota is being measured) role = 'admin'.
+# verify_jwt = FALSE, deliberately.
+#
+# The platform's built-in check only understands JWTs. Internal callers (pg_cron,
+# backfill) authenticate with an opaque secret in the `apikey` header, which the
+# gateway would reject before our code ever ran — the handler could never
+# compare it. Leaving verify_jwt on would have made the cron path unbuildable
+# while giving a false sense that the edge was doing the work.
+#
+# _shared/auth.ts is therefore the entire gate, and it fails closed: an internal
+# secret matched in constant time, or a real user token verified with
+# auth.getUser() plus membership in public.editors with role 'admin'. No
+# unverified JWT claim selects a path, and the service-role key is not accepted
+# as a caller credential at all.
 [functions.ingest]
-verify_jwt = true
+verify_jwt = false

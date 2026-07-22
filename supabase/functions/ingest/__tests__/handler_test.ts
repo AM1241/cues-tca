@@ -15,8 +15,8 @@
  * Skipped automatically when SUPABASE_URL is absent, so the pure unit suite
  * still runs standalone.
  */
-import { assert, assertEquals } from "jsr:@std/assert@1";
-import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2";
+import { assert, assertEquals } from "jsr:@std/assert@1.0.19";
+import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2.110.8";
 import { handleIngest } from "../index.ts";
 import { daysAgo, noSleep, post, scriptedFetch } from "./fixtures.ts";
 
@@ -94,12 +94,15 @@ async function teardown() {
   }
 }
 
-function request(body: unknown, token?: string): Request {
+const INTERNAL_SECRET = Deno.env.get("INGEST_INTERNAL_SECRET") ?? "";
+
+function request(body: unknown, token?: string, apikey?: string): Request {
   return new Request("https://local.test/ingest", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(apikey ? { apikey } : {}),
     },
     body: JSON.stringify(body ?? {}),
   });
@@ -154,16 +157,59 @@ it("admin -> allowed, recorded as manual with the actor snapshot", async () => {
   assert(body.totals.triggered_by !== null);
 });
 
-it("service role -> cron path, no user attributed", async () => {
+it("internal secret -> cron path, no user attributed", async () => {
   const { fetchImpl } = scriptedFetch([{ body: [] }]);
   const res = await handleIngest(
-    request({ source_ids: [sourceA] }, SERVICE!),
+    request({ source_ids: [sourceA] }, undefined, INTERNAL_SECRET),
     { db, fetchImpl, sleep: noSleep },
   );
   assertEquals(res.status, 200);
   const body = await res.json();
   assertEquals(body.totals.trigger_source, "cron");
   assertEquals(body.totals.triggered_by, null);
+});
+
+it("internal secret may request backfill; a browser cannot", async () => {
+  const { fetchImpl } = scriptedFetch([{ body: [] }]);
+  const internal = await handleIngest(
+    request({ source_ids: [sourceA], trigger_source: "backfill" }, undefined, INTERNAL_SECRET),
+    { db, fetchImpl, sleep: noSleep },
+  );
+  assertEquals((await internal.json()).totals.trigger_source, "backfill");
+
+  const browser = await handleIngest(
+    request({ source_ids: [sourceA], trigger_source: "backfill" }, tokens[emails.admin]),
+    { db, ...scriptedFetch([{ body: [] }]), sleep: noSleep },
+  );
+  assertEquals((await browser.json()).totals.trigger_source, "manual");
+});
+
+it("wrong internal secret -> 401 and no run row", async () => {
+  const before = await runCount();
+  const res = await handleIngest(
+    request({ source_ids: [sourceA] }, undefined, "not-the-secret"),
+    { db },
+  );
+  assertEquals(res.status, 401);
+  assertEquals(await runCount(), before);
+});
+
+it("the service-role key is NOT a caller credential", async () => {
+  // It exists to build the internal database client. Accepting it here would
+  // turn a leaked service key into a way to spend provider quota.
+  const before = await runCount();
+  const asBearer = await handleIngest(request({ source_ids: [sourceA] }, SERVICE!), { db });
+  assertEquals(asBearer.status, 401);
+  const asApikey = await handleIngest(request({ source_ids: [sourceA] }, undefined, SERVICE!), { db });
+  assertEquals(asApikey.status, 401);
+  assertEquals(await runCount(), before);
+});
+
+it("the publishable key alone is not a credential", async () => {
+  const before = await runCount();
+  const res = await handleIngest(request({ source_ids: [sourceA] }, undefined, ANON!), { db });
+  assertEquals(res.status, 401);
+  assertEquals(await runCount(), before);
 });
 
 it("browser-supplied trigger_source is ignored", async () => {
@@ -192,6 +238,91 @@ it("unknown source id -> 400 and no run row", async () => {
 // ===========================================================================
 // SKIPS COST NO QUOTA
 // ===========================================================================
+// ===========================================================================
+// FINAL STATUS FOR OPERATIONAL SKIPS
+// A run that collected nothing must never call itself 'completed' just because
+// nothing threw. Only 'disabled' is a benign skip — an operator turned it off,
+// so not collecting it is the correct outcome, not a shortfall.
+// ===========================================================================
+it("every source locked -> failed, not completed", async () => {
+  // Hold both sources with a foreign run, exactly as a concurrent invocation
+  // would, then try to collect them.
+  const { data: blocker } = await db
+    .from("ingest_runs").insert({ trigger_source: "cron" }).select("id").single();
+  for (const sid of [sourceA, sourceB]) {
+    await db.rpc("claim_source_for_ingest", {
+      p_run_id: blocker!.id, p_source_id: sid, p_source_name: "blocker",
+      p_identifier: "https://x", p_stale_after: "15 minutes",
+    });
+  }
+
+  const { fetchImpl, calls } = scriptedFetch([{ body: [] }]);
+  const res = await handleIngest(
+    request({ source_ids: [sourceA, sourceB] }, tokens[emails.admin]),
+    { db, fetchImpl, sleep: noSleep },
+  );
+  const body = await res.json();
+  assertEquals(calls.length, 0, "locked sources cost no quota");
+  assertEquals(body.status, "failed", "collected nothing, so not 'completed'");
+  assertEquals(body.totals.sources_failed, 2);
+  assertEquals(body.totals.sources_ok, 0);
+
+  // release
+  await db.from("ingest_run_sources")
+    .update({ status: "failed", error_code: "stale_lock", finished_at: new Date().toISOString() })
+    .eq("run_id", blocker!.id);
+  await db.rpc("finalize_ingest_run", { p_run_id: blocker!.id });
+});
+
+it("mixed locked and success -> completed_with_errors", async () => {
+  const { data: blocker } = await db
+    .from("ingest_runs").insert({ trigger_source: "cron" }).select("id").single();
+  await db.rpc("claim_source_for_ingest", {
+    p_run_id: blocker!.id, p_source_id: sourceB, p_source_name: "blocker",
+    p_identifier: "https://x", p_stale_after: "15 minutes",
+  });
+
+  const { fetchImpl } = scriptedFetch([{ body: [] }]);
+  const res = await handleIngest(
+    request({ source_ids: [sourceA, sourceB] }, tokens[emails.admin]),
+    { db, fetchImpl, sleep: noSleep },
+  );
+  const body = await res.json();
+  assertEquals(body.status, "completed_with_errors");
+  assertEquals(body.totals.sources_ok, 1);
+  assertEquals(body.totals.sources_failed, 1);
+
+  await db.from("ingest_run_sources")
+    .update({ status: "failed", error_code: "stale_lock", finished_at: new Date().toISOString() })
+    .eq("run_id", blocker!.id);
+  await db.rpc("finalize_ingest_run", { p_run_id: blocker!.id });
+});
+
+it("only a missing identifier -> failed", async () => {
+  const { fetchImpl, calls } = scriptedFetch([{ body: [] }]);
+  const res = await handleIngest(
+    request({ source_ids: [noIdentSource] }, tokens[emails.admin]),
+    { db, fetchImpl, sleep: noSleep },
+  );
+  const body = await res.json();
+  assertEquals(calls.length, 0);
+  assertEquals(body.status, "failed", "configured but unusable is a shortfall");
+  assertEquals(body.totals.sources_failed, 1);
+});
+
+it("only disabled sources -> completed (a benign skip)", async () => {
+  const { fetchImpl, calls } = scriptedFetch([{ body: [] }]);
+  const res = await handleIngest(
+    request({ source_ids: [disabledSource] }, tokens[emails.admin]),
+    { db, fetchImpl, sleep: noSleep },
+  );
+  const body = await res.json();
+  assertEquals(calls.length, 0);
+  assertEquals(body.status, "completed", "an operator switched it off on purpose");
+  assertEquals(body.totals.sources_failed, 0);
+  assertEquals(body.totals.sources_skipped, 1);
+});
+
 it("disabled and identifier-less sources are skipped with zero provider attempts", async () => {
   const { fetchImpl, calls } = scriptedFetch([{ body: [] }]);
   const res = await handleIngest(
@@ -287,7 +418,7 @@ it("persisted counters match the HTTP response exactly", async () => {
 // ===========================================================================
 // FAILURE HANDLING
 // ===========================================================================
-it("provider 401 stops the run; later sources are not fetched", async () => {
+it("provider 401 stops the run but every source keeps an audit row", async () => {
   const { fetchImpl, calls } = scriptedFetch([{ status: 401 }]);
   const res = await handleIngest(
     request({ source_ids: [sourceA, sourceB] }, tokens[emails.admin]),
@@ -296,9 +427,28 @@ it("provider 401 stops the run; later sources are not fetched", async () => {
   const body = await res.json();
   assertEquals(calls.length, 1, "one attempt total, not one per source");
   assertEquals(body.status, "failed");
-  assertEquals(body.results.length, 1, "the second source was never attempted");
-  assertEquals(body.results[0].error_code, "auth");
   assertEquals(body.totals.provider_requests, 1, "a 401 costs exactly one request");
+
+  // The second source was not fetched, but it must not vanish: sources_total
+  // has to match what was asked for, and every source needs a row saying why
+  // it produced nothing.
+  assertEquals(body.totals.sources_total, 2, "no requested source is dropped from the record");
+  assertEquals(body.results.length, 2);
+
+  const { data: rows } = await db
+    .from("ingest_run_sources")
+    .select("source_id, status, error_code, provider_requests")
+    .eq("run_id", body.run_id);
+  assertEquals(rows?.length, 2);
+
+  const aborted = rows!.find((r) => r.source_id === sourceB)!;
+  assertEquals(aborted.status, "skipped");
+  assertEquals(aborted.error_code, "auth_aborted");
+  assertEquals(aborted.provider_requests, 0, "never attempted, so never charged");
+
+  const failedRow = rows!.find((r) => r.source_id === sourceA)!;
+  assertEquals(failedRow.status, "auth_failed");
+  assertEquals(failedRow.error_code, "auth");
 });
 
 it("mixed success and failure -> completed_with_errors", async () => {

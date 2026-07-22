@@ -1,4 +1,4 @@
-import { assertEquals, assertThrows } from "jsr:@std/assert@1";
+﻿import { assertEquals, assertThrows } from "jsr:@std/assert@1.0.19";
 import { LOOKBACK_MAX, LOOKBACK_MIN, MAX_SOURCES_PER_RUN, parseRequest } from "../request.ts";
 import { RequestError } from "../../_shared/errors.ts";
 import { corsHeaders, handlePreflight, isAllowedOrigin } from "../../_shared/cors.ts";

@@ -121,9 +121,12 @@ create table public.ingest_run_sources (
 
   status              text not null default 'running'
                         check (status in ('running','ok','failed','rate_limited','auth_failed','skipped')),
+  -- 'auth_aborted' is recorded for sources that were never attempted because an
+  -- earlier source failed provider authentication. They are not "fine", they
+  -- are unexplained gaps unless we say so.
   error_code          text check (error_code in (
                         'disabled','no_rapidapi_identifier','locked','stale_lock',
-                        'auth','rate_limit','server_error','network',
+                        'auth','auth_aborted','rate_limit','server_error','network',
                         'malformed_response','timeout','budget_exhausted')),
 
   pages_fetched       integer not null default 0 check (pages_fetched >= 0),
@@ -340,16 +343,30 @@ begin
     return null;              -- still working; nothing to finalize
   end if;
 
-  -- A source left unprocessed because the execution budget ran out counts as a
-  -- FAILURE, not a benign skip: the caller asked for it and did not get it. A
-  -- run that quietly reported 'completed' while silently dropping sources would
-  -- be the most misleading state this table can hold.
+  -- OPERATIONAL FAILURES. A source the caller asked for and did not get is a
+  -- failure, however politely it was skipped:
+  --
+  --   budget_exhausted      we ran out of time
+  --   locked                another run held it; this run collected nothing
+  --   no_rapidapi_identifier  configured but unusable
+  --   auth_aborted          never attempted because the provider key is bad
+  --
+  -- Only 'disabled' is a benign skip: an operator switched it off, so not
+  -- collecting it is the correct outcome rather than a shortfall.
+  --
+  -- Without this, a run in which every source was locked would report
+  -- 'completed' having collected nothing at all — the most misleading state
+  -- this table can hold.
   select count(*),
          count(*) filter (where status = 'ok'),
          count(*) filter (
            where status in ('failed','auth_failed','rate_limited')
-              or (status = 'skipped' and error_code = 'budget_exhausted')),
-         count(*) filter (where status = 'skipped' and coalesce(error_code,'') <> 'budget_exhausted')
+              or (status = 'skipped' and error_code in (
+                    'budget_exhausted','locked','no_rapidapi_identifier','auth_aborted'))),
+         count(*) filter (
+           where status = 'skipped'
+             and coalesce(error_code,'') not in (
+                   'budget_exhausted','locked','no_rapidapi_identifier','auth_aborted'))
     into v_total, v_ok, v_failed, v_skipped
     from public.ingest_run_sources
    where run_id = p_run_id;

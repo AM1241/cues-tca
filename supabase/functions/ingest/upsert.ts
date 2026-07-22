@@ -18,7 +18,7 @@
  * source_url, media_urls and engagement_metrics are refreshed in all three
  * cases, because those are provider facts that legitimately change.
  */
-import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
+import type { SupabaseClient } from "jsr:@supabase/supabase-js@2.110.8";
 import type { NormalizedPost } from "./types.ts";
 
 export type UpsertOutcome = "inserted" | "metadata_refreshed" | "content_changed";

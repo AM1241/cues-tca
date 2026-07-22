@@ -150,6 +150,49 @@ end
 $blk$;
 rollback to se2;
 
+\echo '######## E3. FINALIZER STATUS MATRIX FOR OPERATIONAL SKIPS ########'
+savepoint sm;
+do $blk$
+declare
+  r uuid; s1 uuid; s2 uuid; st text;
+  -- code, whether a second source succeeded, expected run status
+  cases text[][] := array[
+    ['locked','no','failed'],
+    ['locked','yes','completed_with_errors'],
+    ['no_rapidapi_identifier','no','failed'],
+    ['no_rapidapi_identifier','yes','completed_with_errors'],
+    ['auth_aborted','no','failed'],
+    ['auth_aborted','yes','completed_with_errors'],
+    ['budget_exhausted','no','failed'],
+    ['budget_exhausted','yes','completed_with_errors'],
+    ['disabled','no','completed'],
+    ['disabled','yes','completed']
+  ];
+  c text[];
+begin
+  select id into s1 from public.sources order by name limit 1;
+  select id into s2 from public.sources order by name desc limit 1;
+
+  foreach c slice 1 in array cases loop
+    insert into public.ingest_runs (trigger_source) values ('cron') returning id into r;
+    insert into public.ingest_run_sources (run_id, source_id, source_name, status, error_code, finished_at)
+    values (r, s1, 'skipped-one', 'skipped', c[1], now());
+    if c[2] = 'yes' then
+      insert into public.ingest_run_sources (run_id, source_id, source_name, status, finished_at)
+      values (r, s2, 'ok-one', 'ok', now());
+    end if;
+
+    st := public.finalize_ingest_run(r);
+    if st is distinct from c[3] then
+      raise notice 'RESULT % (success=%) -> % BUT EXPECTED %', c[1], c[2], st, c[3];
+    else
+      raise notice 'RESULT % (success=%) -> % (expected)', c[1], c[2], st;
+    end if;
+  end loop;
+end
+$blk$;
+rollback to sm;
+
 \echo '######## E2. REAPER: crashed function leaves stale claim AND stale run ########'
 savepoint sr;
 do $blk$

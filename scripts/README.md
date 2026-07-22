@@ -71,6 +71,28 @@ docker run --rm -v "$PWD/supabase/functions:/app" -w /app denoland/deno:alpine-2
   deno test --allow-env --allow-net=jsr.io ingest/__tests__/
 ```
 
+Handler tests additionally need the local stack (`--network` plus the keys from
+`supabase status`, and `INGEST_INTERNAL_SECRET`). They call `handleIngest()`
+directly, so they exercise the logic but **not** the platform gateway.
+
+## 4. Gateway verification
+
+The gateway is a separate boundary, and it is where `verify_jwt` would reject
+the opaque internal secret before any of our code ran. Test it over real HTTP:
+
+```bash
+cp supabase/functions/.env.example supabase/functions/.env.test   # set a real secret
+npx supabase functions serve ingest --env-file supabase/functions/.env.test --no-verify-jwt
+
+# in another shell, with SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY /
+# INGEST_INTERNAL_SECRET exported:
+node scripts/verify_gateway.mjs
+```
+
+Every accepted request targets a source with no `rapidapi_identifier`, so the
+runs finish with skips and **zero** outbound HTTP. `RAPIDAPI_KEY` is a dummy in
+`.env.test` so a real provider call would fail loudly rather than succeed.
+
 ## 3. Verify RLS
 
 ```bash

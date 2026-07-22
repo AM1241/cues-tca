@@ -1,5 +1,5 @@
-/** ingest_runs / ingest_run_sources lifecycle. */
-import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
+﻿/** ingest_runs / ingest_run_sources lifecycle. */
+import type { SupabaseClient } from "jsr:@supabase/supabase-js@2.110.8";
 import type { Actor } from "../_shared/auth.ts";
 import type { SourceCounters } from "./types.ts";
 
@@ -60,7 +60,12 @@ export async function recordSkippedSource(
   db: SupabaseClient,
   runId: string,
   source: { id: string; name: string; rapidapi_identifier: string | null },
-  errorCode: "disabled" | "no_rapidapi_identifier" | "locked" | "budget_exhausted",
+  errorCode:
+    | "disabled"
+    | "no_rapidapi_identifier"
+    | "locked"
+    | "budget_exhausted"
+    | "auth_aborted",
   message: string,
 ): Promise<void> {
   const now = new Date().toISOString();

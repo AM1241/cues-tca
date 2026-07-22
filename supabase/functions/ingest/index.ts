@@ -15,7 +15,7 @@
  * exercised against the local stack with a scripted provider — no test in this
  * repo is permitted to reach RapidAPI.
  */
-import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
+import type { SupabaseClient } from "jsr:@supabase/supabase-js@2.110.8";
 import { handlePreflight, jsonResponse } from "../_shared/cors.ts";
 import { authenticate } from "../_shared/auth.ts";
 import { serviceClient } from "../_shared/db.ts";
@@ -117,8 +117,9 @@ export async function handleIngest(req: Request, deps: IngestDeps = {}): Promise
     });
 
     const results: Record<string, unknown>[] = [];
+    let authAbortedAt = -1;
 
-    for (const source of sources) {
+    for (const [index, source] of sources.entries()) {
       // ---- reasons not to spend quota, checked before claiming ----------
       if (!source.enabled) {
         await recordSkippedSource(db, runId, source, "disabled", "Source is disabled.");
@@ -212,7 +213,30 @@ export async function handleIngest(req: Request, deps: IngestDeps = {}): Promise
 
         // A bad key fails identically for every source; stop rather than
         // spending an attempt per source to learn the same thing.
-        if (pe?.code === "auth") break;
+        if (pe?.code === "auth") {
+          authAbortedAt = index;
+          break;
+        }
+      }
+    }
+
+    // Provider auth failed, so the remaining sources were never attempted.
+    // Record them explicitly: sources_total must still equal what was asked
+    // for, and every source needs a row saying why it produced nothing. A run
+    // that simply omits them looks like they were never requested.
+    if (authAbortedAt >= 0) {
+      for (const source of sources.slice(authAbortedAt + 1)) {
+        await recordSkippedSource(
+          db, runId, source, "auth_aborted",
+          "Not attempted: provider authentication failed on an earlier source.",
+        );
+        results.push({
+          source_id: source.id,
+          name: source.name,
+          status: "skipped",
+          error_code: "auth_aborted",
+          provider_requests: 0,
+        });
       }
     }
 

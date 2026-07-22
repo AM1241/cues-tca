@@ -35,3 +35,7 @@ legacy_snapshot.db
 legacy_posts.db
 legacy_dump.sql
 load_legacy.sql
+
+# Local-only Edge Function test secrets
+supabase/functions/.env*
+!supabase/functions/.env.example

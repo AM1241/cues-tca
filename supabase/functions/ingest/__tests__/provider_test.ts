@@ -1,4 +1,4 @@
-import { assert, assertEquals, assertRejects } from "jsr:@std/assert@1";
+﻿import { assert, assertEquals, assertRejects } from "jsr:@std/assert@1.0.19";
 import { collectCompanyPosts, fetchPage, MAX_PAGES } from "../provider.ts";
 import { ProviderError } from "../../_shared/errors.ts";
 import { daysAgo, noSleep, post, scriptedFetch } from "./fixtures.ts";
