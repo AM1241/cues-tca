@@ -29,3 +29,9 @@ Thumbs.db
 # Logs
 *.log
 npm-debug.log*
+
+# Legacy migration artefacts — real post content, reproducible via scripts/README.md
+legacy_snapshot.db
+legacy_posts.db
+legacy_dump.sql
+load_legacy.sql
