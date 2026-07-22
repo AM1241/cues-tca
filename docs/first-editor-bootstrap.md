@@ -79,9 +79,14 @@ Do this as the **user**, not in the SQL editor. The SQL editor connects as
 
 Get an access token (PowerShell, from your own terminal):
 
+Copy the current publishable key from Dashboard → **Project Settings** → **API
+Keys**, or from `frontend/.env.local` (`VITE_SUPABASE_PUBLISHABLE_KEY`). Do not
+paste a literal key into this file or into any committed script — keys get
+rotated, and a stale one here will send someone debugging the wrong problem.
+
 ```powershell
-$URL  = "https://bxaovkzemfyxrxbcqask.supabase.co"
-$KEY  = "sb_publishable_llipKsKWVIAK3pzFIgsCDA_5N2z7--g"   # publishable, safe
+$URL = "https://bxaovkzemfyxrxbcqask.supabase.co"
+$KEY = "<SUPABASE_PUBLISHABLE_KEY>"   # sb_publishable_... — safe in a browser, still not committed
 
 $body = @{ email = "you@example.com"; password = "<the password>" } | ConvertTo-Json
 $tok  = (Invoke-RestMethod "$URL/auth/v1/token?grant_type=password" `

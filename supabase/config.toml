@@ -124,10 +124,20 @@ port = 54324
 # admin_email = "admin@email.com"
 # sender_name = "Admin"
 
-# Disabled LOCALLY until Phase 7, which is the first phase that uses Storage
-# (DOCX export and batch payloads). Nothing before then touches it.
+# Disabled LOCALLY as a MITIGATION for a host/CLI healthcheck race — not
+# because Storage is unwanted. Nothing has needed it yet.
 #
-# Why: the storage-api image declares a healthcheck with interval 10s, timeout
+# RE-ENABLE (set enabled = true) BEFORE writing or testing anything that touches
+# Storage. That is NOT only Phase 7. In order of likelihood:
+#   - Phase 3, the optional OpenAI Batch path: batch JSONL payloads and their
+#     result files go to Storage. If you build score-batch-submit /
+#     score-batch-poll, you need Storage running first.
+#   - Phase 7: DOCX export and signed URLs.
+#   - Any earlier spike that writes a file anywhere.
+# A disabled Storage container does not fail loudly — calls just error at
+# runtime — so turn it on when you start the work, not when a test surprises you.
+#
+# Why it is off: the storage-api image declares a healthcheck with interval 10s, timeout
 # 2s, retries 3 and NO start_period. The service needs ~6.5-9s to reach
 # "Server listening", so on a slow disk the very first probe at t=10s misses,
 # FailingStreak increments, and the container reports "unhealthy" for a moment

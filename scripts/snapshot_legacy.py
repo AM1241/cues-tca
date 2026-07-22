@@ -6,9 +6,16 @@ if the FastAPI process writes concurrently. Source is opened read-only.
 """
 import sqlite3
 import os
+import datetime
 
 SRC = "file:/app/backend/data/posts.db?mode=ro"
 DST = "/tmp/legacy_snapshot.db"
+
+# The delta boundary. Everything created or modified in the legacy system after
+# this instant is NOT in this snapshot and must be reconciled at final cutover.
+# Record it — see docs/cloud-migration-runbook.md, "Final cutover".
+TAKEN_AT = datetime.datetime.now(datetime.timezone.utc).isoformat()
+print("snapshot_taken_at_utc:", TAKEN_AT)
 
 if os.path.exists(DST):
     os.remove(DST)

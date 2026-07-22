@@ -13,6 +13,35 @@ set in your own shell.
 
 ---
 
+## What this migration is, and is not
+
+**This is a development and test seed. It is not the production cutover.**
+
+The legacy application keeps running and keeps collecting throughout Phases 2–7.
+The moment step 1's snapshot is taken, the cloud copy begins drifting from it —
+by Phase 6 it will be materially behind. That is fine and expected: the point of
+this load is to give the Phase 2–6 work realistic data to build and test
+against, not to be the system of record.
+
+Consequences worth internalising now:
+
+- The legacy Docker container and its volume stay untouched and authoritative
+  until Phase 7 is signed off.
+- Cloud data is **disposable up to the point the new pipeline starts writing**
+  its own rows — the first real `ingest` run in Phase 2. After that it is not.
+- **`load_legacy.sql` truncates before loading. Never run it again once the
+  cloud pipeline has produced anything of its own.** It would silently destroy
+  every post ingested by Phase 2, every score from Phase 3, every anonymisation
+  from Phase 4 and every asset generated in Phase 5 — including editorial work a
+  human has already reviewed and approved. The truncate is safe exactly once, on
+  an empty cloud database, and never again.
+
+The real cutover is a separate operation, specified in
+[Final cutover](#final-cutover-phase-7) below. Read it before Phase 2, not after
+Phase 6 — it is the reason step 2.5 asks you to write down a timestamp.
+
+---
+
 ## Before you start
 
 - The legacy container `cues-editorial-agent-api` must still be running. This
@@ -53,6 +82,37 @@ It also prints per-table row counts. Note them; step 6 compares against these,
 not against the numbers from development. **If the counts differ from
 4 / 133 / 133 / 133 / 30 / 15 / 15 / 89 / 1, that is expected** — the legacy app
 may have collected more posts. Use what step 2 reports as truth.
+
+## 2.5 Record the delta boundary — do not skip this
+
+Step 1 prints `snapshot_taken_at_utc:` followed by an ISO timestamp, then the
+per-table row counts. **Write both down now**, in the migration log below, in a
+ticket, wherever you will still find them in three months.
+
+This timestamp is the line between what the cloud has and what the legacy system
+went on to collect. Without it, final cutover has no way to compute a delta and
+degrades into "copy everything again and hope", which by then is destructive.
+
+Fill this in and commit it:
+
+```text
+Phase 1 cloud load
+  snapshot_taken_at_utc : ____________________________________
+  loaded_at_utc         : ____________________________________
+  source row counts at snapshot:
+    sources ____  raw_posts ____  normalized_posts ____  analyzed_posts ____
+    anonymized_posts_current ____  generation_requests ____
+    editorial_assets ____  traceability_links ____  configurations ____
+  loader summary:
+    external_post_id recovered ____ / null ____
+    link_post_refs ____   unresolved 0
+    provenance: simulated_fallback ____  legacy_unverified ____
+```
+
+The legacy `raw_posts` carry no reliable modification timestamp, but they do
+carry `collected_at`, and `legacy_id` is stable and unique. Between them the
+delta at cutover is computable: rows whose `legacy_id` is absent from the cloud
+are new, and `collected_at > snapshot_taken_at_utc` narrows the search.
 
 ## 3. Generate the loader from that fresh snapshot
 
@@ -98,18 +158,34 @@ large for the dashboard SQL editor, so use `psql`.
 
 You do not need psql installed: the local Supabase database container has it.
 
-Get the connection string from Dashboard → **Connect** → *Session pooler*
-(use the pooler, not `db.<ref>.supabase.co` directly — the direct host is
-IPv6-only and will fail on most home connections).
+Go to Dashboard → **Connect** → **Session pooler** and **copy the connection
+string exactly as shown**, whole. Do not retype it or assemble it from parts:
+the username encodes the project ref, the host and port differ per region and
+per pooler mode, and the string carries SSL parameters (`?sslmode=require`, and
+sometimes more) that must survive verbatim. Guessing any of it produces either a
+refused connection or, worse, an unencrypted one.
+
+Use the pooler, not `db.<ref>.supabase.co` — the direct host is IPv6-only and
+will fail on most home connections.
+
+The copied string contains a `[YOUR-PASSWORD]` placeholder. **Delete that
+placeholder** so the URI holds no password at all, leaving
+`postgresql://user@host:port/postgres?sslmode=require`, and let `PGPASSWORD`
+supply it instead. That keeps the secret out of the process list and out of
+`psql`'s history.
 
 ```powershell
+# Paste the string from the Connect dialog, minus the :[YOUR-PASSWORD] part.
+$CLOUD = "<paste Session pooler connection string here, password removed>"
+
 # Prompts, and keeps the password out of your shell history:
 $pw = Read-Host "DB password" -AsSecureString
 $env:PGPASSWORD = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
   [Runtime.InteropServices.Marshal]::SecureStringToBSTR($pw))
 
-# Replace <REGION> and <USER> with the values from the Connect dialog.
-$CLOUD = "postgresql://<USER>@aws-0-<REGION>.pooler.supabase.com:5432/postgres"
+# Verify connectivity and SSL before sending 1 MB of data:
+docker exec -i -e PGPASSWORD="$env:PGPASSWORD" supabase_db_cues-editorial-cloud `
+  psql "$CLOUD" -c "select current_database(), current_user;"
 
 Get-Content ./load_legacy.sql -Raw -Encoding UTF8 |
   docker exec -i -e PGPASSWORD="$env:PGPASSWORD" supabase_db_cues-editorial-cloud `
@@ -204,8 +280,84 @@ post content and are reproducible from step 1:
 Remove-Item ./legacy_snapshot.db, ./load_legacy.sql
 ```
 
+**Keep the step 2.5 record.** The files are reproducible; the timestamp is not.
+
 Next: `docs/first-editor-bootstrap.md`. Until that is done `public.editors` is
 empty, and RLS will correctly show every signed-in user zero rows.
+
+---
+
+## Final cutover (Phase 7)
+
+Everything above seeds a development database. This is the operation that makes
+the cloud authoritative, and it is **not** a repeat of the above.
+
+By the time you reach it the cloud contains two kinds of data that the legacy
+system knows nothing about: posts the new pipeline ingested itself, and
+editorial assets that humans have reviewed and approved. Both must survive.
+`load_legacy.sql` would erase both. **It is not usable at cutover.** Requirement:
+
+> The Phase 1 loader is single-use. Cutover requires either a write freeze or a
+> delta migration. There is no third option that preserves cloud-side work.
+
+### Option A — freeze and final snapshot
+
+Simplest, and appropriate if the cloud pipeline has not yet ingested anything of
+its own (i.e. Phase 2 ran only against test sources).
+
+1. Stop the legacy collector so nothing new is written:
+   `docker stop cues-editorial-agent-api`
+2. Take a final snapshot exactly as in step 1. Note the new timestamp.
+3. Confirm the cloud has no pipeline-created rows worth keeping:
+
+   ```sql
+   select count(*) from raw_posts where legacy_id is null;          -- new ingests
+   select count(*) from editorial_assets where not is_legacy;       -- new assets
+   select count(*) from editorial_assets where status <> 'draft';   -- human decisions
+   ```
+
+   **If any is non-zero, Option A is off the table.** Use Option B.
+4. Regenerate and apply the loader from the final snapshot.
+5. Reconcile with step 6, then keep the legacy container stopped but its volume
+   intact for at least one full editorial cycle.
+
+The freeze window is minutes, and the legacy system is an internal batch tool
+with no live users, so this is usually acceptable.
+
+### Option B — delta migration
+
+Required once the cloud holds any pipeline-created or human-reviewed data.
+
+Write a separate loader that **inserts and updates, never truncates**:
+
+- **New posts** — legacy rows whose `legacy_id` does not already exist in the
+  cloud `raw_posts`. Insert them and their `normalized_posts`, `analyzed_posts`
+  and `anonymized_posts_current` children, mapping to the new post's uuid.
+  Deduplicate against `(source_id, external_post_id)`, since the new pipeline may
+  already have ingested the same LinkedIn post independently — that collision is
+  the expected case, not an error, and the existing cloud row wins.
+- **Changed rows** — `anonymized_posts_current` is overwrite-only and
+  `analyzed_posts` may have been re-scored. Compare and update; do not blind
+  insert.
+- **Legacy assets** — leave them alone. They are already migrated, flagged
+  `is_legacy`, and may since have been reviewed.
+- **configurations** — do not overwrite. Editors have been editing the cloud row
+  through the Objective screen since Phase 6; the legacy row is stale by
+  definition.
+
+Run it inside one transaction, reconcile as in step 6, and additionally assert
+that pre-existing cloud work is untouched:
+
+```sql
+select count(*) from editorial_assets where status <> 'draft';  -- unchanged
+select count(*) from raw_posts where legacy_id is null;         -- unchanged
+```
+
+### Either way
+
+- Take a cloud backup first — Dashboard → Database → Backups.
+- Do the run against a Supabase branch or a throwaway project before production.
+- Keep the legacy volume for a full cycle after cutover. It is the only rollback.
 
 ---
 

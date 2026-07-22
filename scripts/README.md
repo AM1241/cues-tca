@@ -42,7 +42,16 @@ Apply it:
 psql "$DB_URL" -v ON_ERROR_STOP=1 -f load_legacy.sql
 ```
 
-The script truncates its target tables first, so it is safe to re-run.
+> **The loader TRUNCATES before loading. It is safe to re-run only while the
+> target database holds nothing but legacy data.** Against a local stack that is
+> always true — `db reset` wipes it anyway. Against the cloud it is true exactly
+> once, before Phase 2's first real ingest. After that, re-running it destroys
+> every post, score, anonymisation and reviewed asset the new pipeline produced.
+> Final cutover uses a delta migration instead; see
+> `docs/cloud-migration-runbook.md`.
+
+`snapshot_legacy.py` prints `snapshot_taken_at_utc:`. Record it — it is the
+delta boundary for that eventual cutover, and it is not recoverable afterwards.
 
 ## 3. Verify RLS
 
