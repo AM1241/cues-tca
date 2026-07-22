@@ -91,8 +91,20 @@ enabled = true
 # The maximum length in bytes of HTTP request headers. (default: 4096)
 # max_header_length = 4096
 
+# Disabled LOCALLY. Studio pulls in the postgres-meta container, and both ship
+# healthchecks with no start_period (interval 10s, timeout 2s, retries 3). On
+# this host they need longer than that to bind their port, so the first probe
+# misses, the container is briefly flagged unhealthy, and the CLI aborts
+# `start` / `db reset` with exit 1 — even though the logs show
+# "Server listening" and the database itself is fine.
+#
+# Nothing in this project needs Studio: the schema comes from migrations, and
+# verification goes through psql (see scripts/verify_rls.sql). Studio is also
+# still available for the cloud project via the Supabase dashboard.
+#
+# Set enabled = true to get it back; expect the intermittent exit 1.
 [studio]
-enabled = true
+enabled = false
 # Port to use for Supabase Studio.
 port = 54323
 # External URL of the API server that frontend connects to.
@@ -112,8 +124,22 @@ port = 54324
 # admin_email = "admin@email.com"
 # sender_name = "Admin"
 
+# Disabled LOCALLY until Phase 7, which is the first phase that uses Storage
+# (DOCX export and batch payloads). Nothing before then touches it.
+#
+# Why: the storage-api image declares a healthcheck with interval 10s, timeout
+# 2s, retries 3 and NO start_period. The service needs ~6.5-9s to reach
+# "Server listening", so on a slow disk the very first probe at t=10s misses,
+# FailingStreak increments, and the container reports "unhealthy" for a moment
+# before recovering. `supabase start` / `db reset` poll exactly that flag and
+# abort with exit 1 — after the migrations have already applied successfully.
+# The result was an intermittently red exit code on a green database.
+#
+# Re-enable in Phase 7 (set enabled = true). If the flake reappears, the
+# container is not actually broken: `docker inspect` will show
+# health=healthy with FailingStreak >= 1. Re-running the command works.
 [storage]
-enabled = true
+enabled = false
 # The maximum file size allowed (e.g. "5MB", "500KB").
 file_size_limit = "50MiB"
 
