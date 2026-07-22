@@ -72,10 +72,24 @@ create trigger sources_set_updated_at
 -- -----------------------------------------------------------------------------
 -- Legacy PK was f"{source_type}_{source_name}_{md5(post_text)}", while dedup was
 -- checked on (source_id, source_url). One source posting identical text at two
--- URLs therefore collided on the PK and raised. Fixed here with a surrogate uuid
--- PK plus a unique constraint on (source_id, content_hash).
+-- URLs therefore collided on the PK and raised.
 --
--- content_hash is GENERATED, so it cannot drift from post_text.
+-- IDENTITY IS THE PROVIDER'S ID, NOT THE TEXT. A unique constraint on
+-- (source_id, content_hash) would have re-created the very bug it claimed to
+-- fix: a company legitimately reposting identical copy at a new URL is a
+-- distinct post and must be stored as one. content_hash is therefore only
+-- INDEXED, for exact-duplicate detection and review, never unique.
+--
+-- external_post_id is the provider's stable identifier — the LinkedIn activity
+-- URN, e.g. 7473335599555338240. It is what ../linkedin_rapidapi_scraper already
+-- uses as its own primary key (parser.py::_extract_post_id prefers
+-- urn/id/postUrn/entityUrn, falling back to a URL hash). Nullable, because
+-- manually entered posts have none; the unique index is partial to suit.
+--
+-- canonical_url is indexed but deliberately NOT unique. The LinkedIn URL embeds
+-- a slug built from the post text (.../posts/masaf_40-anni-al-servizio-...
+-- -activity-7473335599555338240-iGps), so editing a post rewrites its URL while
+-- the URN stays put. The URL is the weaker identifier of the two.
 --
 -- Dropped from legacy: `source_name` and `source_type` (denormalised copies of
 -- sources.name / sources.source_type), `post_html` (null in all 133 rows) and
@@ -88,8 +102,12 @@ create table public.raw_posts (
   -- future audit against the old system can still resolve. NULL for new posts.
   legacy_id          text unique,
 
-  source_id          uuid not null references public.sources (id) on delete cascade,
+  -- RESTRICT, not CASCADE: deleting a source must never silently destroy its
+  -- posts and everything derived from them. Sources are retired by setting
+  -- sources.enabled = false; see 0002, where editors have no DELETE at all.
+  source_id          uuid not null references public.sources (id) on delete restrict,
   source_url         text not null,
+  external_post_id   text,
 
   post_title         text,
   post_text          text not null,
@@ -101,23 +119,38 @@ create table public.raw_posts (
   engagement_metrics jsonb not null default '{}'::jsonb,
 
   content_hash       text generated always as (md5(post_text)) stored,
+  canonical_url      text generated always as
+                       (lower(split_part(split_part(source_url, '#', 1), '?', 1))) stored,
 
   is_processed       boolean not null default false,
   created_at         timestamptz not null default now(),
-  updated_at         timestamptz not null default now(),
-
-  constraint raw_posts_source_content_uniq unique (source_id, content_hash)
+  updated_at         timestamptz not null default now()
 );
 
 comment on column public.raw_posts.legacy_id is
   'Legacy SQLite primary key (linkedin_{source_name}_{md5}). NULL for posts ingested by the new pipeline.';
-comment on constraint raw_posts_source_content_uniq on public.raw_posts is
-  'Replaces the legacy colliding PK. Ingest upserts on this constraint.';
+comment on column public.raw_posts.external_post_id is
+  'Provider-stable id (LinkedIn activity URN). The ingest dedup key. NULL for manual entries.';
+comment on column public.raw_posts.content_hash is
+  'md5(post_text), INDEXED NOT UNIQUE. Identical text at two provider ids is two posts, not a duplicate.';
+comment on column public.raw_posts.canonical_url is
+  'source_url minus query/fragment, lowercased. Indexed for lookup; not unique — the URL slug changes when a post is edited.';
+
+-- The real dedup key. Partial, so posts without a provider id are unconstrained
+-- rather than all colliding on NULL. Ingest upserts on this index.
+create unique index raw_posts_source_external_id_uniq
+  on public.raw_posts (source_id, external_post_id)
+  where external_post_id is not null;
 
 create index raw_posts_source_published_idx
   on public.raw_posts (source_id, published_at desc);
 create index raw_posts_published_idx
   on public.raw_posts (published_at desc);
+-- Non-unique: surfaces exact-content repeats for review without forbidding them.
+create index raw_posts_content_hash_idx
+  on public.raw_posts (source_id, content_hash);
+create index raw_posts_canonical_url_idx
+  on public.raw_posts (source_id, canonical_url);
 
 create trigger raw_posts_set_updated_at
   before update on public.raw_posts
@@ -171,6 +204,13 @@ create table public.analyzed_posts (
 
 comment on column public.analyzed_posts.relevance_scores is
   'theme -> score (0-100). The generate stage filters on configurations.min_relevance_score.';
+
+-- DATA QUALITY, for Phase 3: 7 of the 133 migrated rows carry
+-- overall_relevance = 0 while every one of their per-theme scores is non-zero.
+-- The migration preserves them exactly as found; do not "fix" them in transit.
+-- Whatever wrote overall_relevance disagreed with the per-theme values, and the
+-- rescoring work in Phase 3 should establish which is authoritative.
+--   select count(*) from analyzed_posts where overall_relevance = 0;  -- 7
 
 create index analyzed_posts_relevance_idx
   on public.analyzed_posts (overall_relevance desc);
@@ -342,7 +382,9 @@ create index traceability_links_asset_idx
 
 create table public.traceability_link_posts (
   link_id     uuid not null references public.traceability_links (id) on delete cascade,
-  raw_post_id uuid not null references public.raw_posts (id) on delete cascade,
+  -- RESTRICT: this is an audit trail. A post that an approved asset cites may
+  -- not be deleted out from under it, leaving a claim with no evidence.
+  raw_post_id uuid not null references public.raw_posts (id) on delete restrict,
   position    integer not null check (position >= 0),
 
   primary key (link_id, position)

@@ -49,6 +49,16 @@ grant usage on schema public to anon, authenticated, service_role;
 revoke all on all tables in schema public from anon;
 alter default privileges in schema public revoke all on tables from anon;
 
+-- The default grant to authenticated includes TRUNCATE, TRIGGER and REFERENCES.
+-- TRUNCATE is the dangerous one: it is DDL-ish, it is NOT filtered by row level
+-- security, and no policy can stop it. Any logged-in user — allowlisted or not
+-- — could have emptied raw_posts and taken every downstream table with it.
+-- TRIGGER and REFERENCES let a caller attach code to, or pin FKs against, the
+-- pipeline's tables. None of the three has a legitimate client use here.
+revoke truncate, trigger, references on all tables in schema public from authenticated;
+alter default privileges in schema public
+  revoke truncate, trigger, references on tables from authenticated;
+
 
 -- -----------------------------------------------------------------------------
 -- editors — the allowlist
@@ -169,9 +179,11 @@ create policy sources_update_for_editors
   using ((select public.is_editor()))
   with check ((select public.is_editor()));
 
-create policy sources_delete_for_editors
-  on public.sources for delete to authenticated
-  using ((select public.is_editor()));
+-- There is deliberately NO delete policy for sources, and no DELETE grant.
+-- Retiring a source is `update sources set enabled = false`, which is what the
+-- UI does. Hard deletion is a destructive admin operation: raw_posts.source_id
+-- is ON DELETE RESTRICT, so even service_role must clear the posts first, on
+-- purpose. Editors never get to trigger that path.
 
 
 -- -----------------------------------------------------------------------------
@@ -204,10 +216,17 @@ create policy editorial_assets_select_for_editors
   on public.editorial_assets for select to authenticated
   using ((select public.is_editor()));
 
+-- The row-level predicate. Which COLUMNS may be touched is enforced separately,
+-- by the column-level UPDATE grant further down — a policy cannot express that.
+-- The extra with-check stops an editor recording an approval in someone else's
+-- name.
 create policy editorial_assets_update_for_editors
   on public.editorial_assets for update to authenticated
   using ((select public.is_editor()))
-  with check ((select public.is_editor()));
+  with check (
+    (select public.is_editor())
+    and (approved_by is null or approved_by = (select auth.uid()))
+  );
 
 
 -- -----------------------------------------------------------------------------
@@ -232,10 +251,34 @@ grant select on
 to authenticated;
 
 -- ...and write only where a policy permits it.
-grant insert, update, delete on public.sources             to authenticated;
-grant update                 on public.configurations      to authenticated;
-grant update                 on public.editorial_assets    to authenticated;
-grant insert                 on public.generation_requests to authenticated;
+-- No DELETE on sources: retire by setting enabled = false.
+grant insert, update on public.sources             to authenticated;
+grant update         on public.configurations      to authenticated;
+grant insert         on public.generation_requests to authenticated;
+
+-- editorial_assets: COLUMN-LEVEL update. A table-wide grant would let an editor
+-- rewrite generation_id, is_legacy, provenance, llm_used or created_at — the
+-- pipeline's own record of what produced the asset and whether a real LLM call
+-- was involved. Editing copy and recording a review decision are the only
+-- things a reviewer legitimately does, so those are the only columns granted.
+--
+-- Everything omitted here (id, generation_id, variant_number, asset_type,
+-- featured_clusters, featured_sources, is_legacy, provenance, llm_used,
+-- regenerated_from, created_at, updated_at) stays service-role-only. Postgres
+-- rejects an UPDATE touching any ungranted column with "permission denied",
+-- regardless of what the RLS policy says.
+grant update (
+  title,
+  generated_text,
+  hashtags,
+  cta_text,
+  status,
+  approved_by,
+  approval_timestamp,
+  approval_notes,
+  feedback_provided,
+  edits_made
+) on public.editorial_assets to authenticated;
 
 -- Note there is deliberately no grant of INSERT/UPDATE/DELETE on raw_posts,
 -- normalized_posts, analyzed_posts, anonymized_posts_current,
@@ -247,10 +290,12 @@ grant insert                 on public.generation_requests to authenticated;
 -- =============================================================================
 -- Note on provenance integrity
 -- =============================================================================
--- editorial_assets_update_for_editors lets an editor write provenance/llm_used.
--- The check constraint from 0001 still applies, so they cannot set a
--- combination that claims unearned knowledge (e.g. llm_used = true while
--- provenance = 'legacy_unverified'). Locking those two columns to service_role
--- entirely needs a column-level trigger; deferred until the review UI exists
--- and we know whether editors ever legitimately need to correct them.
+-- provenance and llm_used are not in the column-level UPDATE grant, so editors
+-- cannot write them at all — an attempt fails with "permission denied for
+-- table editorial_assets" before RLS or any constraint is consulted. Only
+-- service_role, i.e. the generate function, sets them.
+--
+-- The check constraint from 0001 remains as defence in depth: even a
+-- service_role caller cannot record a combination that claims unearned
+-- knowledge, such as llm_used = true alongside provenance = 'legacy_unverified'.
 -- =============================================================================

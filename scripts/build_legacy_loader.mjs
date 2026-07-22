@@ -47,9 +47,17 @@ const rawPosts = db.prepare('select * from raw_posts').all()
 const idMap = new Map() // legacy string id -> new uuid
 for (const r of rawPosts) idMap.set(r.id, randomUUID())
 
-W(`-- raw_posts (${rawPosts.length}) -- content_hash is GENERATED, not inserted`)
+// The LinkedIn activity URN, recovered from the permalink. The legacy schema
+// never stored it; the scraper's own PK is exactly this value. Posts with no
+// recoverable id (e.g. source_url = 'manual') get NULL, which the partial
+// unique index leaves unconstrained.
+const EXT = /(?:activity|ugcPost)-(\d{10,})/
+let withExt = 0, withoutExt = 0
+W(`-- raw_posts (${rawPosts.length}) -- content_hash and canonical_url are GENERATED, not inserted`)
 for (const r of rawPosts) {
-  W(`insert into public.raw_posts (id, legacy_id, source_id, source_url, post_title, post_text, author, published_at, collected_at, media_urls, engagement_metrics, is_processed, created_at, updated_at) values (${S(idMap.get(r.id))}, ${S(r.id)}, ${S(r.source_id)}, ${S(r.source_url)}, ${S(r.post_title)}, ${S(r.post_text)}, ${S(r.author)}, ${TS(r.published_at)}, ${TS(r.collected_at)}, ${J(r.media_urls, '[]')}, ${J(r.engagement_metrics, '{}')}, ${B(r.is_processed)}, ${TS(r.created_at)}, ${TS(r.updated_at)});`)
+  const m = EXT.exec(r.source_url ?? '')
+  if (m) withExt++; else withoutExt++
+  W(`insert into public.raw_posts (id, legacy_id, source_id, source_url, external_post_id, post_title, post_text, author, published_at, collected_at, media_urls, engagement_metrics, is_processed, created_at, updated_at) values (${S(idMap.get(r.id))}, ${S(r.id)}, ${S(r.source_id)}, ${S(r.source_url)}, ${m ? S(m[1]) : 'null'}, ${S(r.post_title)}, ${S(r.post_text)}, ${S(r.author)}, ${TS(r.published_at)}, ${TS(r.collected_at)}, ${J(r.media_urls, '[]')}, ${J(r.engagement_metrics, '{}')}, ${B(r.is_processed)}, ${TS(r.created_at)}, ${TS(r.updated_at)});`)
 }
 W('')
 
@@ -137,6 +145,7 @@ writeFileSync(process.argv[3], out.join('\n') + '\n', 'utf8')
 
 console.log(`sources=${sources.length} raw_posts=${rawPosts.length} normalized=${norm.length} analyzed=${analyzed.length}`)
 console.log(`anonymized=${anon.length} genreqs=${genreqs.length} assets=${assets.length} links=${links.length}`)
+console.log(`external_post_id: recovered=${withExt} null=${withoutExt}`)
 console.log(`link_post_refs=${refCount} unresolved=${unresolved}`)
 console.log(`provenance: simulated_fallback=${nSim} legacy_unverified=${nUnv}`)
 console.log(`configurations=${cfg.length}`)
