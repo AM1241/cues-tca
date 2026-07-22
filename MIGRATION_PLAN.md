@@ -90,22 +90,36 @@ Each phase ends in something demonstrable. Don't start the next until the check 
 - Commit `CLAUDE.md`, `MIGRATION_PLAN.md`, `docs/`.
 - **Check:** `supabase start` and `npm run dev` both come up clean.
 
-### Phase 1 — Schema, auth, data migration
+### Phase 1 — Schema, auth, data migration ✅ COMPLETE
 
-- Migration `0001_schema.sql`: port the nine tables with real types — `timestamptz` not naive
+Applied to the cloud project 2026-07-22. Full record in `docs/phase-1-completion.md`.
+
+- [x] Migration `0001_schema.sql`: port the nine tables with real types — `timestamptz` not naive
   datetimes, `uuid` PKs, `jsonb`, FK constraints, indexes on `raw_posts(source_id, published_at)`
   and `analyzed_posts(overall_relevance)`.
-- Fix `raw_posts`: surrogate `uuid` PK plus a unique constraint on `(source_id, content_hash)`.
-  The legacy key `f"{type}_{name}_{md5(text)}"` collides when one source posts identical text
-  at two URLs. Add `updated_at` triggers.
-- Drop `clusters` and `analyzed_posts_backup_before_mock_llm`. Clustering is stateless; the
+- [x] Fix `raw_posts`: surrogate `uuid` PK. **Revised during implementation** — the unique key is
+  `(source_id, external_post_id)` (the LinkedIn activity URN), *not* `(source_id, content_hash)`.
+  Hashing the text would have re-created the very collision it was meant to fix: a company
+  reposting identical copy at a new URL is a distinct post. `content_hash` is indexed, not unique.
+  Added `updated_at` triggers.
+- [x] Drop `clusters` and `analyzed_posts_backup_before_mock_llm`. Clustering is stateless; the
   backup table was a one-off.
-- Migration `0002_auth_rls.sql`: `editors` table keyed to `auth.users`, RLS on every table
+- [x] Migration `0002_auth_rls.sql`: `editors` table keyed to `auth.users`, RLS on every table
   (`authenticated` + present in `editors`), service-role-only write paths for pipeline tables.
-- One-shot script to load the legacy dump: 133 posts, 4 sources, 30 anonymised, 15 assets,
+  **Also required, and not anticipated here:** explicit table and column grants. This Postgres
+  grants no DML by default, so policies alone are unreachable and `service_role` cannot write;
+  and `authenticated` held `TRUNCATE` on every table, which RLS does not filter.
+- [x] One-shot script to load the legacy dump: 133 posts, 4 sources, 30 anonymised, 15 assets,
   89 traceability links. Migrate `configurations` as a single row.
-- **Check:** row counts match `docs/legacy-system.md`; an anon-key client is denied on every
-  table; a logged-in allowlisted user can read posts.
+- [x] **Check:** row counts match `docs/legacy-system.md`; an anon-key client is denied on every
+  table; a logged-in allowlisted user can read posts. — all verified locally and in the cloud.
+
+> **The cloud data is a development/test seed, not the production cutover.** The legacy
+> application remains authoritative and its Docker volume untouched until Phase 7. The loader
+> truncates before loading and is therefore single-use: re-running it after Phase 2 starts
+> ingesting would destroy pipeline output and reviewed editorial work. Final cutover requires a
+> write freeze or a delta migration — see *Final cutover* in `docs/cloud-migration-runbook.md`.
+> Delta boundary: **2026-07-22T02:17:11.788315+00:00**.
 
 ### Phase 2 — Ingest
 
