@@ -28,6 +28,8 @@ export interface SourceCounters {
   posts_content_changed: number;
   posts_skipped_duplicate: number;
   posts_skipped_no_id: number;
+  /** Had an id but no usable text, or no parseable published_at. */
+  posts_skipped_malformed: number;
   posts_skipped_out_of_window: number;
 }
 
@@ -42,6 +44,7 @@ export function emptyCounters(): SourceCounters {
     posts_content_changed: 0,
     posts_skipped_duplicate: 0,
     posts_skipped_no_id: 0,
+    posts_skipped_malformed: 0,
     posts_skipped_out_of_window: 0,
   };
 }

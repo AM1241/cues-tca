@@ -42,6 +42,49 @@ Deno.test("quota: retries roll up into the collected total", async () => {
   assert(r.providerRequests > r.pagesFetched, "attempts exceed pages when retries happen");
 });
 
+// The number the run recorder ultimately persists, per failure class. These
+// must be the attempts actually made, never MAX_ATTEMPTS: overstating a 401 as
+// three requests would corrupt the very measurement the cadence decision rests
+// on.
+Deno.test("quota: attempts recorded per failure class", async () => {
+  const cases: Array<{ name: string; script: Parameters<typeof scriptedFetch>[0]; expected: number; code: string }> = [
+    { name: "401", script: [{ status: 401 }], expected: 1, code: "auth" },
+    { name: "403", script: [{ status: 403 }], expected: 1, code: "auth" },
+    { name: "429", script: [{ status: 429, headers: { "Retry-After": "30" } }], expected: 1, code: "rate_limit" },
+    { name: "malformed 200", script: [{ body: "<html>" }], expected: 1, code: "malformed_response" },
+    { name: "500 x3", script: [{ status: 500 }, { status: 500 }, { status: 500 }], expected: 3, code: "server_error" },
+    { name: "timeout x3", script: [{ hang: true }], expected: 3, code: "timeout" },
+    { name: "network x3", script: [{ throws: "network" }], expected: 3, code: "network" },
+  ];
+
+  for (const c of cases) {
+    const { fetchImpl, calls } = scriptedFetch(c.script);
+    const err = await assertRejects(
+      () => collectCompanyPosts(URL_, 30, opts(fetchImpl)),
+      ProviderError,
+    );
+    assertEquals(err.code, c.code, `${c.name}: error code`);
+    assertEquals(calls.length, c.expected, `${c.name}: real HTTP attempts`);
+    assertEquals(err.attempts, c.expected, `${c.name}: attempts on the error`);
+    // What index.ts writes to ingest_run_sources.provider_requests.
+    assertEquals(err.providerRequests, c.expected, `${c.name}: recorded provider_requests`);
+  }
+});
+
+Deno.test("quota: a failure on page 2 adds to the page-1 total, not MAX_ATTEMPTS", async () => {
+  const { fetchImpl, calls } = scriptedFetch([
+    { body: [post("7473335599555338240", "a", daysAgo(1))] }, // page 1 ok  (1)
+    { status: 401 },                                          // page 2 auth (1)
+  ]);
+  const err = await assertRejects(
+    () => collectCompanyPosts(URL_, 30, opts(fetchImpl)),
+    ProviderError,
+  );
+  assertEquals(calls.length, 2);
+  assertEquals(err.attempts, 1, "attempts for the failing page only");
+  assertEquals(err.providerRequests, 2, "running total across the source");
+});
+
 Deno.test("quota: 429 then success -> 2 attempts, 1 page", async () => {
   const { fetchImpl, calls } = scriptedFetch([
     { status: 429, headers: { "Retry-After": "30" } },
@@ -203,4 +246,27 @@ Deno.test("posts with no provider id are skipped and counted", async () => {
   const r = await collectCompanyPosts(URL_, 30, opts(fetchImpl));
   assertEquals(r.posts.length, 1);
   assertEquals(r.skippedNoId, 1);
+  assertEquals(r.skippedMalformed, 0);
+});
+
+Deno.test("malformed posts are counted separately from missing ids", async () => {
+  // Both are unusable, but they indicate different provider problems: no id
+  // means we cannot deduplicate, malformed means the payload is incomplete.
+  const { fetchImpl } = scriptedFetch([
+    {
+      body: [
+        post("7473335599555338240", "good", daysAgo(1)),
+        { text: "no id at all", postedAt: daysAgo(1) },
+        { urn: "urn:li:activity:7473335599555338241", text: "", postedAt: daysAgo(1) },
+        { urn: "urn:li:activity:7473335599555338242", text: "no date" },
+        { urn: "urn:li:activity:7473335599555338243", text: "bad date", postedAt: "garbage" },
+      ],
+    },
+    { body: [] },
+  ]);
+  const r = await collectCompanyPosts(URL_, 30, opts(fetchImpl));
+  assertEquals(r.posts.length, 1);
+  assertEquals(r.skippedNoId, 1, "missing identifier");
+  assertEquals(r.skippedMalformed, 3, "empty text, missing date, unparseable date");
+  assertEquals(r.rawCount, 5, "everything the provider returned is counted as fetched");
 });

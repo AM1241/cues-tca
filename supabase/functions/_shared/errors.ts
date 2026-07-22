@@ -13,6 +13,19 @@ export type IngestErrorCode =
   | "budget_exhausted";
 
 export class ProviderError extends Error {
+  /**
+   * HTTP attempts actually made before this error was raised. Set by fetchPage
+   * on every throw path and accumulated by the caller into provider_requests.
+   *
+   * It must be the real count, never inferred from MAX_ATTEMPTS: a 401, a 429
+   * and a malformed body all fail on the first attempt, and recording three
+   * would overstate consumption in exactly the cases we most want to trust.
+   */
+  attempts = 0;
+
+  /** Running total for the whole source, attached when the error escapes. */
+  providerRequests?: number;
+
   constructor(
     readonly code: IngestErrorCode,
     message: string,

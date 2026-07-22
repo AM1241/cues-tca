@@ -30,14 +30,18 @@ export async function upsertPost(
   post: NormalizedPost,
   seenAt: string,
 ): Promise<UpsertOutcome> {
-  const { data: existing, error: selErr } = await db
-    .from("raw_posts")
-    .select("id")
-    .eq("source_id", sourceId)
-    .eq("external_post_id", post.externalPostId)
-    .maybeSingle();
+  const findExisting = async (): Promise<{ id: string } | null> => {
+    const { data, error } = await db
+      .from("raw_posts")
+      .select("id")
+      .eq("source_id", sourceId)
+      .eq("external_post_id", post.externalPostId)
+      .maybeSingle();
+    if (error) throw new Error(`raw_posts lookup failed: ${error.message}`);
+    return data ?? null;
+  };
 
-  if (selErr) throw new Error(`raw_posts lookup failed: ${selErr.message}`);
+  let existing = await findExisting();
 
   // ---- new post ----------------------------------------------------------
   if (!existing) {
@@ -53,13 +57,20 @@ export async function upsertPost(
       media_urls: post.mediaUrls,
       engagement_metrics: post.engagementMetrics,
     });
-    if (error) {
-      // A concurrent run inserted it between our select and insert. Not an
-      // error — treat it as a repeat sighting.
-      if (error.code === "23505") return "metadata_refreshed";
-      throw new Error(`raw_posts insert failed: ${error.message}`);
+
+    if (!error) return "inserted";
+    if (error.code !== "23505") throw new Error(`raw_posts insert failed: ${error.message}`);
+
+    // A concurrent run won the race between our select and insert. That row is
+    // now the one of record, so fall through to the same refresh path any
+    // repeat sighting takes — returning early here would skip the metadata
+    // update and, worse, skip content-change detection entirely.
+    existing = await findExisting();
+    if (!existing) {
+      throw new Error(
+        `raw_posts insert conflicted on (source_id, external_post_id) but no row was found afterwards`,
+      );
     }
-    return "inserted";
   }
 
   // ---- mutable metadata, refreshed in every existing-row case ------------

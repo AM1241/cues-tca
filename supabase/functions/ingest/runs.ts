@@ -60,7 +60,7 @@ export async function recordSkippedSource(
   db: SupabaseClient,
   runId: string,
   source: { id: string; name: string; rapidapi_identifier: string | null },
-  errorCode: "disabled" | "no_rapidapi_identifier" | "locked",
+  errorCode: "disabled" | "no_rapidapi_identifier" | "locked" | "budget_exhausted",
   message: string,
 ): Promise<void> {
   const now = new Date().toISOString();

@@ -62,6 +62,8 @@ create table public.ingest_runs (
   -- RapidAPI dashboard remains the source of truth for quota. This number
   -- exists to correlate against it and to bound our own behaviour.
   provider_requests      integer not null default 0 check (provider_requests >= 0),
+  -- Pages actually received across all sources. Always <= provider_requests.
+  pages_fetched          integer not null default 0 check (pages_fetched >= 0),
 
   sources_total          integer not null default 0,
   sources_ok             integer not null default 0,
@@ -73,7 +75,11 @@ create table public.ingest_runs (
   posts_metadata_refreshed    integer not null default 0,
   posts_content_changed       integer not null default 0,
   posts_skipped_duplicate     integer not null default 0,
+  -- No usable provider id: cannot be deduplicated, so never stored.
   posts_skipped_no_id         integer not null default 0,
+  -- Had an id, but no text or no parseable published_at. Kept separate from
+  -- no_id because they point at different provider problems.
+  posts_skipped_malformed     integer not null default 0,
   posts_skipped_out_of_window integer not null default 0,
 
   error                  text,
@@ -130,6 +136,7 @@ create table public.ingest_run_sources (
   posts_content_changed       integer not null default 0,
   posts_skipped_duplicate     integer not null default 0,
   posts_skipped_no_id         integer not null default 0,
+  posts_skipped_malformed     integer not null default 0,
   posts_skipped_out_of_window integer not null default 0,
 
   http_status         integer,
@@ -333,10 +340,16 @@ begin
     return null;              -- still working; nothing to finalize
   end if;
 
+  -- A source left unprocessed because the execution budget ran out counts as a
+  -- FAILURE, not a benign skip: the caller asked for it and did not get it. A
+  -- run that quietly reported 'completed' while silently dropping sources would
+  -- be the most misleading state this table can hold.
   select count(*),
          count(*) filter (where status = 'ok'),
-         count(*) filter (where status in ('failed','auth_failed','rate_limited')),
-         count(*) filter (where status = 'skipped')
+         count(*) filter (
+           where status in ('failed','auth_failed','rate_limited')
+              or (status = 'skipped' and error_code = 'budget_exhausted')),
+         count(*) filter (where status = 'skipped' and coalesce(error_code,'') <> 'budget_exhausted')
     into v_total, v_ok, v_failed, v_skipped
     from public.ingest_run_sources
    where run_id = p_run_id;
@@ -365,21 +378,25 @@ begin
          sources_failed  = v_failed,
          sources_skipped = v_skipped,
          provider_requests           = coalesce(s.provider_requests, 0),
+         pages_fetched               = coalesce(s.pages_fetched, 0),
          posts_fetched               = coalesce(s.posts_fetched, 0),
          posts_inserted              = coalesce(s.posts_inserted, 0),
          posts_metadata_refreshed    = coalesce(s.posts_metadata_refreshed, 0),
          posts_content_changed       = coalesce(s.posts_content_changed, 0),
          posts_skipped_duplicate     = coalesce(s.posts_skipped_duplicate, 0),
          posts_skipped_no_id         = coalesce(s.posts_skipped_no_id, 0),
+         posts_skipped_malformed     = coalesce(s.posts_skipped_malformed, 0),
          posts_skipped_out_of_window = coalesce(s.posts_skipped_out_of_window, 0)
     from (
       select sum(provider_requests)           as provider_requests,
+             sum(pages_fetched)               as pages_fetched,
              sum(posts_fetched)               as posts_fetched,
              sum(posts_inserted)              as posts_inserted,
              sum(posts_metadata_refreshed)    as posts_metadata_refreshed,
              sum(posts_content_changed)       as posts_content_changed,
              sum(posts_skipped_duplicate)     as posts_skipped_duplicate,
              sum(posts_skipped_no_id)         as posts_skipped_no_id,
+             sum(posts_skipped_malformed)     as posts_skipped_malformed,
              sum(posts_skipped_out_of_window) as posts_skipped_out_of_window
         from public.ingest_run_sources where run_id = p_run_id
     ) s

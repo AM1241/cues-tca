@@ -10,7 +10,12 @@
  * trigger_source is derived from the credential, never from this body.
  * Sources are processed one at a time under a per-source lock, and a failure on
  * one never aborts the others.
+ *
+ * The handler is exported with injectable dependencies so the whole flow can be
+ * exercised against the local stack with a scripted provider — no test in this
+ * repo is permitted to reach RapidAPI.
  */
+import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { handlePreflight, jsonResponse } from "../_shared/cors.ts";
 import { authenticate } from "../_shared/auth.ts";
 import { serviceClient } from "../_shared/db.ts";
@@ -35,9 +40,17 @@ import { emptyCounters, type SourceRow } from "./types.ts";
  * the run is finalized properly instead of being lost with sources stuck in
  * 'running'.
  */
-const EXECUTION_BUDGET_MS = 240_000;
+export const EXECUTION_BUDGET_MS = 240_000;
 
-Deno.serve(async (req: Request): Promise<Response> => {
+export interface IngestDeps {
+  db?: SupabaseClient;
+  fetchImpl?: typeof fetch;
+  sleep?: (ms: number) => Promise<void>;
+  /** Absolute epoch ms after which no further source is started. */
+  deadline?: number;
+}
+
+export async function handleIngest(req: Request, deps: IngestDeps = {}): Promise<Response> {
   const origin = req.headers.get("Origin");
 
   const preflight = handlePreflight(req);
@@ -47,9 +60,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return jsonResponse({ ok: false, error: "Method not allowed." }, 405, origin);
   }
 
-  const deadline = Date.now() + EXECUTION_BUDGET_MS;
+  const deadline = deps.deadline ?? Date.now() + EXECUTION_BUDGET_MS;
   let runId: string | null = null;
-  let db;
+  let db: SupabaseClient | null = null;
 
   try {
     let body: unknown = {};
@@ -62,7 +75,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       }
     }
 
-    // Auth first: an unauthorised caller must not create a run row.
+    // Auth first: an unauthorised caller must never create a run row.
     const actor = await authenticate(req, body as Record<string, unknown>);
     const request = parseRequest(body);
 
@@ -70,7 +83,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (!apiKey) throw new RequestError(500, "RAPIDAPI_KEY is not configured.");
     const host = Deno.env.get("RAPIDAPI_HOST") ?? DEFAULT_HOST;
 
-    db = serviceClient();
+    db = deps.db ?? serviceClient();
     await reapStale(db);
 
     // ---- resolve sources -------------------------------------------------
@@ -84,7 +97,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (srcErr) throw new Error(`sources lookup failed: ${srcErr.message}`);
     const sources = (sourceRows ?? []) as SourceRow[];
 
-    // Unknown ids are a client error, not a silent no-op.
+    // Unknown ids are a client error, not a silent no-op — and this is checked
+    // before the run row exists, so a bad request leaves no trace.
     if (request.sourceIds) {
       const found = new Set(sources.map((s) => s.id));
       const missing = request.sourceIds.filter((id) => !found.has(id));
@@ -117,7 +131,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
         continue;
       }
       if (Date.now() >= deadline) {
-        await recordSkippedSource(db, runId, source, "locked", "Execution budget exhausted before this source was attempted.");
+        // Persist the real reason. Recording this as 'locked' would blame
+        // contention for what is actually us running out of time, and the
+        // finalizer counts budget_exhausted as a failure so the run cannot
+        // report 'completed' while silently dropping requested sources.
+        await recordSkippedSource(
+          db, runId, source, "budget_exhausted",
+          "Execution budget exhausted before this source was attempted.",
+        );
         results.push({ source_id: source.id, name: source.name, status: "skipped", error_code: "budget_exhausted" });
         continue;
       }
@@ -138,6 +159,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
           apiKey,
           host,
           deadline,
+          fetchImpl: deps.fetchImpl,
+          sleep: deps.sleep,
         });
 
         counters.pages_fetched = collected.pagesFetched;
@@ -145,6 +168,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         counters.truncated = collected.truncated;
         counters.posts_fetched = collected.rawCount;
         counters.posts_skipped_no_id = collected.skippedNoId;
+        counters.posts_skipped_malformed = collected.skippedMalformed;
         counters.posts_skipped_out_of_window = collected.outOfWindow;
 
         if (!request.dryRun) {
@@ -165,8 +189,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
       } catch (e) {
         const pe = e instanceof ProviderError ? e : null;
         // Attempts made before the failure still cost quota.
-        const attempted = (e as { providerRequests?: number }).providerRequests;
-        if (typeof attempted === "number") counters.provider_requests = attempted;
+        if (typeof pe?.providerRequests === "number") {
+          counters.provider_requests = pe.providerRequests;
+        } else if (pe) {
+          counters.provider_requests = pe.attempts || 0;
+        }
 
         const status = pe ? pe.sourceStatus : "failed";
         await finishSource(db, runId, source.id, status, counters, {
@@ -190,7 +217,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
 
     const finalStatus = await finalizeRun(db, runId);
-
     const { data: run } = await db.from("ingest_runs").select("*").eq("id", runId).single();
 
     return jsonResponse(
@@ -211,4 +237,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
     console.error("ingest failed:", e);
     return jsonResponse({ ok: false, error: "Internal error." }, 500, origin);
   }
-});
+}
+
+if (import.meta.main) {
+  Deno.serve((req: Request) => handleIngest(req));
+}

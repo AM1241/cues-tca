@@ -83,6 +83,12 @@ export async function fetchPage(
   let attempts = 0;
   let lastError: ProviderError | null = null;
 
+  /** Stamp the real attempt count on the way out. Never MAX_ATTEMPTS. */
+  const fail = (err: ProviderError): never => {
+    err.attempts = attempts;
+    throw err;
+  };
+
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     attempts++;
     const controller = new AbortController();
@@ -99,7 +105,7 @@ export async function fetchPage(
       if (!res.ok) {
         const hint = (await res.text().catch(() => "")).slice(0, 200);
         const err = mapStatus(res.status, res.headers.get("Retry-After"), hint);
-        if (!err.retryable || attempt === MAX_ATTEMPTS) throw err;
+        if (!err.retryable || attempt === MAX_ATTEMPTS) fail(err);
         lastError = err;
         await sleep(Math.min(60_000, 4_000 * 2 ** (attempt - 1)));
         continue;
@@ -109,7 +115,8 @@ export async function fetchPage(
       try {
         data = await res.json();
       } catch {
-        throw new ProviderError("malformed_response", "Provider returned unparseable JSON.", res.status);
+        // HTTP 200 with an unusable body: one attempt, not retried.
+        fail(new ProviderError("malformed_response", "Provider returned unparseable JSON.", res.status));
       }
 
       const raw = normalizePage(data);
@@ -125,22 +132,22 @@ export async function fetchPage(
     } catch (e) {
       clearTimeout(timer);
       if (e instanceof ProviderError) {
-        if (!e.retryable || attempt === MAX_ATTEMPTS) throw e;
+        if (!e.retryable || attempt === MAX_ATTEMPTS) fail(e);
         lastError = e;
       } else if (e instanceof DOMException && e.name === "AbortError") {
         const err = new ProviderError("timeout", `Request exceeded ${REQUEST_TIMEOUT_MS}ms.`);
-        if (attempt === MAX_ATTEMPTS) throw err;
+        if (attempt === MAX_ATTEMPTS) fail(err);
         lastError = err;
       } else {
         const err = new ProviderError("network", `Network failure: ${(e as Error).message}`);
-        if (attempt === MAX_ATTEMPTS) throw err;
+        if (attempt === MAX_ATTEMPTS) fail(err);
         lastError = err;
       }
       await sleep(Math.min(60_000, 4_000 * 2 ** (attempt - 1)));
     }
   }
 
-  throw lastError ?? new ProviderError("network", "Exhausted attempts.");
+  return fail(lastError ?? new ProviderError("network", "Exhausted attempts."));
 }
 
 /**
@@ -180,11 +187,11 @@ export async function collectCompanyPosts(
     try {
       result = await fetchPage(linkedinUrl, page * 50, opts);
     } catch (e) {
-      // Attempts still cost quota even when the page failed. Surface the count
-      // so the caller can record it before re-throwing.
+      // Failed attempts still cost quota. Add the attempts actually made — a
+      // 401 costs one, an exhausted 500 retry costs three — so the recorded
+      // figure matches what the provider really saw.
       if (e instanceof ProviderError) {
-        (e as ProviderError & { providerRequests?: number }).providerRequests =
-          providerRequests + MAX_ATTEMPTS;
+        e.providerRequests = providerRequests + (e.attempts || 1);
       }
       throw e;
     }

@@ -45,19 +45,23 @@ export async function authenticate(
   const token = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
   if (!token) throw new RequestError(401, "Missing bearer token.");
 
-  const claims = decodeJwtPayload(token);
-  const claimedRole = typeof claims?.role === "string" ? claims.role : "";
-
   // ---- service role: cron / backfill -------------------------------------
-  if (claimedRole === "service_role") {
-    // Compare against the real key rather than trusting an unverified claim.
-    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-    if (!serviceKey || token !== serviceKey) {
-      throw new RequestError(401, "Invalid service credential.");
-    }
+  // Exact-match the configured key first. Supabase issues both legacy JWT
+  // service keys and the newer opaque `sb_secret_...` form; only the JWT one
+  // carries a decodable role claim, so matching the key itself is the check
+  // that works for both.
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  if (serviceKey && token === serviceKey) {
     const requested = body.trigger_source;
     const triggerSource = requested === "backfill" ? "backfill" : "cron";
     return { kind: "service", triggerSource };
+  }
+
+  // A token *claiming* service_role that is not the configured key is a forgery
+  // attempt, not a user session. Refuse rather than falling through.
+  const claims = decodeJwtPayload(token);
+  if (typeof claims?.role === "string" && claims.role === "service_role") {
+    throw new RequestError(401, "Invalid service credential.");
   }
 
   // ---- end user: always manual -------------------------------------------
