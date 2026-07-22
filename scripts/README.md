@@ -53,6 +53,24 @@ psql "$DB_URL" -v ON_ERROR_STOP=1 -f load_legacy.sql
 `snapshot_legacy.py` prints `snapshot_taken_at_utc:`. Record it — it is the
 delta boundary for that eventual cutover, and it is not recoverable afterwards.
 
+Since 0003, the loader's `truncate ... cascade` on `sources` also clears
+`ingest_run_sources` and `raw_post_content_changes`. Locally that is harmless;
+in the cloud it is one more reason the loader is single-use.
+
+## 3. Verify
+
+```bash
+psql "$DB_URL" -f scripts/verify_rls.sql      # Phase 1 access matrix
+psql "$DB_URL" -f scripts/verify_ingest.sql   # Phase 2 privileges, locking, finalizer
+```
+
+Both roll back everything they do. Phase 2 unit tests need no database:
+
+```bash
+docker run --rm -v "$PWD/supabase/functions:/app" -w /app denoland/deno:alpine-2.5.2 \
+  deno test --allow-env --allow-net=jsr.io ingest/__tests__/
+```
+
 ## 3. Verify RLS
 
 ```bash

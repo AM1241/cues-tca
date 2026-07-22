@@ -145,9 +145,9 @@ port = 54324
 # abort with exit 1 — after the migrations have already applied successfully.
 # The result was an intermittently red exit code on a green database.
 #
-# Re-enable in Phase 7 (set enabled = true). If the flake reappears, the
-# container is not actually broken: `docker inspect` will show
-# health=healthy with FailingStreak >= 1. Re-running the command works.
+# If the flake reappears after re-enabling, the container is not actually
+# broken: `docker inspect` will show health=healthy with FailingStreak >= 1.
+# Re-running the command works.
 [storage]
 enabled = false
 # The maximum file size allowed (e.g. "5MB", "500KB").
@@ -451,3 +451,13 @@ enabled = true
 # declarative_schema_path = "./database"
 # JSON string passed through to pg-delta SQL formatting.
 # format_options = "{\"keywordCase\":\"upper\",\"indent\":2,\"maxWidth\":80,\"commaStyle\":\"trailing\"}"
+
+# -----------------------------------------------------------------------------
+# Edge Functions
+# -----------------------------------------------------------------------------
+# verify_jwt = true rejects unauthenticated callers at the platform edge, before
+# any of our code runs. It is not sufficient on its own: a valid JWT only proves
+# somebody signed up. _shared/auth.ts additionally requires membership in
+# public.editors, and (while provider quota is being measured) role = 'admin'.
+[functions.ingest]
+verify_jwt = true

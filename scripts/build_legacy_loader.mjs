@@ -35,10 +35,25 @@ W('  restart identity cascade;')
 W('')
 
 // --- sources ---------------------------------------------------------------
+// Canonical provider input per source. Must match the UPDATE statements at the
+// end of 0003_ingest.sql: this loader truncates and reinserts sources, so
+// without the same map a local reset + reload would silently drop the values
+// the migration set. sources.url stays the human link; this is what the ingest
+// function actually sends as `linkedin_url`.
+const CANONICAL_IDENTIFIER = {
+  'GBfoods Italy LinkedIn': 'https://www.linkedin.com/company/gbfoods-italy',
+  'Fratelli Branca Distillerie LinkedIn': 'https://www.linkedin.com/company/fratelli-branca-distillerie',
+  'MASAF LinkedIn': 'https://www.linkedin.com/company/masaf',
+  'European Commission LinkedIn': 'https://www.linkedin.com/company/european-commission',
+}
+
 const sources = db.prepare('select * from sources').all()
+let identifierHits = 0
 W(`-- sources (${sources.length})`)
 for (const s of sources) {
-  W(`insert into public.sources (id, name, source_type, url, company_name, collection_frequency, enabled, last_fetched_at, created_at, updated_at) values (${S(s.id)}, ${S(s.name)}, ${S(s.source_type)}, ${S(s.url)}, ${S(s.company_name)}, ${S(s.collection_frequency ?? 'daily')}, ${B(s.enabled)}, ${TS(s.last_fetched_at)}, ${TS(s.created_at)}, ${TS(s.updated_at)});`)
+  const ident = CANONICAL_IDENTIFIER[s.name] ?? null
+  if (ident) identifierHits++
+  W(`insert into public.sources (id, name, source_type, url, company_name, rapidapi_identifier, collection_frequency, enabled, last_fetched_at, created_at, updated_at) values (${S(s.id)}, ${S(s.name)}, ${S(s.source_type)}, ${S(s.url)}, ${S(s.company_name)}, ${ident ? S(ident) : 'null'}, ${S(s.collection_frequency ?? 'daily')}, ${B(s.enabled)}, ${TS(s.last_fetched_at)}, ${TS(s.created_at)}, ${TS(s.updated_at)});`)
 }
 W('')
 
@@ -57,7 +72,10 @@ W(`-- raw_posts (${rawPosts.length}) -- content_hash and canonical_url are GENER
 for (const r of rawPosts) {
   const m = EXT.exec(r.source_url ?? '')
   if (m) withExt++; else withoutExt++
-  W(`insert into public.raw_posts (id, legacy_id, source_id, source_url, external_post_id, post_title, post_text, author, published_at, collected_at, media_urls, engagement_metrics, is_processed, created_at, updated_at) values (${S(idMap.get(r.id))}, ${S(r.id)}, ${S(r.source_id)}, ${S(r.source_url)}, ${m ? S(m[1]) : 'null'}, ${S(r.post_title)}, ${S(r.post_text)}, ${S(r.author)}, ${TS(r.published_at)}, ${TS(r.collected_at)}, ${J(r.media_urls, '[]')}, ${J(r.engagement_metrics, '{}')}, ${B(r.is_processed)}, ${TS(r.created_at)}, ${TS(r.updated_at)});`)
+  // last_seen_at mirrors collected_at for migrated rows, matching what
+  // 0003_ingest.sql backfills. Without this a local reset + reload would
+  // diverge from a migrated database on that column.
+  W(`insert into public.raw_posts (id, legacy_id, source_id, source_url, external_post_id, post_title, post_text, author, published_at, collected_at, last_seen_at, media_urls, engagement_metrics, is_processed, created_at, updated_at) values (${S(idMap.get(r.id))}, ${S(r.id)}, ${S(r.source_id)}, ${S(r.source_url)}, ${m ? S(m[1]) : 'null'}, ${S(r.post_title)}, ${S(r.post_text)}, ${S(r.author)}, ${TS(r.published_at)}, ${TS(r.collected_at)}, ${TS(r.collected_at)}, ${J(r.media_urls, '[]')}, ${J(r.engagement_metrics, '{}')}, ${B(r.is_processed)}, ${TS(r.created_at)}, ${TS(r.updated_at)});`)
 }
 W('')
 
