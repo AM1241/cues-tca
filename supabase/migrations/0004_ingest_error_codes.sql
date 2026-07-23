@@ -41,15 +41,20 @@ comment on constraint ingest_run_sources_error_code_check on public.ingest_run_s
 -- Data corrections (idempotent, keyed on name)
 -- -----------------------------------------------------------------------------
 
--- 1. Quarantine GBfoods. Its identifier has never resolved: zero rows in the
---    legacy connector db, an identical 404 in the scraper log, and three wasted
---    requests in the first live validation. Disable it and clear the identifier
---    so a "collect every enabled source" run cannot call it by accident.
---    sources.url is deliberately left as the human reference. Re-enable only
---    after the real LinkedIn company URL has been independently verified.
+-- 1. Repoint the mislabelled source to the ACTUAL stakeholder company. The row
+--    carried a GBfoods URL that never resolved (0 rows in the legacy connector,
+--    an identical 404 in the scraper log, 3 wasted requests in validation). The
+--    real source is STAR / GBfoods Italy at the star-spa page. This UPDATES the
+--    existing row in place — same UUID — so every raw_posts, analyzed_posts and
+--    traceability relationship keyed on that source id is preserved. It does NOT
+--    create a second source. Idempotent: after it runs the old name no longer
+--    matches, so a re-run is a no-op.
 update public.sources
-   set enabled = false,
-       rapidapi_identifier = null
+   set name                = 'STAR / GBfoods Italy LinkedIn',
+       company_name        = 'STAR / GBfoods Italy',
+       url                 = 'https://www.linkedin.com/company/star-spa/',
+       rapidapi_identifier = 'https://www.linkedin.com/company/star-spa/',
+       enabled             = true
  where name = 'GBfoods Italy LinkedIn';
 
 -- 2. European Commission: pin the EXACT provider input proven to work. The 49

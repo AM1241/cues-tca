@@ -35,32 +35,54 @@ W('  restart identity cascade;')
 W('')
 
 // --- sources ---------------------------------------------------------------
-// Provider input per source. Must reflect the END state after 0003 + 0004:
-// this loader truncates and reinserts sources, and runs AFTER migrations on a
-// local reset, so without matching the migrations a reset + reload would drop
-// the values (and the GBfoods quarantine) they set. sources.url stays the human
-// link; rapidapi_identifier is what the ingest function sends as `linkedin_url`.
+// Per-source config, must reflect the END state after 0003 + 0004: this loader
+// truncates and reinserts sources and runs AFTER migrations on a local reset, so
+// without matching the migrations a reset + reload would diverge from the
+// migrated cloud. Keyed on the LEGACY snapshot name.
 //
-// EC uses the trailing-slash form proven against the provider (0004). GBfoods is
-// quarantined (0004): identifier null and disabled, because its slug never
-// resolved. Fratelli and MASAF keep their canonical clean forms.
-const CANONICAL_IDENTIFIER = {
-  'GBfoods Italy LinkedIn': null,
-  'Fratelli Branca Distillerie LinkedIn': 'https://www.linkedin.com/company/fratelli-branca-distillerie',
-  'MASAF LinkedIn': 'https://www.linkedin.com/company/masaf',
-  'European Commission LinkedIn': 'https://www.linkedin.com/company/european-commission/',
+//   - GBfoods row is REPOINTED to STAR / GBfoods Italy (0004): same UUID, new
+//     name/company/url/identifier, enabled. The GBfoods slug never resolved.
+//   - European Commission uses the exact trailing-slash form proven against the
+//     provider (0004).
+//   - Fratelli and MASAF keep the canonical clean identifiers set by 0003, so
+//     local matches cloud. (Their display urls already equal the stakeholder
+//     URLs, from the legacy data.) If a live call to either is ever wanted, pin
+//     the exact proven form first, as was done for EC.
+//
+// sources.url is the human/display link; rapidapi_identifier is what the ingest
+// function sends as `linkedin_url`. A field omitted below falls back to the
+// legacy snapshot value.
+const SOURCE_CONFIG = {
+  'GBfoods Italy LinkedIn': {
+    name: 'STAR / GBfoods Italy LinkedIn',
+    company_name: 'STAR / GBfoods Italy',
+    url: 'https://www.linkedin.com/company/star-spa/',
+    rapidapi_identifier: 'https://www.linkedin.com/company/star-spa/',
+    enabled: true,
+  },
+  'Fratelli Branca Distillerie LinkedIn': {
+    rapidapi_identifier: 'https://www.linkedin.com/company/fratelli-branca-distillerie',
+  },
+  'MASAF LinkedIn': {
+    rapidapi_identifier: 'https://www.linkedin.com/company/masaf',
+  },
+  'European Commission LinkedIn': {
+    rapidapi_identifier: 'https://www.linkedin.com/company/european-commission/',
+  },
 }
-// Quarantined by 0004: proven-broken identifier, must not be callable.
-const DISABLED_SOURCES = new Set(['GBfoods Italy LinkedIn'])
 
 const sources = db.prepare('select * from sources').all()
 let identifierHits = 0
 W(`-- sources (${sources.length})`)
 for (const s of sources) {
-  const ident = CANONICAL_IDENTIFIER[s.name] ?? null
+  const cfg = SOURCE_CONFIG[s.name] ?? {}
+  const name = cfg.name ?? s.name
+  const company = cfg.company_name ?? s.company_name
+  const url = cfg.url ?? s.url
+  const ident = cfg.rapidapi_identifier ?? null
+  const enabled = cfg.enabled ?? !!s.enabled
   if (ident) identifierHits++
-  const enabled = DISABLED_SOURCES.has(s.name) ? false : !!s.enabled
-  W(`insert into public.sources (id, name, source_type, url, company_name, rapidapi_identifier, collection_frequency, enabled, last_fetched_at, created_at, updated_at) values (${S(s.id)}, ${S(s.name)}, ${S(s.source_type)}, ${S(s.url)}, ${S(s.company_name)}, ${ident ? S(ident) : 'null'}, ${S(s.collection_frequency ?? 'daily')}, ${enabled ? 'true' : 'false'}, ${TS(s.last_fetched_at)}, ${TS(s.created_at)}, ${TS(s.updated_at)});`)
+  W(`insert into public.sources (id, name, source_type, url, company_name, rapidapi_identifier, collection_frequency, enabled, last_fetched_at, created_at, updated_at) values (${S(s.id)}, ${S(name)}, ${S(s.source_type)}, ${S(url)}, ${S(company)}, ${ident ? S(ident) : 'null'}, ${S(s.collection_frequency ?? 'daily')}, ${enabled ? 'true' : 'false'}, ${TS(s.last_fetched_at)}, ${TS(s.created_at)}, ${TS(s.updated_at)});`)
 }
 W('')
 
