@@ -1,4 +1,4 @@
-﻿export type Json =
+export type Json =
   | string
   | number
   | boolean
@@ -7,6 +7,11 @@
   | Json[]
 
 export type Database = {
+  // Allows to automatically instantiate createClient with right options
+  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
+  __InternalSupabase: {
+    PostgrestVersion: "14.5"
+  }
   graphql_public: {
     Tables: {
       [_ in never]: never
@@ -37,6 +42,7 @@ export type Database = {
       analyzed_posts: {
         Row: {
           created_at: string
+          current_result_id: string | null
           entities: Json
           id: string
           included_in_generation: boolean
@@ -50,6 +56,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          current_result_id?: string | null
           entities?: Json
           id?: string
           included_in_generation?: boolean
@@ -63,6 +70,7 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          current_result_id?: string | null
           entities?: Json
           id?: string
           included_in_generation?: boolean
@@ -75,6 +83,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "analyzed_posts_current_result_id_fkey"
+            columns: ["current_result_id"]
+            isOneToOne: false
+            referencedRelation: "scoring_results"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "analyzed_posts_raw_post_id_fkey"
             columns: ["raw_post_id"]
@@ -672,6 +687,270 @@ export type Database = {
           },
         ]
       }
+      scoring_dead_letter: {
+        Row: {
+          attempts: number
+          dead_lettered_at: string
+          error_code: string | null
+          error_message: string | null
+          failure_type: string
+          id: string
+          job_id: string
+          provider_response: Json | null
+          raw_post_id: string
+          scoring_request_id: string
+        }
+        Insert: {
+          attempts: number
+          dead_lettered_at?: string
+          error_code?: string | null
+          error_message?: string | null
+          failure_type: string
+          id?: string
+          job_id: string
+          provider_response?: Json | null
+          raw_post_id: string
+          scoring_request_id: string
+        }
+        Update: {
+          attempts?: number
+          dead_lettered_at?: string
+          error_code?: string | null
+          error_message?: string | null
+          failure_type?: string
+          id?: string
+          job_id?: string
+          provider_response?: Json | null
+          raw_post_id?: string
+          scoring_request_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "scoring_dead_letter_raw_post_id_fkey"
+            columns: ["raw_post_id"]
+            isOneToOne: false
+            referencedRelation: "raw_posts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "scoring_dead_letter_scoring_request_id_fkey"
+            columns: ["scoring_request_id"]
+            isOneToOne: false
+            referencedRelation: "scoring_requests"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      scoring_job_state: {
+        Row: {
+          enqueued_at: string
+          failure_count: number
+          id: string
+          last_error_code: string | null
+          last_error_message: string | null
+          last_failure_type: string | null
+          msg_id: number | null
+          next_attempt_at: string | null
+          raw_post_id: string
+          scoring_request_id: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          enqueued_at?: string
+          failure_count?: number
+          id?: string
+          last_error_code?: string | null
+          last_error_message?: string | null
+          last_failure_type?: string | null
+          msg_id?: number | null
+          next_attempt_at?: string | null
+          raw_post_id: string
+          scoring_request_id: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          enqueued_at?: string
+          failure_count?: number
+          id?: string
+          last_error_code?: string | null
+          last_error_message?: string | null
+          last_failure_type?: string | null
+          msg_id?: number | null
+          next_attempt_at?: string | null
+          raw_post_id?: string
+          scoring_request_id?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "scoring_job_state_raw_post_id_fkey"
+            columns: ["raw_post_id"]
+            isOneToOne: false
+            referencedRelation: "raw_posts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "scoring_job_state_scoring_request_id_fkey"
+            columns: ["scoring_request_id"]
+            isOneToOne: false
+            referencedRelation: "scoring_requests"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      scoring_requests: {
+        Row: {
+          aggregation_strategy: string
+          config_hash: string
+          config_snapshot: Json
+          created_at: string
+          id: string
+          model: string
+          model_snapshot: string
+          prompt_hash: string
+          prompt_version: string
+          purpose: string
+          status: string
+        }
+        Insert: {
+          aggregation_strategy: string
+          config_hash: string
+          config_snapshot: Json
+          created_at?: string
+          id?: string
+          model: string
+          model_snapshot: string
+          prompt_hash: string
+          prompt_version: string
+          purpose: string
+          status?: string
+        }
+        Update: {
+          aggregation_strategy?: string
+          config_hash?: string
+          config_snapshot?: Json
+          created_at?: string
+          id?: string
+          model?: string
+          model_snapshot?: string
+          prompt_hash?: string
+          prompt_version?: string
+          purpose?: string
+          status?: string
+        }
+        Relationships: []
+      }
+      scoring_results: {
+        Row: {
+          aggregation_strategy: string
+          config_hash: string
+          config_snapshot: Json
+          created_at: string
+          id: string
+          idempotency_key: string
+          included_in_generation: boolean
+          llm_used: boolean
+          model: string | null
+          model_snapshot: string | null
+          overall_relevance: number
+          prompt_version: string | null
+          provenance_status: string
+          provider_response: Json | null
+          raw_post_id: string
+          reason: string | null
+          scoring_job_id: string | null
+          scoring_request_id: string | null
+          source: string
+          theme_scores: Json
+        }
+        Insert: {
+          aggregation_strategy: string
+          config_hash: string
+          config_snapshot: Json
+          created_at?: string
+          id?: string
+          idempotency_key: string
+          included_in_generation: boolean
+          llm_used: boolean
+          model?: string | null
+          model_snapshot?: string | null
+          overall_relevance: number
+          prompt_version?: string | null
+          provenance_status: string
+          provider_response?: Json | null
+          raw_post_id: string
+          reason?: string | null
+          scoring_job_id?: string | null
+          scoring_request_id?: string | null
+          source: string
+          theme_scores: Json
+        }
+        Update: {
+          aggregation_strategy?: string
+          config_hash?: string
+          config_snapshot?: Json
+          created_at?: string
+          id?: string
+          idempotency_key?: string
+          included_in_generation?: boolean
+          llm_used?: boolean
+          model?: string | null
+          model_snapshot?: string | null
+          overall_relevance?: number
+          prompt_version?: string | null
+          provenance_status?: string
+          provider_response?: Json | null
+          raw_post_id?: string
+          reason?: string | null
+          scoring_job_id?: string | null
+          scoring_request_id?: string | null
+          source?: string
+          theme_scores?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "scoring_results_raw_post_id_fkey"
+            columns: ["raw_post_id"]
+            isOneToOne: false
+            referencedRelation: "raw_posts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "scoring_results_scoring_request_id_fkey"
+            columns: ["scoring_request_id"]
+            isOneToOne: false
+            referencedRelation: "scoring_requests"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      scoring_themes: {
+        Row: {
+          active: boolean
+          created_at: string
+          label: string
+          position: number
+          theme_id: string
+        }
+        Insert: {
+          active?: boolean
+          created_at?: string
+          label: string
+          position: number
+          theme_id: string
+        }
+        Update: {
+          active?: boolean
+          created_at?: string
+          label?: string
+          position?: number
+          theme_id?: string
+        }
+        Relationships: []
+      }
       sources: {
         Row: {
           collection_frequency: string
@@ -790,6 +1069,14 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      activate_scoring_request: {
+        Args: { p_request_id: string }
+        Returns: undefined
+      }
+      backfill_scoring_for_request: {
+        Args: { p_request_id: string }
+        Returns: number
+      }
       claim_source_for_ingest: {
         Args: {
           p_identifier: string
@@ -800,8 +1087,67 @@ export type Database = {
         }
         Returns: boolean
       }
+      close_scoring_request: {
+        Args: { p_request_id: string }
+        Returns: undefined
+      }
+      complete_scoring_job: {
+        Args: {
+          p_job_id: string
+          p_msg_id: number
+          p_provider_response?: Json
+          p_raw_post_id: string
+          p_reason: string
+          p_scoring_request_id: string
+          p_theme_scores: Json
+        }
+        Returns: string
+      }
+      create_scoring_request: {
+        Args: {
+          p_aggregation_strategy: string
+          p_config_snapshot: Json
+          p_model: string
+          p_model_snapshot: string
+          p_prompt_hash: string
+          p_prompt_version: string
+          p_purpose: string
+        }
+        Returns: string
+      }
+      dead_letter_scoring_job: {
+        Args: {
+          p_attempts: number
+          p_error_code: string
+          p_error_message: string
+          p_failure_type: string
+          p_job_id: string
+          p_msg_id: number
+          p_provider_response: Json
+          p_raw_post_id: string
+          p_scoring_request_id: string
+        }
+        Returns: undefined
+      }
+      enqueue_reevaluation: { Args: { p_request_id: string }; Returns: number }
+      enqueue_scoring_job: {
+        Args: { p_raw_post_id: string; p_scoring_request_id: string }
+        Returns: string
+      }
       finalize_ingest_run: { Args: { p_run_id: string }; Returns: string }
+      import_legacy_analyses: { Args: never; Returns: number }
       is_editor: { Args: never; Returns: boolean }
+      open_production_scoring_request: {
+        Args: {
+          p_aggregation_strategy: string
+          p_config_snapshot: Json
+          p_model: string
+          p_model_snapshot: string
+          p_prompt_hash: string
+          p_prompt_version: string
+        }
+        Returns: string
+      }
       reap_stale_ingest: {
         Args: { p_stale_after?: string }
         Returns: {
@@ -816,6 +1162,36 @@ export type Database = {
           p_run_id: string
         }
         Returns: boolean
+      }
+      record_scoring_failure: {
+        Args: {
+          p_error_code: string
+          p_error_message: string
+          p_failure_type: string
+          p_job_id: string
+          p_msg_id: number
+          p_provider_response?: Json
+          p_raw_post_id: string
+          p_scoring_request_id: string
+        }
+        Returns: string
+      }
+      revive_scoring_job: { Args: { p_job_id: string }; Returns: undefined }
+      scoring_apply_aggregation: {
+        Args: { p_strategy: string; p_theme_scores: Json }
+        Returns: number
+      }
+      scoring_config_snapshot: { Args: never; Returns: Json }
+      scoring_hash_of_snapshot: { Args: { p_snapshot: Json }; Returns: string }
+      scoring_prompt_version: { Args: never; Returns: string }
+      scoring_theme_snapshot: { Args: never; Returns: Json }
+      set_current_scoring_result: {
+        Args: { p_raw_post_id: string; p_result_id: string }
+        Returns: undefined
+      }
+      validate_theme_scores: {
+        Args: { p_scores: Json; p_snapshot: Json }
+        Returns: undefined
       }
     }
     Enums: {
@@ -952,4 +1328,3 @@ export const Constants = {
     Enums: {},
   },
 } as const
-
