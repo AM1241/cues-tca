@@ -35,17 +35,23 @@ W('  restart identity cascade;')
 W('')
 
 // --- sources ---------------------------------------------------------------
-// Canonical provider input per source. Must match the UPDATE statements at the
-// end of 0003_ingest.sql: this loader truncates and reinserts sources, so
-// without the same map a local reset + reload would silently drop the values
-// the migration set. sources.url stays the human link; this is what the ingest
-// function actually sends as `linkedin_url`.
+// Provider input per source. Must reflect the END state after 0003 + 0004:
+// this loader truncates and reinserts sources, and runs AFTER migrations on a
+// local reset, so without matching the migrations a reset + reload would drop
+// the values (and the GBfoods quarantine) they set. sources.url stays the human
+// link; rapidapi_identifier is what the ingest function sends as `linkedin_url`.
+//
+// EC uses the trailing-slash form proven against the provider (0004). GBfoods is
+// quarantined (0004): identifier null and disabled, because its slug never
+// resolved. Fratelli and MASAF keep their canonical clean forms.
 const CANONICAL_IDENTIFIER = {
-  'GBfoods Italy LinkedIn': 'https://www.linkedin.com/company/gbfoods-italy',
+  'GBfoods Italy LinkedIn': null,
   'Fratelli Branca Distillerie LinkedIn': 'https://www.linkedin.com/company/fratelli-branca-distillerie',
   'MASAF LinkedIn': 'https://www.linkedin.com/company/masaf',
-  'European Commission LinkedIn': 'https://www.linkedin.com/company/european-commission',
+  'European Commission LinkedIn': 'https://www.linkedin.com/company/european-commission/',
 }
+// Quarantined by 0004: proven-broken identifier, must not be callable.
+const DISABLED_SOURCES = new Set(['GBfoods Italy LinkedIn'])
 
 const sources = db.prepare('select * from sources').all()
 let identifierHits = 0
@@ -53,7 +59,8 @@ W(`-- sources (${sources.length})`)
 for (const s of sources) {
   const ident = CANONICAL_IDENTIFIER[s.name] ?? null
   if (ident) identifierHits++
-  W(`insert into public.sources (id, name, source_type, url, company_name, rapidapi_identifier, collection_frequency, enabled, last_fetched_at, created_at, updated_at) values (${S(s.id)}, ${S(s.name)}, ${S(s.source_type)}, ${S(s.url)}, ${S(s.company_name)}, ${ident ? S(ident) : 'null'}, ${S(s.collection_frequency ?? 'daily')}, ${B(s.enabled)}, ${TS(s.last_fetched_at)}, ${TS(s.created_at)}, ${TS(s.updated_at)});`)
+  const enabled = DISABLED_SOURCES.has(s.name) ? false : !!s.enabled
+  W(`insert into public.sources (id, name, source_type, url, company_name, rapidapi_identifier, collection_frequency, enabled, last_fetched_at, created_at, updated_at) values (${S(s.id)}, ${S(s.name)}, ${S(s.source_type)}, ${S(s.url)}, ${S(s.company_name)}, ${ident ? S(ident) : 'null'}, ${S(s.collection_frequency ?? 'daily')}, ${enabled ? 'true' : 'false'}, ${TS(s.last_fetched_at)}, ${TS(s.created_at)}, ${TS(s.updated_at)});`)
 }
 W('')
 

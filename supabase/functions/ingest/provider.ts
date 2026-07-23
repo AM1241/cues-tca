@@ -51,6 +51,11 @@ export interface CollectResult extends PageResult {
 
 const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+/**
+ * Map an HTTP status to a classified error. Only 5xx is retryable here; every
+ * 4xx is a deterministic client/config problem and is classified explicitly
+ * rather than being swept into the retryable server_error bucket.
+ */
 function mapStatus(status: number, retryAfter: string | null, bodyHint: string): ProviderError {
   if (status === 401 || status === 403) {
     return new ProviderError("auth", `Provider returned ${status}. Check RAPIDAPI_KEY.`, status);
@@ -59,10 +64,26 @@ function mapStatus(status: number, retryAfter: string | null, bodyHint: string):
     const secs = retryAfter && /^\d+$/.test(retryAfter) ? Number(retryAfter) : undefined;
     return new ProviderError("rate_limit", `Provider returned 429.`, status, secs);
   }
+  if (status === 404) {
+    // "the url was not found on Linkedin" — the identifier does not resolve.
+    // Not transient: the source's rapidapi_identifier needs correcting.
+    return new ProviderError(
+      "source_not_found",
+      `Provider returned 404: ${bodyHint}`,
+      status,
+    );
+  }
   if (status >= 500) {
     return new ProviderError("server_error", `Provider returned ${status}: ${bodyHint}`, status);
   }
-  return new ProviderError("server_error", `Provider returned ${status}: ${bodyHint}`, status);
+  if (status >= 400) {
+    // Any other 4xx (400, 405, 410, 422, ...). A request-shape or config fault,
+    // not a passing outage, so it is not retried.
+    return new ProviderError("client_error", `Provider returned ${status}: ${bodyHint}`, status);
+  }
+  // Non-2xx that is neither 4xx nor 5xx (an unfollowed 3xx, say). Treat as a
+  // non-retryable client error rather than silently retrying an unknown status.
+  return new ProviderError("client_error", `Provider returned ${status}: ${bodyHint}`, status);
 }
 
 /**

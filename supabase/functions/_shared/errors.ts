@@ -1,16 +1,22 @@
-/** Error codes mirrored from ingest_run_sources.error_code in 0003_ingest.sql. */
+/** Error codes mirrored from ingest_run_sources.error_code (0003 + 0004). */
 export type IngestErrorCode =
   | "disabled"
   | "no_rapidapi_identifier"
   | "locked"
   | "stale_lock"
   | "auth"
+  | "auth_aborted"
   | "rate_limit"
   | "server_error"
   | "network"
   | "malformed_response"
   | "timeout"
-  | "budget_exhausted";
+  | "budget_exhausted"
+  // Provider 404: the identifier does not resolve. Non-retryable — the source
+  // config is wrong and no amount of retrying fixes it.
+  | "source_not_found"
+  // Any other 4xx: a request/config problem, not a transient outage.
+  | "client_error";
 
 export class ProviderError extends Error {
   /**
@@ -37,10 +43,14 @@ export class ProviderError extends Error {
   }
 
   /**
-   * Whether another attempt could plausibly succeed.
+   * Whether another attempt could plausibly succeed. ONLY genuinely transient
+   * failures qualify: 5xx, network drops and timeouts.
    *
-   * `auth` is not retryable on purpose: a bad key fails identically every time,
-   * and retrying it across four sources burns quota to learn nothing.
+   * Everything else — auth, rate limits, 404s, other 4xx, malformed bodies — is
+   * deterministic given the same request, so retrying only burns quota to learn
+   * the same thing. A bad identifier that returned 404 three times (once in the
+   * legacy scraper, once in our first dry run) is exactly what this guards
+   * against.
    */
   get retryable(): boolean {
     return this.code === "server_error" || this.code === "network" ||

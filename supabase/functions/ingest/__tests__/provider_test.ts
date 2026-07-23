@@ -51,6 +51,11 @@ Deno.test("quota: attempts recorded per failure class", async () => {
     { name: "401", script: [{ status: 401 }], expected: 1, code: "auth" },
     { name: "403", script: [{ status: 403 }], expected: 1, code: "auth" },
     { name: "429", script: [{ status: 429, headers: { "Retry-After": "30" } }], expected: 1, code: "rate_limit" },
+    // 404: the failure that cost three requests before this fix. Now one.
+    { name: "404", script: [{ status: 404, body: { data: null, message: "the url was not found on Linkedin" } }], expected: 1, code: "source_not_found" },
+    { name: "400", script: [{ status: 400 }], expected: 1, code: "client_error" },
+    { name: "422", script: [{ status: 422 }], expected: 1, code: "client_error" },
+    { name: "410", script: [{ status: 410 }], expected: 1, code: "client_error" },
     { name: "malformed 200", script: [{ body: "<html>" }], expected: 1, code: "malformed_response" },
     { name: "500 x3", script: [{ status: 500 }, { status: 500 }, { status: 500 }], expected: 3, code: "server_error" },
     { name: "timeout x3", script: [{ hang: true }], expected: 3, code: "timeout" },
@@ -104,6 +109,40 @@ Deno.test("quota: immediate 401 -> 1 attempt, 0 pages, not retried", async () =>
   );
   assertEquals(err.code, "auth");
   assertEquals(calls.length, 1, "a bad key is not worth retrying");
+});
+
+Deno.test("404 'url not found' -> source_not_found, one attempt, zero pages, no retry", async () => {
+  // The exact GBfoods failure. The identifier does not resolve; retrying it
+  // three times (as both the legacy scraper and our first dry run did) only
+  // spends quota. This asserts the value the run recorder persists.
+  const { fetchImpl, calls } = scriptedFetch([
+    { status: 404, body: { data: null, message: "the url was not found on Linkedin" } },
+  ]);
+  const err = await assertRejects(
+    () => collectCompanyPosts(URL_, 30, opts(fetchImpl)),
+    ProviderError,
+  );
+  assertEquals(err.code, "source_not_found");
+  assertEquals(err.retryable, false);
+  assertEquals(err.httpStatus, 404);
+  assertEquals(calls.length, 1, "exactly one provider request");
+  assertEquals(err.attempts, 1);
+  assertEquals(err.providerRequests, 1);
+  assertEquals(err.sourceStatus, "failed", "the source is finalized as failed");
+  assert(err.message.includes("not found on Linkedin"), "provider message is preserved");
+});
+
+Deno.test("other 4xx -> client_error, one attempt, no retry", async () => {
+  for (const status of [400, 405, 410, 422]) {
+    const { fetchImpl, calls } = scriptedFetch([{ status }]);
+    const err = await assertRejects(
+      () => collectCompanyPosts(URL_, 30, opts(fetchImpl)),
+      ProviderError,
+    );
+    assertEquals(err.code, "client_error", `status ${status}`);
+    assertEquals(err.retryable, false, `status ${status} must not retry`);
+    assertEquals(calls.length, 1, `status ${status}: one request only`);
+  }
 });
 
 Deno.test("quota: retry exhaustion -> 3 attempts, 0 pages", async () => {

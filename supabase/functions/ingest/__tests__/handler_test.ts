@@ -451,6 +451,33 @@ it("provider 401 stops the run but every source keeps an audit row", async () =>
   assertEquals(failedRow.error_code, "auth");
 });
 
+it("a 404 source finalizes failed with source_not_found and one request", async () => {
+  // End-to-end version of the GBfoods failure: the run must be 'failed', the
+  // source must carry source_not_found with the provider status and message,
+  // and it must have cost exactly one provider request — not three.
+  const { fetchImpl, calls } = scriptedFetch([
+    { status: 404, body: { data: null, message: "the url was not found on Linkedin" } },
+  ]);
+  const res = await handleIngest(
+    request({ source_ids: [sourceA] }, tokens[emails.admin]),
+    { db, fetchImpl, sleep: noSleep },
+  );
+  const body = await res.json();
+  assertEquals(calls.length, 1, "one request, no retries on a 404");
+  assertEquals(body.status, "failed");
+  assertEquals(body.totals.provider_requests, 1);
+
+  const { data: row } = await db
+    .from("ingest_run_sources").select("status, error_code, http_status, error_message, provider_requests")
+    .eq("run_id", body.run_id).eq("source_id", sourceA).single();
+  assert(row);
+  assertEquals(row.status, "failed");
+  assertEquals(row.error_code, "source_not_found");
+  assertEquals(row.http_status, 404);
+  assertEquals(row.provider_requests, 1);
+  assert(row.error_message?.includes("not found on Linkedin"));
+});
+
 it("mixed success and failure -> completed_with_errors", async () => {
   let call = 0;
   const fetchImpl = ((input: string | URL | Request) => {
