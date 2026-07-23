@@ -186,6 +186,14 @@ for (const c of cfg) {
 }
 
 W('')
+// Phase 3B parity: the migration ran import/backfill against an empty DB, so
+// replay them now that the legacy analyzed rows exist. Idempotent: import only
+// acts on analyses without a current_result_id; backfill only enqueues genuinely
+// unscored posts (none here — all legacy posts get a simulated current result).
+W('-- Phase 3B: preserve simulated analyses as scoring history + current pointer.')
+W('-- No backfill/enqueue here: jobs are only created later under an approved request.')
+W('select public.import_legacy_analyses();')
+W('')
 W('commit;')
 
 writeFileSync(process.argv[3], out.join('\n') + '\n', 'utf8')
