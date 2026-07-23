@@ -144,14 +144,49 @@ Validated against the cloud on 2026-07-23. Full record in `docs/phase-2-completi
 
 ### Phase 3 — Scoring
 
-- `pgmq` queue `scoring_jobs`; trigger enqueues on `raw_posts` insert.
-- Edge Function `score-worker`: drains N jobs per invocation, one LLM call per post, JSON
-  schema response with `overall_relevance`, per-theme `relevance_scores`, `reason_for_score`.
-  Port the prompt from the dead `llm_batch_scoring_service.py`, not the live integer-only one.
-- `pg_cron` drains the queue every few minutes. Retry with backoff; a job that fails three
-  times lands in a dead-letter table visible in the UI.
-- Optional: `score-batch-submit` / `score-batch-poll` using the OpenAI Batch API for bulk
-  re-scoring runs, polled by cron. Same prompt, same writer.
+- [x] **3A — design** (in-conversation). Audit found all 133 migrated analyses are
+  simulated (`reason='Simulated LLM semantic scoring'`); the EC post is unscored.
+  Decided: `pgmq` queue + `score-worker`, OpenAI Responses API structured outputs,
+  synchronous (Batch deferred), server-derived overall score.
+- [x] **3B — database layer**, migration `0005_scoring.sql`. Built and tested locally,
+  then **applied to the cloud project on 2026-07-23** (`supabase db push`; confirmed via
+  `supabase migration list`, local and remote both show 0005). `frontend/src/lib/database.types.ts`
+  regenerated against the cloud schema and committed.
+  - `scoring_requests` (immutable run definition; only `status` transitions) +
+    `scoring_results` (append-only history — UPDATE/DELETE blocked by trigger, TRUNCATE
+    revoked; `analyzed_posts.current_result_id` holds the current projection).
+  - `scoring_job_state` (business retry, 30s→120s→dead-letter backoff) +
+    `scoring_dead_letter`.
+  - pgmq `scoring_jobs` queue; enqueue trigger fires only for pipeline posts under an
+    *active production* request.
+  - 133 simulated analyses imported as `provenance_status='legacy_unknown'`,
+    `scoring_request_id=null`.
+  - RPCs: `create/activate/close_scoring_request`, `open_production_scoring_request`,
+    `enqueue_scoring_job`, `backfill_scoring_for_request`, `enqueue_reevaluation`,
+    `complete_scoring_job` (definition comes from the request — worker cannot override
+    model/prompt/config/aggregation/source), `record_scoring_failure`,
+    `dead_letter_scoring_job`, `revive_scoring_job`, `set_current_scoring_result`
+    (promote/rollback), `import_legacy_analyses`.
+  - The migration creates **no production request and no jobs** on its own — cloud state
+    after the push is 133 legacy `scoring_results` linked, 0 jobs, no request.
+  - Verified: `scripts/verify_scoring.sql` (37 assertions, 0 failures); Phase 1/2
+    regressions still green.
+- [ ] **3C — `score-worker` Edge Function.** OpenAI Responses API (`/v1/responses`,
+  `text.format` strict json_schema, `store:false`, schema built dynamically from the
+  request's `config_snapshot`). Internal-secret auth (reuse `_shared/auth.ts`). Flow:
+  reap → `pgmq.read` → build prompt → call OpenAI → validate → `complete_scoring_job` /
+  `record_scoring_failure` / `dead_letter_scoring_job`. No silent fallback — handle
+  refusal / incomplete (max tokens) / content-filter / empty / 429 / 5xx / timeout / 4xx.
+  Offline tests with a scripted OpenAI, mirroring the `ingest` harness.
+- [ ] **3D — model + prompt.** Port the richer per-theme prompt from the dead
+  `llm_batch_scoring_service.py` (not the live integer-only one). Pin a specific OpenAI
+  model snapshot (not yet chosen — see Open product decisions below).
+- [ ] **3E — one controlled cloud call**, EC post only (~$0.0003), explicit approval
+  required before it runs.
+- [ ] **3F — sample evaluation.** Score a ~24-post sample (incl. the 7 historically
+  inconsistent rows) against a written rubric, then `open_production_scoring_request` +
+  backfill. Promotion gate before real scores become current.
+- [ ] **3G — enable `pg_cron` drain**, only after cost + reliability are measured from 3E/3F.
 - **Check:** re-scoring all currently available raw posts completes unattended and every
   row has non-zero per-theme scores. (134 at the Phase 2 completion snapshot — 133 legacy
   plus the one European Commission post ingested during Phase 2 validation.)
