@@ -18,13 +18,17 @@ The two constraints that do bite, and the answers:
 
 | Constraint | Impact | Answer |
 |---|---|---|
-| Edge Function wall clock ~400s | Scoring 133 posts in one invocation would blow it | Work queue (`pgmq`) drained in chunks by a cron-triggered worker |
+| Edge Function wall clock ~400s | Scoring 133 posts in one invocation would blow it | Work queue (`pgmq`) drained in chunks by an on-demand worker |
 | Edge Function CPU time ~2s | Irrelevant — the work is awaiting `fetch`, not computing | — |
-| No long-lived process | No APScheduler | `pg_cron` for nightly ingest and queue draining |
+| No long-lived process | No APScheduler | Human-triggered invocation (a button per stage); the queue holds state between drains |
 | No local filesystem | Batch JSONL and exports have nowhere to live | Supabase Storage |
 
 At 133 posts, 4 sources and ~10 users, this sits inside the Supabase and Netlify free tiers;
-the only real cost is LLM tokens.
+the only real cost is LLM tokens. Ingest, scoring and the queue drain are triggered on demand
+(a button in the UI, or the internal-secret path) rather than by a scheduler — a batch tool
+used by ~10 people is driven by people, and on-demand triggering avoids depending on any
+scheduler extension or on a project staying awake. Unattended automation, if wanted later, is
+an optional add-on (see *Optional automation* below), not a dependency of the product.
 
 ## Architecture
 
@@ -40,7 +44,7 @@ Netlify (static)                     Supabase
 │  Export          │                 │ Edge Functions (Deno/TS)            │
 └──────────────────┘                 │   ingest score anonymize            │
                                      │   cluster generate export           │
-                                     │ pgmq queue + pg_cron                │
+                                     │ pgmq queue (on-demand drain)        │
                                      │ Storage: batches, exports           │
                                      └─────────────────────────────────────┘
                                           │ RapidAPI LinkedIn, OpenAI
@@ -55,9 +59,10 @@ Beyond the lift-and-shift, these are the actual improvements. Each maps to a pha
 
 1. **The manual batch step disappears.** Today an operator runs `batch/build`, takes the
    JSONL to the provider by hand, and posts back a `results_path`. Replaced by a queue: new
-   posts are enqueued on insert, a cron-driven worker drains them. Optionally the OpenAI
-   Batch API is used for cost (50% cheaper, 24h) with cron polling the batch status — still
-   zero human steps.
+   posts are enqueued on insert, and an on-demand worker (invoked from the UI or the
+   internal-secret path) drains them in chunks. Optionally the OpenAI Batch API is used for
+   cost (50% cheaper, 24h), polled by re-invoking the worker — still one button, no JSONL
+   shuttling.
 2. **Scoring returns per-theme scores again.** The live batch prompt asks for a bare integer,
    so `apply_scores` writes `{theme: 0.0}` for all themes — which starves clustering, which
    buckets posts by highest per-theme score. The richer prompt already exists in the dead
@@ -130,17 +135,18 @@ Validated against the cloud on 2026-07-23. Full record in `docs/phase-2-completi
   loop is gone. **Identity is `(source_id, external_post_id)`, not the content hash** (see Phase 1).
 - [x] Move `connector_config.json` into the `sources` table; add `rapidapi_identifier` and
   `lookback_days` columns (migration `0003_ingest.sql`).
-- [x] Manual "Collect now" path: admin-only, JWT + `editors` allowlist, internal-secret path for
-  cron. `0003` also adds run/observability tables, a per-source concurrency lock, and
-  content-change capture; `0004` adds precise 4xx classification.
+- [x] Manual "Collect now" path: admin-only, JWT + `editors` allowlist, plus an internal-secret
+  path for programmatic (non-UI) triggering. `0003` also adds run/observability tables, a
+  per-source concurrency lock, and content-change capture; `0004` adds precise 4xx classification.
 - [x] **Check:** a live run inserts new rows and a second identical run inserts nothing —
   proven on European Commission (run 1 inserted 1, run 2 inserted 0, metadata refreshed, text
   never overwritten).
 
-> **`pg_cron` nightly trigger is intentionally NOT enabled yet.** Cadence must be set from
-> measured provider usage against the confirmed RapidAPI plan, not assumed. The internal-secret
-> path the cron job will use is built and tested; enabling the schedule is a deliberate later
-> step. See the completion doc's "Known limitations".
+> **Ingest is triggered on demand, not on a schedule.** An editor presses "Collect now"; the
+> internal-secret path also allows programmatic triggering if unattended runs are ever wanted
+> (see *Optional automation*). This keeps the tool inside the free tier and independent of any
+> scheduler extension or of the project staying awake. See the completion doc's "Known
+> limitations".
 
 ### Phase 3 — Scoring
 
@@ -186,10 +192,13 @@ Validated against the cloud on 2026-07-23. Full record in `docs/phase-2-completi
 - [ ] **3F — sample evaluation.** Score a ~24-post sample (incl. the 7 historically
   inconsistent rows) against a written rubric, then `open_production_scoring_request` +
   backfill. Promotion gate before real scores become current.
-- [ ] **3G — enable `pg_cron` drain**, only after cost + reliability are measured from 3E/3F.
-- **Check:** re-scoring all currently available raw posts completes unattended and every
-  row has non-zero per-theme scores. (134 at the Phase 2 completion snapshot — 133 legacy
-  plus the one European Commission post ingested during Phase 2 validation.)
+- [ ] **3G — repeat-drain loop.** Confirm the worker can be re-invoked until the queue is
+  empty (chunked draining) without exceeding wall-clock, and that cost + reliability from
+  3E/3F are acceptable. Triggering stays on-demand (button / internal-secret path).
+- **Check:** re-scoring all currently available raw posts completes (across as many worker
+  invocations as the queue needs) and every row has non-zero per-theme scores. (134 at the
+  Phase 2 completion snapshot — 133 legacy plus the one European Commission post ingested
+  during Phase 2 validation.)
 
 ### Phase 4 — Anonymise & cluster
 
@@ -262,6 +271,18 @@ Progress (2026-07-23, built against the cloud seed data, in parallel with Phase 
   env, SPA redirect rule. Deploy previews on PRs.
 - **Check:** an editor completes collect → score → generate → approve → export on the
   production URL.
+
+## Optional automation
+
+The product ships fully on-demand: every stage (ingest, score, drain) is triggered by a
+button in the UI, and the queue holds work between drains. No scheduler is required, which is
+what keeps it inside the free tier and independent of any project-wake behaviour.
+
+If unattended runs are ever wanted, the internal-secret path on `ingest` (and, later, the
+worker) is already the hook — an external caller can hit it on whatever cadence is chosen
+(e.g. a GitHub Actions cron, or any external HTTP pinger). This stays an optional add-on and
+is deliberately **not** a dependency of any phase; do not gate a phase on it, and do not enable
+it until cost and reliability have been measured on real runs.
 
 ## Sequencing note
 
