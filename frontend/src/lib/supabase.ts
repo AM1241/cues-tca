@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import type { Database } from './database.types'
 
 // Only the project URL and the publishable key may reach the browser bundle.
 // The secret (service role) key bypasses RLS and lives in `supabase secrets set`.
@@ -11,4 +12,4 @@ if (!url || !publishableKey) {
   )
 }
 
-export const supabase = createClient(url, publishableKey)
+export const supabase = createClient<Database>(url, publishableKey)

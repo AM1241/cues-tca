@@ -212,17 +212,44 @@ Validated against the cloud on 2026-07-23. Full record in `docs/phase-2-completi
 - No simulated fallback. On LLM failure, fail the request and surface it.
 - **Check:** output quality matches or beats the stored legacy assets on the same window.
 
-### Phase 6 — Frontend
+### Phase 6 — Frontend — IN PROGRESS
 
 Routes: **Sources** (CRUD, enable/disable, collect now) · **Posts** (table with scores,
 reasons, filters) · **Objective** (themes, voice, threshold, aliases — the config row) ·
 **Generate** (period, format, instructions; live job status) · **Review** (asset with its
 traceability panel, edit, approve, reject, request regeneration) · **Export**.
 
-- `supabase-js` with the anon key; generated types from `supabase gen types typescript`.
-- Magic-link login, allowlist enforced by RLS.
+- `supabase-js` with the publishable key; generated types from `supabase gen types typescript`.
+- Login + allowlist enforced by RLS.
 - Realtime subscription on job status so long pipeline runs report progress.
 - **Check:** the full pipeline is drivable end to end without a terminal.
+
+Progress (2026-07-23, built against the cloud seed data, in parallel with Phase 3):
+
+- [x] Foundation: `react-router-dom` shell with a nav layout; `ErrorBoundary` + a toast
+  system + shared `Spinner`/`EmptyState`/`ErrorNotice` primitives. Client typed with the
+  generated `Database` generic.
+- [x] **Auth gate** — email+password login (`signInWithPassword`), not magic-link. Three
+  states: unauthenticated → login; authenticated but not on `public.editors` → explicit
+  "awaiting access" screen (RLS returns empty, not an error, so this is surfaced
+  deliberately); allowlisted → app. `useAuth` resolves `isEditor` from the allowlist.
+- [x] **Posts** — read-only table over `analyzed_posts` joined to `raw_posts`/`sources`:
+  per-theme score bars, overall relevance, reason, in-generation badge; filter by source,
+  min-relevance, in-generation-only.
+- [x] **Sources** — list + enable/disable toggle + create/edit modal. No delete (RLS grants
+  none; retire via `enabled=false`). "Collect now" not yet wired (needs `ingest` invoke).
+- [x] **Objective** — edits the single `default` config row: themes, voice, threshold,
+  anonymisation flags, company aliases. Update only; no insert/delete.
+- [x] **Review** — asset list with status + `legacy`/`no-LLM` provenance badges; detail with
+  editable title/text/CTA (the 10 RLS-granted columns only), approve/reject writing
+  `approved_by = auth.uid()`, and the traceability panel. Regeneration deferred to Phase 7
+  (needs `generate`).
+- [x] **Export** — client-side Markdown + JSON of an asset (or all in a status filter) with
+  traceability; copy + download. DOCX deferred to Phase 7.
+- [ ] **Generate** — placeholder only. The form + `generation_requests` insert can be built
+  now, but it produces nothing until the `generate` Edge Function (Phase 5) exists.
+- [ ] Realtime job-status subscription — deferred until the Phase 3 scoring worker emits
+  status.
 
 ### Phase 7 — Review, export, deploy
 

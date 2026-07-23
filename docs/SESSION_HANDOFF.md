@@ -1,19 +1,42 @@
 # Session handoff — CUES Editorial Cloud
 
-Last updated: 2026-07-23 (session 2). Read this first, then `MIGRATION_PLAN.md` and the
-`docs/phase-*-completion.md` records. This file is the single "where are we"
+Last updated: 2026-07-23 (session 3 — frontend). Read this first, then `MIGRATION_PLAN.md`
+and the `docs/phase-*-completion.md` records. This file is the single "where are we"
 pointer between working sessions.
 
 ## One-paragraph state
 
 Phases 0, 1 and 2 are **complete and live on the cloud**. Phase 3A/3B (scoring design +
-database layer) are **complete and now applied to the cloud as of this session** —
-`0005_scoring.sql` is live, types are regenerated and committed. The `score-worker`
-Edge Function (3C) is **not built**. No OpenAI call has ever been made. Cron is not
-enabled anywhere. The legacy system (`../cues-tca-editorial-agent` Docker container +
-volume) is untouched and remains authoritative until Phase 7.
+database layer) are **complete and applied to the cloud** — `0005_scoring.sql` is live,
+types are regenerated and committed. The `score-worker` Edge Function (3C) is **not built**;
+no OpenAI call has ever been made; cron is not enabled anywhere. **Phase 6 (frontend) is now
+in progress in parallel** — 5 of 6 routes built against the cloud seed (Posts, Sources,
+Objective, Review, Export) plus an email+password auth gate; only Generate remains a
+placeholder (blocked on Phase 5). The legacy system (`../cues-tca-editorial-agent` Docker
+container + volume) is untouched and remains authoritative until Phase 7.
 
-## What happened this session
+## What happened this session (session 3 — frontend)
+
+Frontend work only; **no schema, migration, or cloud-DB changes**. `database.types.ts`
+treated as read-only (owned by the Phase 3 sessions — not regenerated).
+
+1. **Phase 0 finish + repo setup on the frontend machine**: `git init`, added `origin`
+   (SSH — HTTPS had no credentials), pulled `main`. `npm install` in `frontend/`.
+   `frontend/.env.local` confirmed to hold only the cloud URL + publishable key.
+2. **Auth (Phase 6)**: email+password login via `signInWithPassword` (not magic-link).
+   `useAuth` hook resolves `isEditor` from `public.editors`; three-state gate
+   (login / awaiting-access / app). The one existing user (`hzafeiris@f-in.eu`, admin on
+   the allowlist) had its **login password reset to `123456` for testing** — change before
+   production.
+3. **Built 5 routes** against the cloud seed: Posts (read), Sources (CRUD, no delete),
+   Objective (config-row editor), Review (asset approval + traceability, RLS-granted columns
+   only), Export (client-side MD/JSON). Generate left as a placeholder. Added
+   `react-router-dom`, an `ErrorBoundary`, a toast system, and shared UI primitives.
+4. **Everything verified** via `tsc -b`, `oxlint`, and a production `vite build` — all clean.
+   Writes were not all click-tested as the authed user; the RLS grants were matched to the
+   `0002` migration by hand.
+
+### Earlier sessions
 
 1. **Reviewed session 1's handoff**, confirmed via `supabase migration list` that cloud
    was on 0001–0004 with 0005 pending locally only.
