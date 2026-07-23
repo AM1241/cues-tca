@@ -121,15 +121,26 @@ Applied to the cloud project 2026-07-22. Full record in `docs/phase-1-completion
 > write freeze or a delta migration — see *Final cutover* in `docs/cloud-migration-runbook.md`.
 > Delta boundary: **2026-07-22T02:17:11.788315+00:00**.
 
-### Phase 2 — Ingest
+### Phase 2 — Ingest ✅ COMPLETE
 
-- Edge Function `ingest`: calls RapidAPI LinkedIn directly per configured source, upserts
-  into `raw_posts` on the new unique constraint, honours `lookback_days`. This deletes the
-  `subprocess` → sibling-repo → HTTP-back-to-itself loop entirely.
-- Move `connector_config.json` into the `sources` table; add `rapidapi_identifier` and
-  `lookback_days` columns.
-- `pg_cron` nightly trigger; manual "Collect now" from the UI.
-- **Check:** a run against a live source inserts new rows and inserts nothing on a second run.
+Validated against the cloud on 2026-07-23. Full record in `docs/phase-2-completion.md`.
+
+- [x] Edge Function `ingest`: calls RapidAPI LinkedIn directly per configured source, upserts
+  into `raw_posts`, honours `lookback_days`. The `subprocess` → sibling-repo → HTTP-back-to-itself
+  loop is gone. **Identity is `(source_id, external_post_id)`, not the content hash** (see Phase 1).
+- [x] Move `connector_config.json` into the `sources` table; add `rapidapi_identifier` and
+  `lookback_days` columns (migration `0003_ingest.sql`).
+- [x] Manual "Collect now" path: admin-only, JWT + `editors` allowlist, internal-secret path for
+  cron. `0003` also adds run/observability tables, a per-source concurrency lock, and
+  content-change capture; `0004` adds precise 4xx classification.
+- [x] **Check:** a live run inserts new rows and a second identical run inserts nothing —
+  proven on European Commission (run 1 inserted 1, run 2 inserted 0, metadata refreshed, text
+  never overwritten).
+
+> **`pg_cron` nightly trigger is intentionally NOT enabled yet.** Cadence must be set from
+> measured provider usage against the confirmed RapidAPI plan, not assumed. The internal-secret
+> path the cron job will use is built and tested; enabling the schedule is a deliberate later
+> step. See the completion doc's "Known limitations".
 
 ### Phase 3 — Scoring
 
