@@ -16,7 +16,7 @@
  *
  * Run (PowerShell), from the repo root:
  *
- *   $env:SMOKE_SOURCE_ID   = '4417049a-6ddb-4aa9-a3f3-11d590070dde'  # confirm via Step 2 SQL
+ *   $env:SMOKE_SOURCE_ID   = '1f8022ec-e875-4127-a6da-be3ccbaafc6e'  # European Commission (confirm via SQL)
  *   $env:SMOKE_ADMIN_EMAIL = Read-Host 'admin email'
  *   $env:SMOKE_ADMIN_PASSWORD = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
  *     [Runtime.InteropServices.Marshal]::SecureStringToBSTR((Read-Host 'admin password' -AsSecureString)))

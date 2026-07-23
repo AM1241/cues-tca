@@ -173,6 +173,37 @@ Deno.test("quota: three clean pages -> 3 attempts, 3 pages", async () => {
 });
 
 // ===========================================================================
+// REQUEST SHAPE — newest-first ordering must be pinned on every page
+// ===========================================================================
+Deno.test("every page request pins sort_by=recent, with linkedin_url and start", async () => {
+  // Three pages so the assertion covers start=0 and subsequent offsets. All
+  // posts are in-window (lookback 90) with distinct ids, so pagination advances
+  // rather than stopping on an out-of-window page or a repeat.
+  const { fetchImpl, calls } = scriptedFetch([
+    { body: [post("7900000000000000001", "a", daysAgo(1))] },
+    { body: [post("7900000000000000002", "b", daysAgo(2))] },
+    { body: [post("7900000000000000003", "c", daysAgo(3))] },
+    { body: [] },
+  ]);
+  await collectCompanyPosts("https://www.linkedin.com/company/european-commission/", 90, opts(fetchImpl));
+
+  assert(calls.length >= 3, `expected multiple page requests, got ${calls.length}`);
+  for (const c of calls) {
+    assert(c.includes("sort_by=recent"), `missing sort_by=recent: ${c}`);
+    assert(c.includes("linkedin_url="), `missing linkedin_url: ${c}`);
+    assert(/[?&]start=\d+/.test(c), `missing start: ${c}`);
+  }
+  // Exact offsets: page 0 -> start=0, page 1 -> start=50.
+  assert(calls[0].includes("start=0"), calls[0]);
+  assert(calls[1].includes("start=50"), calls[1]);
+  // The company URL is percent-encoded into linkedin_url.
+  assert(
+    calls[0].includes("linkedin_url=" + encodeURIComponent("https://www.linkedin.com/company/european-commission/")),
+    calls[0],
+  );
+});
+
+// ===========================================================================
 // PAGINATION STOP CONDITIONS
 // ===========================================================================
 Deno.test("pagination: empty page stops", async () => {

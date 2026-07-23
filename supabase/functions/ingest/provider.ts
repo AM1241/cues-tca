@@ -1,8 +1,13 @@
 /**
  * RapidAPI "Fresh LinkedIn Profile Data" client.
  *
- *   GET /get-company-posts?linkedin_url=<url>&start=<offset>
+ *   GET /get-company-posts?linkedin_url=<url>&sort_by=recent&start=<offset>
  *   headers: x-rapidapi-key, x-rapidapi-host
+ *
+ * sort_by=recent pins newest-first ordering. The pagination stop rule ("stop
+ * when a whole page has no in-window posts") is only sound if results are
+ * newest-first, so we make that ordering explicit rather than relying on the
+ * provider's unstated default.
  *
  * `fetch` is injected so every test in this repo runs against fixtures. Nothing
  * here should ever reach the network during a test run.
@@ -13,6 +18,8 @@ import type { NormalizedPost } from "./types.ts";
 
 export const DEFAULT_HOST = "fresh-linkedin-profile-data.p.rapidapi.com";
 export const COMPANY_POSTS_PATH = "/get-company-posts";
+/** Pins newest-first ordering; required for the page-level stop rule to be sound. */
+export const SORT_BY = "recent";
 
 /** Hard ceiling per source. A misconfigured lookback must not drain quota. */
 export const MAX_PAGES = 5;
@@ -99,7 +106,11 @@ export async function fetchPage(
   const doFetch = opts.fetchImpl ?? fetch;
   const sleep = opts.sleep ?? defaultSleep;
   const host = opts.host ?? DEFAULT_HOST;
-  const url = `https://${host}${COMPANY_POSTS_PATH}?linkedin_url=${encodeURIComponent(linkedinUrl)}&start=${start}`;
+  // Params, in intended order: linkedin_url, sort_by, start.
+  const url = `https://${host}${COMPANY_POSTS_PATH}` +
+    `?linkedin_url=${encodeURIComponent(linkedinUrl)}` +
+    `&sort_by=${SORT_BY}` +
+    `&start=${start}`;
 
   let attempts = 0;
   let lastError: ProviderError | null = null;
@@ -172,9 +183,19 @@ export async function fetchPage(
 }
 
 /**
+ * Pagination is offset-based: start = page * 50. This is validated against the
+ * live endpoint — the first EC run advanced start=0 -> start=50 and returned 98
+ * distinct posts, so `start` genuinely pages. The provider also exposes a
+ * pagination_token in secondary docs, but the authoritative Playground contract
+ * could not be read (login-gated) and the token's response field name is not
+ * confirmed, so offset paging is kept. Revisit only with the exact field name
+ * from the Playground; the repeat-id stop below already guards a provider that
+ * ignores `start`.
+ *
  * Page through one company until any stop condition trips:
  *   - a page comes back empty
- *   - every post on the page is older than the lookback window
+ *   - every post on the page is older than the lookback window (sound because
+ *     sort_by=recent pins newest-first ordering)
  *   - the page repeats ids we have already seen (provider ignoring `start`)
  *   - MAX_PAGES reached -> truncated = true
  *   - the caller's overall time budget is spent -> budget_exhausted
