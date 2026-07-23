@@ -7,11 +7,6 @@ export type Json =
   | Json[]
 
 export type Database = {
-  // Allows to automatically instantiate createClient with right options
-  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
-  __InternalSupabase: {
-    PostgrestVersion: "14.5"
-  }
   graphql_public: {
     Tables: {
       [_ in never]: never
@@ -749,8 +744,10 @@ export type Database = {
           last_error_code: string | null
           last_error_message: string | null
           last_failure_type: string | null
+          leased_at: string | null
           msg_id: number | null
           next_attempt_at: string | null
+          processing_token: string | null
           raw_post_id: string
           scoring_request_id: string
           status: string
@@ -763,8 +760,10 @@ export type Database = {
           last_error_code?: string | null
           last_error_message?: string | null
           last_failure_type?: string | null
+          leased_at?: string | null
           msg_id?: number | null
           next_attempt_at?: string | null
+          processing_token?: string | null
           raw_post_id: string
           scoring_request_id: string
           status?: string
@@ -777,8 +776,10 @@ export type Database = {
           last_error_code?: string | null
           last_error_message?: string | null
           last_failure_type?: string | null
+          leased_at?: string | null
           msg_id?: number | null
           next_attempt_at?: string | null
+          processing_token?: string | null
           raw_post_id?: string
           scoring_request_id?: string
           status?: string
@@ -811,6 +812,7 @@ export type Database = {
           model: string
           model_snapshot: string
           prompt_hash: string
+          prompt_template: string
           prompt_version: string
           purpose: string
           status: string
@@ -824,6 +826,7 @@ export type Database = {
           model: string
           model_snapshot: string
           prompt_hash: string
+          prompt_template: string
           prompt_version: string
           purpose: string
           status?: string
@@ -837,6 +840,7 @@ export type Database = {
           model?: string
           model_snapshot?: string
           prompt_hash?: string
+          prompt_template?: string
           prompt_version?: string
           purpose?: string
           status?: string
@@ -1095,6 +1099,7 @@ export type Database = {
         Args: {
           p_job_id: string
           p_msg_id: number
+          p_processing_token?: string
           p_provider_response?: Json
           p_raw_post_id: string
           p_reason: string
@@ -1110,6 +1115,7 @@ export type Database = {
           p_model: string
           p_model_snapshot: string
           p_prompt_hash: string
+          p_prompt_template?: string
           p_prompt_version: string
           p_purpose: string
         }
@@ -1148,6 +1154,14 @@ export type Database = {
         }
         Returns: string
       }
+      read_scoring_jobs: {
+        Args: { p_qty: number; p_vt: number }
+        Returns: {
+          message: Json
+          msg_id: number
+          processing_token: string
+        }[]
+      }
       reap_stale_ingest: {
         Args: { p_stale_after?: string }
         Returns: {
@@ -1170,6 +1184,7 @@ export type Database = {
           p_failure_type: string
           p_job_id: string
           p_msg_id: number
+          p_processing_token?: string
           p_provider_response?: Json
           p_raw_post_id: string
           p_scoring_request_id: string
@@ -1183,6 +1198,7 @@ export type Database = {
       }
       scoring_config_snapshot: { Args: never; Returns: Json }
       scoring_hash_of_snapshot: { Args: { p_snapshot: Json }; Returns: string }
+      scoring_prompt_template: { Args: never; Returns: string }
       scoring_prompt_version: { Args: never; Returns: string }
       scoring_theme_snapshot: { Args: never; Returns: Json }
       set_current_scoring_result: {
@@ -1328,3 +1344,4 @@ export const Constants = {
     Enums: {},
   },
 } as const
+

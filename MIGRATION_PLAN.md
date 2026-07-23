@@ -177,22 +177,32 @@ Validated against the cloud on 2026-07-23. Full record in `docs/phase-2-completi
     after the push is 133 legacy `scoring_results` linked, 0 jobs, no request.
   - Verified: `scripts/verify_scoring.sql` (37 assertions, 0 failures); Phase 1/2
     regressions still green.
-- [~] **3C — `score-worker` Edge Function. In progress locally — WIP, not deployed.**
-  Local draft only: migration `0006_scoring_worker.sql` (not applied to cloud),
-  `_shared/openai.ts`, `score-worker/{index,queue,prompt}.ts` + offline tests. `deno check`
-  clean; offline suite 12/12 passing against the local stack with a scripted OpenAI — no
-  real OpenAI call has been made, nothing deployed, no scoring request created anywhere.
-  Remaining before this can be marked done: atomic claim/lease (`processing_token`),
-  stale-worker rejection, immutable prompt snapshot in `scoring_requests`, correct
-  OpenAI error disposition (refusal/content-filter → immediate dead-letter; auth/shape
-  errors → circuit-break; only transient errors retry), DB-completion failures must not
-  consume a business retry, hard SQL assertions, stronger test isolation, and a full
-  `ingest` regression re-run. See `docs/SESSION_HANDOFF.md` for the exact state.
-- [ ] **3D — model + prompt.** Port the richer per-theme prompt from the dead
-  `llm_batch_scoring_service.py` (not the live integer-only one). Pin a specific OpenAI
-  model snapshot (not yet chosen — see Open product decisions below).
-- [ ] **3E — one controlled cloud call**, EC post only (~$0.0003), explicit approval
-  required before it runs.
+- [x] **3C — `score-worker` Edge Function. Deployed to cloud and hardened (2026-07-24, session 6).**
+  Migrations `0006`/`0008` plus `0009_scoring_worker_lease.sql` and
+  `0010_scoring_prompt_snapshot.sql` applied to cloud; `score-worker` deployed
+  (`verify_jwt=false`, internal-secret auth). `deno check` clean; offline suite **18/18**;
+  `verify_scoring.sql` all green against cloud; a 2-post live smoke test scored correctly
+  with the pinned snapshot. Blockers resolved: OpenAI error disposition (`0008`);
+  atomic claim/lease via `processing_token` — `read_scoring_jobs` stamps a per-claim token,
+  `complete/record_scoring_job` return `'superseded'` for a stale token instead of raising,
+  so a losing worker never aborts the batch (#1/#2); immutable prompt snapshot — the prompt
+  template is stored on the request (`0010`, `public.scoring_prompt_template()`) and the
+  worker renders from it, not a hardcoded constant (#3); DB-completion failures return
+  `infra_error` and do **not** burn a business retry (#5); extended `verify_scoring.sql`
+  assertions (#6); per-test request isolation (#7); comment fix (#9). **Still open: #8**
+  full `ingest` regression re-run — blocked on the 133-post legacy seed, not on this machine.
+- [x] **3D — model + prompt.** Richer per-theme rubric prompt ported and, as of
+  `0010`, stored on the request itself (`public.scoring_prompt_template()`), not
+  hardcoded. Model pinned to the dated snapshot **`gpt-5.4-nano-2026-03-17`**
+  (400k context / 128k max output; structured outputs via the Responses API
+  confirmed). Chosen pragmatically from the 3E validation, not a full 3F rubric —
+  3F may still revise it before production scores go live.
+- [x] **3E — controlled cloud calls done (2026-07-24).** Two rounds against the deployed
+  worker on evaluation requests (non-production, nothing promoted to `current_result_id`):
+  a 3-post spread (92 sustainability / 85 food+tradition / 0 World-Cup noise) proved the
+  mechanism, then a 2-post smoke test on the pinned `gpt-5.4-nano-2026-03-17` after the 3C
+  hardening. Total spend well under $0.01. `llm_used=true`, structured outputs + strict
+  schema + our parser all confirmed live.
 - [ ] **3F — sample evaluation.** Score a ~24-post sample (incl. the 7 historically
   inconsistent rows) against a written rubric, then `open_production_scoring_request` +
   backfill. Promotion gate before real scores become current.

@@ -1,11 +1,13 @@
 /**
- * Scoring prompt + JSON schema, built dynamically from a scoring_request's
- * config_snapshot. Ported from the legacy per-theme rubric in the dead
- * `llm_batch_scoring_service.py` (the live system used a bare-integer prompt,
- * which is why every migrated analysis has flat 0.0 per-theme scores).
+ * Scoring prompt + JSON schema.
  *
- * The worker never hardcodes the theme list — it always comes from the
- * request's snapshot, so scoring_themes can change without touching this file.
+ * The prompt TEXT is not defined here — it is the immutable `prompt_template`
+ * stored on the scoring_request (migration 0010, source
+ * `public.scoring_prompt_template()`), so a historical result can always be
+ * reproduced from its request row and a later template edit is distinguishable
+ * from the one actually used. This file only *renders* that template by
+ * substituting the placeholders, and derives the JSON schema from the request's
+ * theme snapshot (the theme list is never hardcoded either).
  */
 import type { JsonSchemaFormat } from "../_shared/openai.ts";
 
@@ -21,27 +23,23 @@ export interface ScoringPost {
   text: string;
 }
 
-export function buildScoringPrompt(post: ScoringPost, themes: ThemeSnapshotEntry[]): string {
+/**
+ * Render the request's stored template. Placeholders: {{THEMES}} (the theme
+ * list), {{SOURCE}}, {{POST_ID}}, {{POST_TEXT}}. Substitution is literal — no
+ * placeholder in the template body can be forged from post text, since post
+ * text is only ever the replacement value, never the pattern.
+ */
+export function buildScoringPrompt(
+  template: string,
+  post: ScoringPost,
+  themes: ThemeSnapshotEntry[],
+): string {
   const themesBlock = themes.map((t) => `- ${t.theme_id} (${t.label})`).join("\n");
-  return (
-    "You are scoring LinkedIn posts for the CUES editorial pipeline.\n\n" +
-    "Score how relevant this post is to each editorial theme below.\n\n" +
-    `Themes:\n${themesBlock}\n\n` +
-    "Scoring rubric (apply per theme):\n" +
-    "0-20 = unrelated noise or pure marketing\n" +
-    "21-40 = weak or indirect relevance\n" +
-    "41-60 = partial relevance with some editorial value\n" +
-    "61-80 = strong relevance to food, agriculture, sustainability, supply chain, innovation, or talent\n" +
-    "81-100 = direct high-value relevance with clear editorial usefulness\n\n" +
-    "Rules:\n" +
-    "- Score every theme independently as an integer from 0 to 100.\n" +
-    "- Include every listed theme_id in theme_scores, using the exact theme_id given.\n" +
-    "- Be conservative and context-aware; do not inflate scores for marketing language.\n" +
-    "- reason is a short explanation (1-2 sentences) of the overall editorial relevance.\n\n" +
-    `Source: ${post.sourceName}\n` +
-    `Post ID: ${post.postId}\n\n` +
-    `POST TEXT:\n${post.text}`
-  );
+  return template
+    .replaceAll("{{THEMES}}", themesBlock)
+    .replaceAll("{{SOURCE}}", post.sourceName)
+    .replaceAll("{{POST_ID}}", post.postId)
+    .replaceAll("{{POST_TEXT}}", post.text);
 }
 
 /** Strict JSON schema for the Responses API — every theme_id is a required key. */

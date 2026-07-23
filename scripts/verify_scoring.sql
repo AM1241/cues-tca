@@ -1,4 +1,5 @@
--- Phase 3B verification (scoring_requests structure). One transaction, rolled back.
+-- Phase 3B/3C verification (scoring schema, state machine, lease, prompt snapshot).
+-- One transaction, rolled back.
 --   psql "$DB_URL" -f scripts/verify_scoring.sql
 \pset pager off
 \set ON_ERROR_STOP off
@@ -176,7 +177,7 @@ rollback to s;
 savepoint s;
 do $blk$
 declare v_sid uuid; v_rp uuid; v_req uuid; v_job uuid; v_msg bigint;
-        v_o1 text; v_o2 text; v_o3 text; v_fc int; v_status text; v_dl int;
+        v_o1 text; v_o2 text; v_o3 text; v_o4 text; v_fc int; v_status text; v_dl int;
 begin
   select id into v_sid from public.sources limit 1;
   v_req := pg_temp.mk_request(); perform public.activate_scoring_request(v_req);
@@ -193,7 +194,11 @@ begin
   select status,failure_count into v_status,v_fc from public.scoring_job_state where id=v_job;
   select count(*) into v_dl from public.scoring_dead_letter where job_id=v_job;
   raise notice 'RESULT fail#3 -> % status=% fc=% dl_rows=% (expect dead_letter,dead_letter,3,1)', v_o3, v_status, v_fc, v_dl;
-  begin perform public.record_scoring_failure(v_job,v_msg,v_rp,v_req,'server_error','500','y'); raise notice 'RESULT fail-on-dead ACCEPTED (BAD)'; exception when others then raise notice 'RESULT fail-on-dead rejected'; end;
+  -- Post-0009: a failure against a terminal job is a benign no-op ('superseded'),
+  -- not a raise — a losing/stale worker must never abort the batch.
+  v_o4 := public.record_scoring_failure(v_job,v_msg,v_rp,v_req,'server_error','500','y');
+  select failure_count into v_fc from public.scoring_job_state where id=v_job;
+  raise notice 'RESULT fail-on-dead -> % fc=% (expect superseded,3 unchanged)', v_o4, v_fc;
   perform public.revive_scoring_job(v_job);
   select status,failure_count into v_status,v_fc from public.scoring_job_state where id=v_job;
   raise notice 'RESULT revived -> status=% fc=% (expect pending,0)', v_status, v_fc;
@@ -261,6 +266,50 @@ begin
   v_req := pg_temp.mk_request();
   begin perform public.activate_scoring_request(v_req); raise notice 'RESULT status change (draft->active) accepted (expect this)'; exception when others then raise notice 'RESULT status change REJECTED (BAD)'; end;
   begin update public.scoring_requests set model='other' where id=v_req; raise notice 'RESULT definition change ACCEPTED (BAD)'; exception when others then raise notice 'RESULT definition change rejected'; end;
+end $blk$;
+rollback to s;
+
+\echo '######## N. 0009 lease/claim: token stamped, stale superseded, owner completes ########'
+savepoint s;
+do $blk$
+declare v_sid uuid; v_rp uuid; v_req uuid; v_job uuid; v_msg bigint; v_tok uuid; v_status text;
+        v_o_stale text; v_o_ok text; v_fc int; v_res int;
+        v_scores jsonb := '{"sustainability":10,"innovation":80,"talent_development":5,"food_safety":9,"supply_chain":7,"tradition":4}'::jsonb;
+begin
+  select id into v_sid from public.sources limit 1;
+  v_req := pg_temp.mk_request(); perform public.activate_scoring_request(v_req);
+  insert into public.raw_posts (source_id,source_url,external_post_id,post_text,published_at)
+  values (v_sid,'u','9300000000000000009','p',now()) returning id into v_rp;
+  select id into v_job from public.scoring_job_state where raw_post_id=v_rp;
+
+  -- claim the job the way the worker does; read the stamped token from job_state
+  perform 1 from public.read_scoring_jobs(120, 100);
+  select status, processing_token, msg_id into v_status, v_tok, v_msg from public.scoring_job_state where id=v_job;
+  raise notice 'RESULT after claim: status=% token_present=% (expect processing,t)', v_status, (v_tok is not null);
+
+  -- a stale (wrong) token is superseded: nothing written, no retry burned
+  v_o_stale := public.complete_scoring_job(v_job,v_msg,v_rp,v_req,v_scores,'r',null,gen_random_uuid());
+  select count(*) into v_res from public.scoring_results where raw_post_id=v_rp and scoring_request_id=v_req;
+  select failure_count into v_fc from public.scoring_job_state where id=v_job;
+  raise notice 'RESULT stale complete -> % results=% fc=% (expect superseded,0,0)', v_o_stale, v_res, v_fc;
+
+  -- the genuine lease holder completes normally
+  v_o_ok := public.complete_scoring_job(v_job,v_msg,v_rp,v_req,v_scores,'r',null,v_tok);
+  select count(*) into v_res from public.scoring_results where raw_post_id=v_rp and scoring_request_id=v_req;
+  raise notice 'RESULT owner complete -> % results=% (expect inserted,1)', v_o_ok, v_res;
+end $blk$;
+rollback to s;
+
+\echo '######## N2. 0010 prompt snapshot: template captured, hash matches text ########'
+savepoint s;
+do $blk$
+declare v_req uuid; v_tmpl text; v_hash text;
+begin
+  v_req := pg_temp.mk_request();
+  select prompt_template, prompt_hash into v_tmpl, v_hash from public.scoring_requests where id=v_req;
+  raise notice 'RESULT prompt_template present=% hash_matches=% (expect t,t)',
+    (v_tmpl is not null and length(v_tmpl) > 0), (v_hash = md5(v_tmpl));
+  begin update public.scoring_requests set prompt_template='tampered' where id=v_req; raise notice 'RESULT template mutation ACCEPTED (BAD)'; exception when others then raise notice 'RESULT template mutation rejected'; end;
 end $blk$;
 rollback to s;
 

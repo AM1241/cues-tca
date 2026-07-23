@@ -35,6 +35,9 @@ const stamp = Date.now();
 let sourceId = "";
 const rawPostIds: string[] = [];
 let evalRequestId = "";
+// Requests created ad-hoc by tests that need isolation (their own request they
+// can close/pollute without touching the shared evalRequestId). Cleaned in teardown.
+const createdRequestIds: string[] = [];
 
 function request(body: unknown, apikey?: string): Request {
   return new Request("https://local.test/score-worker", {
@@ -111,11 +114,11 @@ async function setup() {
 }
 
 async function teardown() {
-  if (evalRequestId) {
-    await db.from("scoring_job_state").delete().eq("scoring_request_id", evalRequestId);
-    await db.from("scoring_dead_letter").delete().eq("scoring_request_id", evalRequestId);
+  for (const rid of [evalRequestId, ...createdRequestIds].filter(Boolean)) {
+    await db.from("scoring_job_state").delete().eq("scoring_request_id", rid);
+    await db.from("scoring_dead_letter").delete().eq("scoring_request_id", rid);
     // scoring_results is append-only; leave history, just close the request.
-    await db.rpc("close_scoring_request", { p_request_id: evalRequestId });
+    await db.rpc("close_scoring_request", { p_request_id: rid });
   }
   if (rawPostIds.length) {
     await db.from("analyzed_posts").delete().in("raw_post_id", rawPostIds);
@@ -125,13 +128,38 @@ async function teardown() {
 }
 
 async function enqueue(text: string): Promise<{ rawPostId: string; jobId: string }> {
+  return await enqueueUnder(evalRequestId, text);
+}
+
+async function enqueueUnder(requestId: string, text: string): Promise<{ rawPostId: string; jobId: string }> {
   const rawPostId = await makeRawPost(text);
   rawPostIds.push(rawPostId);
   const { data: jobId, error } = await db.rpc("enqueue_scoring_job", {
-    p_raw_post_id: rawPostId, p_scoring_request_id: evalRequestId,
+    p_raw_post_id: rawPostId, p_scoring_request_id: requestId,
   });
   if (error) throw error;
   return { rawPostId, jobId: jobId as string };
+}
+
+/** Create + activate a fresh evaluation request, tracked for teardown. An
+ * optional custom prompt template proves the worker renders from the request
+ * row (blocker #3) rather than a hardcoded constant. */
+async function makeEvalRequest(promptTemplate?: string): Promise<string> {
+  const { data: reqId, error } = await db.rpc("create_scoring_request", {
+    p_purpose: "evaluation",
+    p_prompt_version: "scoring_v1",
+    p_prompt_hash: "test-hash",
+    p_config_snapshot: CONFIG_SNAPSHOT,
+    p_model: "gpt-test",
+    p_model_snapshot: "gpt-test-2026-01-01",
+    p_aggregation_strategy: "max_theme_v1",
+    ...(promptTemplate ? { p_prompt_template: promptTemplate } : {}),
+  });
+  if (error) throw error;
+  createdRequestIds.push(reqId as string);
+  const { error: actErr } = await db.rpc("activate_scoring_request", { p_request_id: reqId });
+  if (actErr) throw actErr;
+  return reqId as string;
 }
 
 if (LIVE) {
@@ -219,19 +247,24 @@ it("a second read of the same message range does not double-score", async () => 
 // ===========================================================================
 // FAILURE HANDLING — no silent fallback, ever
 // ===========================================================================
-it("a refusal is recorded as a retry, not a fabricated score", async () => {
-  const { jobId } = await enqueue("Some post that gets refused.");
+it("a refusal dead-letters immediately, never as a fabricated score", async () => {
+  const { jobId, rawPostId } = await enqueue("Some post that gets refused.");
   const { callOpenAiImpl } = scriptedOpenAi([{ throws: "refusal" }]);
 
   const res = await handleScoreWorker(request({ batch_size: 5 }, INTERNAL_SECRET), { db, callOpenAiImpl });
   const body = await res.json();
-  assertEquals(body.totals.retried, 1);
+  assertEquals(body.totals.dead_lettered, 1);
   assertEquals(body.results[0].error_code, "refusal");
 
   const { data: job } = await db.from("scoring_job_state").select("status, failure_count, last_failure_type").eq("id", jobId).single();
-  assertEquals(job!.status, "pending");
+  assertEquals(job!.status, "dead_letter", "retrying asks the model the same question and gets the same refusal");
   assertEquals(job!.failure_count, 1);
   assertEquals(job!.last_failure_type, "refusal");
+
+  const { count } = await db
+    .from("scoring_results").select("*", { count: "exact", head: true })
+    .eq("raw_post_id", rawPostId).eq("scoring_request_id", evalRequestId);
+  assertEquals(count, 0);
 });
 
 it("three consecutive failures dead-letter the job", async () => {
@@ -276,6 +309,30 @@ it("three consecutive failures dead-letter the job", async () => {
   assertEquals(count, 0, "a dead-lettered job never produces a fabricated result");
 });
 
+it("a content_filter failure dead-letters immediately, without 3 retries", async () => {
+  const { jobId, rawPostId } = await enqueue("A post that trips the content filter.");
+  const { callOpenAiImpl } = scriptedOpenAi([{ throws: "content_filter" }]);
+
+  const res = await handleScoreWorker(request({ batch_size: 5 }, INTERNAL_SECRET), { db, callOpenAiImpl });
+  const body = await res.json();
+  assertEquals(body.totals.dead_lettered, 1);
+  assertEquals(body.results[0].status, "dead_letter");
+
+  const { data: job } = await db.from("scoring_job_state").select("status, failure_count, last_failure_type").eq("id", jobId).single();
+  assertEquals(job!.status, "dead_letter");
+  assertEquals(job!.failure_count, 1, "dead-lettered on the first occurrence, not after 3 strikes");
+  assertEquals(job!.last_failure_type, "content_filter");
+
+  const { data: dl } = await db.from("scoring_dead_letter").select("failure_type, attempts").eq("job_id", jobId).single();
+  assertEquals(dl!.failure_type, "content_filter", "the real reason is preserved, not overwritten with 'exhausted'");
+  assertEquals(dl!.attempts, 1);
+
+  const { count } = await db
+    .from("scoring_results").select("*", { count: "exact", head: true })
+    .eq("raw_post_id", rawPostId).eq("scoring_request_id", evalRequestId);
+  assertEquals(count, 0);
+});
+
 it("one job's failure does not abort the batch", async () => {
   const failing = await enqueue("This one fails.");
   const succeeding = await enqueue("This one succeeds fine.");
@@ -311,6 +368,137 @@ it("model_snapshot comes from the request, never overridable by the body", async
     { db, callOpenAiImpl },
   );
   assertEquals(calls[0]?.model, "gpt-test-2026-01-01");
+});
+
+// ===========================================================================
+// LEASE / OWNERSHIP — blockers #1 + #2 (processing_token)
+// ===========================================================================
+it("only the current lease holder can complete; a stale token is superseded", async () => {
+  await drainAmbientQueueNoise();                       // isolate: nothing else visible
+  const { rawPostId, jobId } = await enqueue("Lease test post.");
+
+  // Claim it the way the worker does — read_scoring_jobs stamps a fresh token.
+  const { data: claimed } = await db.rpc("read_scoring_jobs", { p_vt: 120, p_qty: 50 });
+  const mine = (claimed as { msg_id: number; message: { job_id: string }; processing_token: string }[])
+    .find((m) => m.message.job_id === jobId)!;
+  assert(mine?.processing_token, "the claim stamped a processing_token");
+
+  const args = {
+    p_job_id: jobId, p_msg_id: mine.msg_id, p_raw_post_id: rawPostId,
+    p_scoring_request_id: evalRequestId, p_theme_scores: themeScores({ innovation: 40 }), p_reason: "r",
+  };
+
+  // A worker holding a stale (wrong) token must be rejected, benignly.
+  const { data: stale } = await db.rpc("complete_scoring_job", { ...args, p_processing_token: crypto.randomUUID() });
+  assertEquals(stale, "superseded");
+
+  const { count: after } = await db
+    .from("scoring_results").select("*", { count: "exact", head: true })
+    .eq("raw_post_id", rawPostId).eq("scoring_request_id", evalRequestId);
+  assertEquals(after, 0, "a superseded completion writes nothing");
+  const { data: jobMid } = await db.from("scoring_job_state").select("status, failure_count").eq("id", jobId).single();
+  assertEquals(jobMid!.status, "processing", "still leased, untouched");
+  assertEquals(jobMid!.failure_count, 0, "a superseded worker never burns a retry");
+
+  // The genuine lease holder completes normally.
+  const { data: ok } = await db.rpc("complete_scoring_job", { ...args, p_processing_token: mine.processing_token });
+  assertEquals(ok, "inserted");
+});
+
+it("a stale token cannot burn a business retry via record_scoring_failure", async () => {
+  await drainAmbientQueueNoise();
+  const { rawPostId, jobId } = await enqueue("Lease failure test post.");
+  const { data: claimed } = await db.rpc("read_scoring_jobs", { p_vt: 120, p_qty: 50 });
+  const mine = (claimed as { msg_id: number; message: { job_id: string } }[]).find((m) => m.message.job_id === jobId)!;
+
+  const { data: superseded } = await db.rpc("record_scoring_failure", {
+    p_job_id: jobId, p_msg_id: mine.msg_id, p_raw_post_id: rawPostId, p_scoring_request_id: evalRequestId,
+    p_failure_type: "server_error", p_error_code: "500", p_error_message: "stale worker",
+    p_processing_token: crypto.randomUUID(),
+  });
+  assertEquals(superseded, "superseded");
+  const { data: job } = await db.from("scoring_job_state").select("status, failure_count").eq("id", jobId).single();
+  assertEquals(job!.failure_count, 0, "a superseded failure is not counted");
+  assertEquals(job!.status, "processing");
+});
+
+// ===========================================================================
+// INFRA vs BUSINESS FAILURE — blocker #5
+// ===========================================================================
+it("a DB-completion failure is infrastructure, not a burned retry", async () => {
+  await drainAmbientQueueNoise();
+  const { rawPostId, jobId } = await enqueue("Infra-failure test post.");
+  const { callOpenAiImpl } = scriptedOpenAi([
+    { result: { theme_scores: themeScores({ innovation: 60 }), reason: "ok" } },
+  ]);
+
+  // A db whose complete_scoring_job always errors — the OpenAI call still
+  // succeeds, so this simulates a fault AFTER the paid work is done.
+  const failingDb = {
+    from: db.from.bind(db),
+    rpc: (name: string, params?: unknown) =>
+      name === "complete_scoring_job"
+        ? Promise.resolve({ data: null, error: { message: "simulated DB outage" } })
+        : (db.rpc as (n: string, p?: unknown) => unknown)(name, params),
+  } as unknown as SupabaseClient;
+
+  const res = await handleScoreWorker(request({ batch_size: 5 }, INTERNAL_SECRET), { db: failingDb, callOpenAiImpl });
+  const body = await res.json();
+  assertEquals(body.totals.infra_error, 1);
+  assertEquals(body.totals.scored, 0);
+
+  const { data: job } = await db.from("scoring_job_state").select("status, failure_count").eq("id", jobId).single();
+  assertEquals(job!.failure_count, 0, "an infra fault must not consume a business retry");
+  assertEquals(job!.status, "processing", "job stays leased so its message is re-claimed after the VT");
+
+  const { count } = await db
+    .from("scoring_results").select("*", { count: "exact", head: true })
+    .eq("raw_post_id", rawPostId).eq("scoring_request_id", evalRequestId);
+  assertEquals(count, 0);
+});
+
+// ===========================================================================
+// PROMPT SNAPSHOT — blocker #3 (prompt comes from the request row)
+// ===========================================================================
+it("renders the prompt from the request's stored template, not a code constant", async () => {
+  await drainAmbientQueueNoise();
+  const marker = `MARKER-${crypto.randomUUID()}`;
+  const customReq = await makeEvalRequest(`${marker}\nThemes:\n{{THEMES}}\n\nSOURCE={{SOURCE}} ID={{POST_ID}}\n\n{{POST_TEXT}}`);
+  await enqueueUnder(customReq, "distinctive body text ABC123");
+
+  const { callOpenAiImpl, calls } = scriptedOpenAi([{ result: { theme_scores: themeScores(), reason: "ok" } }]);
+  const res = await handleScoreWorker(request({ batch_size: 5 }, INTERNAL_SECRET), { db, callOpenAiImpl });
+  assertEquals((await res.json()).totals.scored, 1);
+
+  assert(calls[0].input.includes(marker), "prompt uses the request's stored template text");
+  assert(calls[0].input.includes("distinctive body text ABC123"), "{{POST_TEXT}} interpolated");
+  assert(calls[0].input.includes("- innovation (innovation)"), "{{THEMES}} interpolated from the snapshot");
+});
+
+// This test uses its OWN request (it closes it as the circuit-break under
+// test), so it no longer has to run last — the shared evalRequestId is
+// unaffected regardless of ordering (blocker #7).
+it("an auth error dead-letters the job and closes the request (circuit-break)", async () => {
+  await drainAmbientQueueNoise();
+  const cbReq = await makeEvalRequest();
+  const { jobId: failingJobId } = await enqueueUnder(cbReq, "First job under a doomed request.");
+  const { jobId: siblingJobId } = await enqueueUnder(cbReq, "Second job, never gets read this batch.");
+  const { callOpenAiImpl } = scriptedOpenAi([{ throws: "client_error", httpStatus: 401 }]);
+
+  const res = await handleScoreWorker(request({ batch_size: 1 }, INTERNAL_SECRET), { db, callOpenAiImpl });
+  const body = await res.json();
+  assertEquals(body.totals.dead_lettered, 1);
+
+  const { data: failingJob } = await db.from("scoring_job_state").select("status").eq("id", failingJobId).single();
+  assertEquals(failingJob!.status, "dead_letter");
+
+  const { data: req } = await db.from("scoring_requests").select("status").eq("id", cbReq).single();
+  assertEquals(req!.status, "closed", "every other job under this request would fail identically, so draining stops");
+
+  // The sibling wasn't read this batch (batch_size 1) but its request is now
+  // closed, which is what stops trg_enqueue_scoring_on_raw_post feeding it more.
+  const { data: siblingJob } = await db.from("scoring_job_state").select("status").eq("id", siblingJobId).single();
+  assertEquals(siblingJob!.status, "pending");
 });
 
 if (LIVE) {

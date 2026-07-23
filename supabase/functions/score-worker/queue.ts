@@ -4,6 +4,9 @@ import type { SupabaseClient } from "jsr:@supabase/supabase-js@2.110.8";
 export interface QueueMessage {
   msg_id: number;
   message: { job_id: string; raw_post_id: string; scoring_request_id: string };
+  /** The lease token stamped on the job when this batch claimed it (0009).
+   * Passed back to complete/record so a superseded worker is rejected. */
+  processing_token: string | null;
 }
 
 /** Visibility timeout for a claimed message, in seconds. Generous — a slow
@@ -27,6 +30,7 @@ export interface ScoringRequestRow {
   model: string;
   model_snapshot: string;
   prompt_version: string;
+  prompt_template: string;
   config_snapshot: { themes: { theme_id: string; label: string; position: number }[]; min_relevance_score: number };
   aggregation_strategy: string;
 }
@@ -34,7 +38,7 @@ export interface ScoringRequestRow {
 export async function getScoringRequest(db: SupabaseClient, requestId: string): Promise<ScoringRequestRow> {
   const { data, error } = await db
     .from("scoring_requests")
-    .select("id, status, model, model_snapshot, prompt_version, config_snapshot, aggregation_strategy")
+    .select("id, status, model, model_snapshot, prompt_version, prompt_template, config_snapshot, aggregation_strategy")
     .eq("id", requestId)
     .single();
   if (error) throw new Error(`scoring_requests lookup failed: ${error.message}`);
@@ -61,10 +65,10 @@ export async function getRawPost(db: SupabaseClient, rawPostId: string): Promise
 export async function completeJob(
   db: SupabaseClient,
   args: {
-    jobId: string; msgId: number; rawPostId: string; requestId: string;
+    jobId: string; msgId: number; rawPostId: string; requestId: string; processingToken: string | null;
     themeScores: Record<string, number>; reason: string; providerResponse?: unknown;
   },
-): Promise<"inserted" | "duplicate"> {
+): Promise<"inserted" | "duplicate" | "superseded"> {
   const { data, error } = await db.rpc("complete_scoring_job", {
     p_job_id: args.jobId,
     p_msg_id: args.msgId,
@@ -73,18 +77,19 @@ export async function completeJob(
     p_theme_scores: args.themeScores,
     p_reason: args.reason,
     p_provider_response: args.providerResponse ?? null,
+    p_processing_token: args.processingToken,
   });
   if (error) throw new Error(`complete_scoring_job failed: ${error.message}`);
-  return data as "inserted" | "duplicate";
+  return data as "inserted" | "duplicate" | "superseded";
 }
 
 export async function recordFailure(
   db: SupabaseClient,
   args: {
-    jobId: string; msgId: number; rawPostId: string; requestId: string;
+    jobId: string; msgId: number; rawPostId: string; requestId: string; processingToken: string | null;
     failureType: string; errorCode?: string; errorMessage?: string; providerResponse?: unknown;
   },
-): Promise<"retry" | "dead_letter"> {
+): Promise<"retry" | "dead_letter" | "superseded"> {
   const { data, error } = await db.rpc("record_scoring_failure", {
     p_job_id: args.jobId,
     p_msg_id: args.msgId,
@@ -94,7 +99,8 @@ export async function recordFailure(
     p_error_code: args.errorCode ?? null,
     p_error_message: args.errorMessage?.slice(0, 500) ?? null,
     p_provider_response: args.providerResponse ?? null,
+    p_processing_token: args.processingToken,
   });
   if (error) throw new Error(`record_scoring_failure failed: ${error.message}`);
-  return data as "retry" | "dead_letter";
+  return data as "retry" | "dead_letter" | "superseded";
 }

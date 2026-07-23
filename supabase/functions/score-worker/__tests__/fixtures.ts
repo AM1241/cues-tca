@@ -10,6 +10,8 @@ export interface ScriptedCall {
   result?: { theme_scores: Record<string, number>; reason: string };
   /** Or throw this failure type instead. */
   throws?: OpenAiFailureType;
+  /** HTTP status to attach when throwing (e.g. 401 for an auth failure). */
+  httpStatus?: number;
   /** Never settle. */
   hang?: boolean;
 }
@@ -33,7 +35,7 @@ export function scriptedOpenAi(script: ScriptedCall[]): ScriptedOpenAi {
       return new Promise(() => {});
     }
     if (step.throws) {
-      throw new OpenAiError(step.throws, `scripted failure: ${step.throws}`);
+      throw new OpenAiError(step.throws, `scripted failure: ${step.throws}`, step.httpStatus);
     }
     const raw = { status: "completed", output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify(step.result) }] }] };
     return { parsed: step.result as unknown as Record<string, unknown>, raw };

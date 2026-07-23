@@ -60,7 +60,7 @@ function parseBatchSize(body: Record<string, unknown>): number {
 interface JobOutcome {
   job_id: string;
   raw_post_id: string;
-  status: "scored" | "duplicate" | "retry" | "dead_letter";
+  status: "scored" | "duplicate" | "retry" | "dead_letter" | "superseded" | "infra_error";
   error_code?: string;
 }
 
@@ -72,6 +72,7 @@ async function processJob(
   deps: ScoreWorkerDeps,
 ): Promise<JobOutcome> {
   const { job_id: jobId, raw_post_id: rawPostId, scoring_request_id: requestId } = msg.message;
+  const token = msg.processing_token;
   const call = deps.callOpenAiImpl ?? callOpenAi;
 
   let request = requestCache.get(requestId);
@@ -83,32 +84,50 @@ async function processJob(
   const themes = request.config_snapshot.themes;
   const post = await getRawPost(db, rawPostId);
 
+  // Stage 1 — the OpenAI call. A failure here is a *business* failure and is
+  // routed through record_scoring_failure (retry / dead-letter accounting).
+  let result;
   try {
-    const result = await call({
+    result = await call({
       apiKey,
       model: request.model_snapshot,
-      input: buildScoringPrompt({ sourceName: post.source_name, postId: post.id, text: post.post_text }, themes),
+      input: buildScoringPrompt(
+        request.prompt_template,
+        { sourceName: post.source_name, postId: post.id, text: post.post_text },
+        themes,
+      ),
       jsonSchema: buildScoringSchema(themes),
       fetchImpl: deps.fetchImpl,
     } satisfies CallOpenAiOptions);
-
-    const themeScores = result.parsed.theme_scores as Record<string, number>;
-    const reason = result.parsed.reason as string;
-
-    const outcome = await completeJob(db, {
-      jobId, msgId: msg.msg_id, rawPostId, requestId,
-      themeScores, reason, providerResponse: result.raw,
-    });
-    return { job_id: jobId, raw_post_id: rawPostId, status: outcome === "inserted" ? "scored" : "duplicate" };
   } catch (e) {
     const oe = e instanceof OpenAiError ? e : null;
     const failureType = oe?.failureType ?? "unknown";
     const outcome = await recordFailure(db, {
-      jobId, msgId: msg.msg_id, rawPostId, requestId,
+      jobId, msgId: msg.msg_id, rawPostId, requestId, processingToken: token,
       failureType, errorCode: oe?.httpStatus?.toString(), errorMessage: (e as Error).message,
       providerResponse: oe?.rawResponse,
     });
     return { job_id: jobId, raw_post_id: rawPostId, status: outcome, error_code: failureType };
+  }
+
+  // Stage 2 — persist the result. A failure HERE is *infrastructure*, not a
+  // scoring failure: the OpenAI work succeeded, so it must NOT burn a business
+  // retry. The job stays leased and the message un-archived; its visibility
+  // timeout expires, a later drain re-claims it, and completion is idempotent
+  // (same idempotency_key), so re-scoring is safe. Persistent infra faults keep
+  // retrying rather than dead-lettering good work — deliberate.
+  try {
+    const themeScores = result.parsed.theme_scores as Record<string, number>;
+    const reason = result.parsed.reason as string;
+    const outcome = await completeJob(db, {
+      jobId, msgId: msg.msg_id, rawPostId, requestId, processingToken: token,
+      themeScores, reason, providerResponse: result.raw,
+    });
+    const status = outcome === "inserted" ? "scored" : outcome; // "duplicate" | "superseded"
+    return { job_id: jobId, raw_post_id: rawPostId, status };
+  } catch (e) {
+    console.error(`score-worker: DB completion failed for job ${jobId} after a successful OpenAI call:`, e);
+    return { job_id: jobId, raw_post_id: rawPostId, status: "infra_error" };
   }
 }
 
@@ -161,6 +180,8 @@ export async function handleScoreWorker(req: Request, deps: ScoreWorkerDeps = {}
       duplicate: results.filter((r) => r.status === "duplicate").length,
       retried: results.filter((r) => r.status === "retry").length,
       dead_lettered: results.filter((r) => r.status === "dead_letter").length,
+      superseded: results.filter((r) => r.status === "superseded").length,
+      infra_error: results.filter((r) => r.status === "infra_error").length,
     };
 
     return jsonResponse({ ok: true, totals, results }, 200, origin);

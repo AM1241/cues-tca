@@ -1,231 +1,252 @@
 # Session handoff — CUES Editorial Cloud
 
-Last updated: 2026-07-23 (session 4 — score-worker draft, WIP checkpoint). Read this first,
-then `MIGRATION_PLAN.md` and the `docs/phase-*-completion.md` records. This file is the
-single "where are we" pointer between working sessions.
+Last updated: 2026-07-24 (session 6). Read this first, then `MIGRATION_PLAN.md` and the
+`docs/phase-*-completion.md` records. This file is the single "where are we" pointer
+between working sessions.
 
-## One-paragraph state
+## Plain-language state (read this first)
 
-Phases 0, 1 and 2 are **complete and live on the cloud**. Phase 3A/3B (scoring design +
-database layer) are **complete and applied to the cloud** — `0005_scoring.sql` is live and
-**immutable** (only status transitions, per its own guard trigger), types are regenerated
-and committed. **Phase 3C (`score-worker`) is IN PROGRESS — local WIP, not approved, not
-cloud-ready.** See "Phase 3C — exact state" below. Phase 6 (frontend) is in progress in
-parallel — 5 of 6 routes built against the cloud seed (Posts, Sources, Objective, Review,
-Export) plus an email+password auth gate; only Generate remains a placeholder (blocked on
-Phase 5). The legacy system (`../cues-tca-editorial-agent` Docker container + volume) is
-untouched and remains authoritative until Phase 7.
+Three deployable pieces — **all three now live on the cloud**:
 
-## Phase 3C — exact state (session 4)
+| Piece | What it does | Deployed? |
+|---|---|---|
+| `ingest` Edge Function | pulls LinkedIn posts via RapidAPI | **Yes — live, Phase 2 complete** |
+| Scoring **database schema** (`scoring_requests`, `scoring_results`, lease, prompt snapshot) | tables + RPCs the scorer needs | **Yes — migrations 0001–0010 on cloud** |
+| `score-worker` Edge Function | calls OpenAI to score posts | **Yes — deployed & hardened (session 6); Phase 3C/3D/3E complete** |
 
-**`Phase 3C is IN PROGRESS — local WIP, not approved, not cloud-ready.`**
+**Phase 3 is code-complete and validated live.** `score-worker` is deployed
+(`verify_jwt=false`, internal-secret auth), the 8 correctness blockers are resolved
+(except #8, see below), the model is pinned to `gpt-5.4-nano-2026-03-17`, and real OpenAI
+calls have scored posts correctly on the cloud (twice — see session log). What has **not**
+been done, deliberately: **3F/3G** — scoring the whole 47-post corpus and promoting real
+scores into what editors see. Those are the remaining OpenAI spend and are gated on a
+rubric review; nothing production is scored yet (0 production requests, 0 promoted).
 
-This session wrote a first draft of the `score-worker` Edge Function and iterated on its
-offline test harness. Nothing from this session has been applied, deployed, or invoked
-against the cloud project or a real OpenAI endpoint.
+"Workers" isn't separate infrastructure — `score-worker` is an Edge Function like `ingest`,
+deployed the same way, running on Supabase (Netlify = static frontend only).
 
-Confirmed this session:
-- `deno check` passes clean on all four new TypeScript files.
-- The score-worker offline test suite passed **12/12** against the local stack, using a
-  fully scripted OpenAI client (`__tests__/fixtures.ts`) — no network call to the real API
-  ever happened.
-- `git diff --check` clean (only benign CRLF-normalization notices, no real whitespace
-  errors); a secret/key-pattern scan of the new files found nothing.
+## What to do next (pick one, in rough priority order)
 
-Explicitly NOT done, NOT applied, NOT run this session:
-- **`0006_scoring_worker.sql` has NOT been applied to the cloud.** It exists only as a local
-  migration file. `supabase migration list` against the remote still stops at `0005`.
-- **`score-worker` has NOT been deployed** (no `supabase functions deploy`).
-- **No OpenAI call has ever been made** — every test run uses the scripted client.
-- **No scoring request has been created or activated**, on cloud or locally, this session.
-- **No cron / scheduler was touched or enabled** — triggering remains on-demand only, per
-  the plan revision already on `main`.
-- **The full `ingest` regression suite was not reconfirmed this session.** An earlier
-  attempt to rerun it timed out before completing; its pass/fail status needs a clean
-  re-run in a future session before treating it as unaffected.
+1. **Phase 3F — sample evaluation.** Score a ~24-post sample (incl. the 7 historically
+   inconsistent overall=0 rows) against a written rubric to confirm/adjust the pinned model,
+   then `open_production_scoring_request` + `backfill_scoring_for_request` and promote via
+   `set_current_scoring_result`. This is the gate before real scores become what editors
+   see. **Needs OpenAI calls** (~$0.01 for all 47) — get a go-ahead on spend.
+2. **Phase 3G — repeat-drain loop.** Re-invoke the worker until the queue empties in bounded
+   chunks; confirm cost/reliability. Also OpenAI spend.
+3. **Blocker #8** (still open) — full `ingest` regression re-run needs the 133-post legacy
+   seed (`../cues-tca-editorial-agent`, not on this machine). Accept the gap or get the seed.
+4. **Phase 4+** (anonymise/cluster → generate → review/export/deploy).
 
-New draft files (uncommitted at the start of this checkpoint, committed by it):
+Note: `INGEST_INTERNAL_SECRET` was **rotated** in session 6 (the old value is dead). The
+new value is only in a session scratchpad — if the internal-trigger path is needed again,
+re-rotate via `supabase secrets set` or store it durably in a gitignored file.
 
-| File | What it currently implements |
-|---|---|
-| `supabase/migrations/0006_scoring_worker.sql` | One `SECURITY DEFINER` wrapper RPC, `read_scoring_jobs(p_vt, p_qty)`, so PostgREST (which only exposes `public`/`graphql_public`, not `pgmq`) can drain the `scoring_jobs` queue. Nothing else. |
-| `supabase/functions/_shared/openai.ts` | Responses API client (`/v1/responses`, `store:false`, strict `json_schema`). Typed failure modes: `refusal`, `incomplete`, `content_filter`, `empty_output`, `invalid_json`, `schema_mismatch`, `rate_limit`, `server_error`, `network`, `timeout`, `client_error`. Currently treats retry eligibility as a flat `retryable` flag per failure type — see blockers below. |
-| `supabase/functions/score-worker/index.ts` | Handler: internal-secret auth only (no editor/browser path), reads a bounded batch (`batch_size`, default 10, max 25), processes jobs sequentially, one job's failure doesn't abort the batch. Model/prompt/config always read from the job's `scoring_requests` row, never from the request body. |
-| `supabase/functions/score-worker/queue.ts` | Thin wrappers over `read_scoring_jobs`, `scoring_requests`/`raw_posts` lookups, `complete_scoring_job`, `record_scoring_failure`. |
-| `supabase/functions/score-worker/prompt.ts` | Per-theme scoring prompt (ported from the legacy dead code's richer rubric, not the live integer-only one) + a strict JSON schema built dynamically from the request's `config_snapshot.themes`. |
-| `supabase/functions/score-worker/__tests__/{fixtures,handler_test}.ts` | Scripted-OpenAI test harness mirroring `ingest/__tests__/`; 12 cases covering auth, batch-size validation, happy path, idempotency, refusal handling, 3-strikes dead-letter, partial-batch-failure isolation, and that `model_snapshot` can't be overridden by the caller. |
+## Known gap this session
 
-### Remaining blockers before 3C can be considered done
-
-1. **Atomic claim/lease with a `processing_token`.** Today a read just bumps pgmq's
-   visibility timeout; nothing stamps which invocation owns a job, so two overlapping
-   worker calls could both believe they own the same job.
-2. **Stale/superseded worker rejection.** A slow worker finishing an old batch must not be
-   able to write a result after a newer invocation has already reclaimed the same job.
-3. **Immutable prompt snapshot stored in `scoring_requests`.** `config_snapshot` and
-   `model_snapshot` are captured per-request; the prompt *text* itself is not, so a later
-   prompt edit can't be distinguished from the one actually used for a historical result.
-4. **Correct OpenAI error disposition / circuit-break behavior.** Every failure currently
-   goes through the same per-job retry counter. Needed: refusal/content-filter → dead-letter
-   immediately (retrying changes nothing); 401/403 or 400/422 → circuit-break the whole
-   batch rather than spending one retry per job on a problem identical for all of them;
-   429/5xx/timeout/network → the existing retry path only.
-5. **Database completion failures must not consume a business retry.** If `complete_scoring_job`
-   itself fails after a successful OpenAI call, that's an infrastructure fault, not a
-   scoring failure, and shouldn't burn one of the job's 3 allowed attempts.
-6. **Hard SQL assertions**, extending the `scripts/verify_scoring.sql` pattern to
-   score-worker's own state transitions, not just app-level Deno tests.
-7. **Stronger test isolation.** This session hit two real bugs in the test harness itself
-   (shared-queue pollution across `it()` blocks in the same file; a backoff-timing
-   assumption that doesn't hold against pgmq's real visibility semantics — `pgmq.read`
-   cannot reveal a message before its `vt` has actually passed). The dead-letter test was
-   rewritten to call `record_scoring_failure` directly for attempts 2–3 instead of relying
-   on wall-clock backoff expiry; that pattern should be reviewed, not assumed correct.
-8. **Full `ingest` regression suite** needs a clean, completed re-run to confirm the new
-   shared file (`_shared/openai.ts`) and migration introduce no regression.
-9. **A comment inaccuracy in the draft** (about legacy per-theme scores) needs correcting
-   before this is reviewable — flagged, not yet fixed.
-
-None of these are cloud-facing risks by themselves (nothing has been applied or deployed),
-but all of them are correctness risks for real editorial data once 3C does go live, and
-should be resolved before `0006` is pushed or `score-worker` is deployed.
-
-## What happened this session (session 3 — frontend)
-
-Frontend work only; **no schema, migration, or cloud-DB changes**. `database.types.ts`
-treated as read-only (owned by the Phase 3 sessions — not regenerated).
-
-1. **Phase 0 finish + repo setup on the frontend machine**: `git init`, added `origin`
-   (SSH — HTTPS had no credentials), pulled `main`. `npm install` in `frontend/`.
-   `frontend/.env.local` confirmed to hold only the cloud URL + publishable key.
-2. **Auth (Phase 6)**: email+password login via `signInWithPassword` (not magic-link).
-   `useAuth` hook resolves `isEditor` from `public.editors`; three-state gate
-   (login / awaiting-access / app). The one existing user (`hzafeiris@f-in.eu`, admin on
-   the allowlist) had its **login password reset to `123456` for testing** — change before
-   production.
-3. **Built 5 routes** against the cloud seed: Posts (read), Sources (CRUD, no delete),
-   Objective (config-row editor), Review (asset approval + traceability, RLS-granted columns
-   only), Export (client-side MD/JSON). Generate left as a placeholder. Added
-   `react-router-dom`, an `ErrorBoundary`, a toast system, and shared UI primitives.
-4. **Everything verified** via `tsc -b`, `oxlint`, and a production `vite build` — all clean.
-   Writes were not all click-tested as the authed user; the RLS grants were matched to the
-   `0002` migration by hand.
-
-### Earlier sessions
-
-1. **Reviewed session 1's handoff**, confirmed via `supabase migration list` that cloud
-   was on 0001–0004 with 0005 pending locally only.
-2. **Pushed `0005_scoring.sql` to the cloud** (`bxaovkzemfyxrxbcqask`) after explicit
-   user confirmation — `npx supabase db push`. Confirmed applied via
-   `supabase migration list` (local and remote both report `0005`). The push emitted a
-   non-fatal warning (`failed to cache migrations catalog` / missing
-   `pgdelta-target-ca.crt`) — cosmetic, unrelated to whether the migration itself
-   applied; verified separately that it did.
-3. **Regenerated `frontend/src/lib/database.types.ts`** against the linked cloud project
-   (`supabase gen types typescript --linked`) and committed it
-   (`c320d70`).
-4. **Prepared the frontend env handoff** for a colleague joining frontend work.
-   `frontend/.env.local` already held the correct values (cloud URL +
-   publishable key only — no secrets); pointed the user at it, no changes needed.
-5. **Added a Supabase MCP server** (`.mcp.json`, commit `9a8f59a`) — `@supabase/mcp-server-supabase`,
-   **read-write**, scoped via `--project-ref=bxaovkzemfyxrxbcqask`. No token is stored
-   in the repo; each contributor sets `SUPABASE_ACCESS_TOKEN` locally (shell env or
-   `.claude/settings.local.json`, both gitignored). **Not yet exercised in a session** —
-   needs a Personal Access Token from
-   `supabase.com/dashboard/account/tokens` and a Claude Code restart before it's live.
-   Chosen deliberately read-write (not `--read-only`) per user's explicit choice —
-   means Claude can write to the cloud DB directly through MCP, not just via reviewed
-   migrations. Worth revisiting if that turns out to be too permissive in practice.
+`scripts/verify_rls.sql`, `verify_ingest.sql`, `verify_scoring.sql`, and the `ingest`
+Deno regression suite all assume the 133-post legacy seed is loaded. Loading it requires
+`../cues-tca-editorial-agent`'s Docker container (see `scripts/README.md`), which is not
+present on this machine. They were **not run to completion** this session — don't treat
+that as "verified", it's "couldn't be checked here." Schema-level checks (`deno check`,
+`db reset`, the score-worker's own self-contained test suite) were run instead and did
+pass.
 
 ## Cloud vs local — exact state
 
-| | Cloud (`bxaovkzemfyxrxbcqask`, eu-west-1, PG 17.6) | Local stack |
+| | Cloud (`bxaovkzemfyxrxbcqask`, eu-west-1, PG 17.6) | Local stack (this machine) |
 |---|---|---|
-| Migrations | **0001–0005 applied** | 0001–0005 apply cleanly |
-| `0005_scoring.sql` | **applied 2026-07-23** | applied + tested |
-| Data | 134 raw_posts (133 legacy + 1 EC), 133 analyzed (all simulated), 133 `scoring_results` (legacy import), 0 scoring jobs, no scoring request, 15 assets, 89/469 traceability, 4 sources | reproduced via loader (133 raw; EC post is cloud-only) |
-| `ingest` function | **deployed v4, ACTIVE, verify_jwt=false** | served locally for tests |
-| Secrets | `RAPIDAPI_KEY`, `INGEST_INTERNAL_SECRET`, `ALLOWED_ORIGINS`, `OPENAI_API_KEY` set | `.env.test` (gitignored) |
-| Extensions | pgmq 1.5.1 + pg_cron 1.6.4 **available, not installed** | pgmq verified |
-| MCP | `.mcp.json` added, read-write, **needs SUPABASE_ACCESS_TOKEN set locally to activate** | same |
+| Migrations | **0001–0010 applied** | 0001–0010 apply cleanly (parity) |
+| `score-worker` function | **deployed, ACTIVE, verify_jwt=false** (internal-secret auth) | code + 18/18 offline tests |
+| Data | **180 raw_posts (133 legacy + 47 non-legacy)**, 133 analyzed (all simulated), ~138 `scoring_results` (133 legacy + 5 from eval tests), **0 production requests, 0 jobs, queue empty, 0 promoted to current** | **no legacy seed on this machine** — loader needs `../cues-tca-editorial-agent`, not present |
+| `ingest` function | **deployed v4, ACTIVE, verify_jwt=false** | served locally for tests only |
+| Secrets | `RAPIDAPI_KEY`, **`INGEST_INTERNAL_SECRET` (rotated session 6)**, `ALLOWED_ORIGINS`, `OPENAI_API_KEY` set | `.env.test` (gitignored) |
+| CLI auth | `SUPABASE_ACCESS_TOKEN` + `SUPABASE_DB_PASSWORD` in gitignored `frontend/.env.local` (non-`VITE_`, not bundled) | same |
+| Extensions | pgmq available + installed (`scoring_jobs` queue live); pg_cron available, not installed | pgmq verified |
+| MCP | `.mcp.json` read-write, **needs SUPABASE_ACCESS_TOKEN in env + Claude restart to activate** (not active in session 6; CLI used instead) | same |
 
 **Delta boundary** (legacy → cloud seed): `2026-07-22T02:17:11.788315+00:00`. The
 cloud data is a **dev/test seed**, not the production cutover — see
 `docs/cloud-migration-runbook.md` (final cutover needs a write freeze or delta
 migration; the truncate-loader is single-use).
 
+## Phase 3C — score-worker — exact state
+
+**As of session 6 this is all applied to cloud and deployed** (see the top of this file);
+the table below is the file-by-file map. Session-6 additions: `0009_scoring_worker_lease.sql`
+(processing_token claim/lease + superseded) and `0010_scoring_prompt_snapshot.sql`
+(prompt template on the request).
+
+| File | What it implements |
+|---|---|
+| `supabase/migrations/0006_scoring_worker.sql` | `read_scoring_jobs(p_vt, p_qty)` RPC so PostgREST can drain the `pgmq` queue (PostgREST doesn't expose the `pgmq` schema directly). |
+| `supabase/migrations/0008_scoring_failure_disposition.sql` | Fixes blocker #4 (below) — added session 5. |
+| `supabase/functions/_shared/openai.ts` | OpenAI Responses API client, typed failure modes (`refusal`, `incomplete`, `content_filter`, `rate_limit`, `server_error`, `network`, `timeout`, `client_error`, etc.). |
+| `supabase/functions/score-worker/index.ts` | Handler: internal-secret auth only, bounded batch read, one job's failure doesn't abort the batch, model/prompt always from the job's `scoring_requests` row. |
+| `supabase/functions/score-worker/queue.ts` | Thin wrappers over the queue RPC + `complete_scoring_job` / `record_scoring_failure`. |
+| `supabase/functions/score-worker/prompt.ts` | Per-theme scoring prompt + dynamic JSON schema from the request's themes. |
+| `supabase/functions/score-worker/__tests__/{fixtures,handler_test}.ts` | Scripted-OpenAI offline suite, **18/18 passing** (session 6; +4 lease/infra/prompt-snapshot cases). |
+
+### 3C blockers — status (8 of 9 resolved, session 6)
+
+1. ✅ **Atomic claim/lease (`processing_token`).** `0009`: `read_scoring_jobs` stamps a
+   fresh `processing_token` (+ `status='processing'`, `leased_at`) when it claims a job.
+2. ✅ **Stale/superseded worker rejection.** `0009`: `complete_scoring_job` /
+   `record_scoring_failure` take the token and return `'superseded'` (benign, no raise, no
+   write, no retry burn) when it no longer matches — a losing worker never aborts the batch.
+   Terminal-state calls also return `'superseded'` instead of raising.
+3. ✅ **Immutable prompt snapshot.** `0010`: the prompt template is a DB row
+   (`public.scoring_prompt_template()`), stored on each request as `prompt_template`
+   (`prompt_hash = md5(template)`), and the worker renders from it — not a hardcoded
+   constant. Guard extended so the template is immutable after creation.
+4. ✅ **OpenAI error disposition / circuit-break.** `0008` (now on cloud): refusal/
+   content_filter dead-letter on first occurrence; auth/shape `client_error`
+   (400/401/403/404/422) dead-letters + closes the request; transient keeps 30s→120s→
+   dead-letter-on-3rd.
+5. ✅ **DB-completion failures don't burn a business retry.** `index.ts` splits the OpenAI
+   call from the DB write: a completion failure returns `infra_error`, leaves the job
+   leased + message un-archived (re-claimed after VT, idempotent), and does not touch
+   `failure_count`.
+6. ✅ **Hard SQL assertions.** `verify_scoring.sql` sections N/N2 (lease + prompt snapshot)
+   and an updated section I (fail-on-terminal → superseded) — all green against cloud.
+7. ✅ **Test isolation.** Per-test evaluation requests via `makeEvalRequest()`; the
+   circuit-break test uses its own request so ordering no longer matters; new tests
+   `drainAmbientQueueNoise()` first. 18/18 passing.
+8. ⏳ **OPEN — Full `ingest` regression re-run.** Still blocked on the 133-post legacy seed
+   (`../cues-tca-editorial-agent`, not on this machine). The scoring changes don't touch
+   `ingest`, but a clean regression hasn't been run here.
+9. ✅ **Comment inaccuracy fixed.** The "every migrated analysis has flat 0.0 per-theme
+   scores" claim was wrong (all 133 legacy results have varied non-zero scores, verified);
+   removed when `prompt.ts` was rewritten for #3.
+
+Validated: `deno check` clean, `db reset` 0001–0010, offline suite **18/18**,
+`verify_scoring.sql` all green vs cloud, and a live 2-post smoke test on the deployed worker
+(`gpt-5.4-nano-2026-03-17`, scored correctly, non-destructive).
+
+## This session (session 6) — what actually happened, in order
+
+1. Validated the scoring mechanism live (Phase 3E): deployed `score-worker`, pushed
+   `0006`/`0007`/`0008` to cloud, rotated `INGEST_INTERNAL_SECRET`, created an **evaluation**
+   request, enqueued 3 posts, and made real `gpt-5.4-nano` calls — 92/85/0 scores,
+   non-destructive (no promotion). Confirmed the whole path works.
+2. Completed Phase 3C hardening offline (no OpenAI): `0009_scoring_worker_lease.sql`
+   (processing_token claim/lease + superseded), `0010_scoring_prompt_snapshot.sql`
+   (prompt template on the request), worker changes (`index.ts`/`queue.ts`/`prompt.ts`),
+   +4 tests (18/18), extended `verify_scoring.sql`, comment fix. `deno check` clean.
+3. Pinned the model (3D): `gpt-5.4-nano-2026-03-17`.
+4. Pushed `0009`/`0010` to cloud + redeployed the worker. **Hit and fixed a real migration
+   bug**: `0010`'s backfill ran after the immutability guard was recreated to protect
+   `prompt_template`, so the guard blocked the backfill on the cloud (which has existing
+   rows); invisible locally because a fresh `db reset` has none. Reordered backfill before
+   the guard; re-pushed clean. (The one pre-existing closed eval request has a
+   `prompt_hash` that no longer matches its backfilled template — cosmetic, the 0005 guard
+   blocks fixing `prompt_hash` on existing rows; harmless, it's closed.)
+5. Ran `verify_scoring.sql` against cloud (rolled back) — all green. Ran a live 2-post
+   smoke test on the deployed, hardened worker with the pinned snapshot — scored correctly
+   (78 supply-chain / 75 sustainability), `provider_response` stored, 0 promoted. Closed
+   the request; cloud clean (0 active requests, empty queue).
+6. Updated `MIGRATION_PLAN.md` + this file. Nothing committed to git this session.
+
+## Previous session (session 5) — what actually happened, in order
+
+1. Pulled `590ef0f` (session 4's score-worker draft) from `origin/main`.
+2. Renamed a local, unrelated, pre-existing untracked migration from `0006_...` to
+   `0007_source_last_fetched.sql` (a `sources.last_fetched_at` stamping trigger — nothing
+   to do with Phase 3, just avoided colliding with the newly-pulled `0006_scoring_worker.sql`
+   filename). Not otherwise touched, out of scope for Phase 3C.
+3. Upgraded the local Supabase CLI 2.75.0 → 2.109.1 (`/usr/local/bin/supabase`) — the old
+   CLI couldn't parse `supabase/config.toml` (`experimental.pgdelta`, `local_smtp` keys
+   are newer than 2.75.0 understands). This machine had never run `supabase start` for
+   this project before.
+4. Resolved a port conflict on `54322` with an unrelated local Supabase project
+   (`supabase-local`) by stopping it (user confirmed). Local stack for `cues` started
+   clean, migrations 0001–0007 applied.
+5. Reconfirmed `deno check` clean and the score-worker offline suite 12/12 — matched
+   session 4's report exactly, no drift.
+6. Created `supabase/functions/.env.test` locally (gitignored) with a freshly generated
+   `INGEST_INTERNAL_SECRET` — didn't exist on this machine before.
+7. Attempted `verify_rls.sql` / `verify_ingest.sql` / `verify_scoring.sql` — all fail
+   immediately on missing `sources` data, because the legacy seed loader needs
+   `../cues-tca-editorial-agent`, not present on this machine. Logged as a known gap, not
+   a regression.
+8. Implemented blocker #4 (see above): new migration `0008_scoring_failure_disposition.sql`,
+   2 new offline tests, 1 existing test corrected. 14/14 passing, confirmed against a
+   fully fresh `db reset`. Applied locally only — **not pushed to cloud**.
+9. Updated `MIGRATION_PLAN.md` and this file. Nothing committed to git this session —
+   `git status` still shows the same files as modified/untracked as when the session
+   started, plus the new migration and test changes.
+
 ## Verify locally (any session)
 
 ```bash
-npx supabase db reset            # applies 0001–0005 (re-run if a container-restart flake trips it)
+npx supabase db reset            # applies 0001–0010 (re-run if a container-restart flake trips it)
 # then load the legacy seed (see scripts/README.md: snapshot -> build loader -> psql)
+# — needs ../cues-tca-editorial-agent reachable; not available on every machine
 psql "$DB_URL" -f scripts/verify_rls.sql       # Phase 1
 psql "$DB_URL" -f scripts/verify_ingest.sql    # Phase 2
 psql "$DB_URL" -f scripts/verify_scoring.sql   # Phase 3B  (expect 37 RESULT, 0 BAD)
-# Deno ingest tests:
-docker run --rm -v "$PWD/supabase/functions:/app" -w /app denoland/deno:alpine-2.5.2 \
-  deno test --allow-env --allow-net=jsr.io ingest/__tests__/
+
+# score-worker offline suite — does NOT need the legacy seed, just a running local stack:
+source <(supabase status -o env | grep -v '^Stopped')
+INGEST_INTERNAL_SECRET=$(grep INGEST_INTERNAL_SECRET supabase/functions/.env.test | cut -d= -f2)
+docker run --rm --network supabase_network_cues-editorial-cloud \
+  -v "$PWD/supabase/functions:/app" -w /app \
+  -e SUPABASE_URL=http://kong:8000 -e SUPABASE_ANON_KEY="$ANON_KEY" \
+  -e SUPABASE_SERVICE_ROLE_KEY="$SERVICE_ROLE_KEY" -e OPENAI_API_KEY=dummy-not-used \
+  -e INGEST_INTERNAL_SECRET="$INGEST_INTERNAL_SECRET" \
+  denoland/deno:alpine-2.5.2 deno test --allow-env --allow-net score-worker/__tests__/
 ```
 
 Verify the cloud push specifically:
 
 ```bash
-npx supabase migration list      # expect 0001-0005 on both local and remote
+npx supabase migration list      # expect 0001-0010 on both local and remote (parity)
 ```
 
 ## Future work (in order)
 
-1. **Activate the Supabase MCP server.** Generate a Personal Access Token
-   (`supabase.com/dashboard/account/tokens`), set `SUPABASE_ACCESS_TOKEN` locally,
-   restart Claude Code. Then it can replace ad-hoc `npx supabase` / `psql` calls for
-   inspection — remember it is read-write, so treat its write tools with the same
-   care as a direct migration.
-2. **Phase 3C — `score-worker` Edge Function.** OpenAI **Responses API**
-   (`/v1/responses`, `text.format` strict json_schema, `store:false`, dynamic
-   schema from the request's `config_snapshot`). Internal-secret auth (reuse
-   `_shared/auth.ts`). Flow: reap → `pgmq.read` → build prompt → call OpenAI →
-   validate → call `complete_scoring_job` / `record_scoring_failure` /
-   `dead_letter_scoring_job`. **No silent fallback.** Handle refusal / incomplete
-   (max tokens) / content-filter / empty / 429 / 5xx / timeout / 4xx per the 3A
-   addendum §9. Offline tests with a scripted OpenAI, mirroring the ingest
-   harness.
-3. **Phase 3E** — one controlled cloud scoring call: **EC post only** (~$0.0003).
-4. **Phase 3F** — score a ~24-post sample (incl. the 7 historically inconsistent
-   rows), review against a written rubric, then `open_production_scoring_request`
-   + backfill. **Promotion gate** before making real scores current.
-5. **Phase 3G** — enable `pg_cron` drain, only after cost + reliability measured.
-6. **Phases 4–7** (`MIGRATION_PLAN.md`): anonymise + pgvector clustering;
-   generation; frontend; review/export/deploy + **final cutover**.
+1. Resolve remaining Phase 3C blockers #1, #2, #3, #5–#9 (above) — all local-only work.
+2. Get the legacy seed onto whichever machine works this next, so the full verify suite
+   and `ingest` regression can actually run (or explicitly accept the gap and move on).
+3. **Phase 3D** — pin an exact OpenAI model snapshot (not yet chosen).
+4. **Phase 3E** — one controlled cloud scoring call, EC post only (~$0.0003), **requires
+   explicit approval first**.
+5. **Phase 3F** — score a ~24-post sample against a written rubric, then
+   `open_production_scoring_request` + backfill. Promotion gate before real scores go live.
+6. **Phase 3G** — confirm repeated draining works within cost/reliability bounds.
+7. **Phases 4–7**: anonymise + pgvector clustering; generation; frontend; review/export/
+   deploy + final cutover.
+8. **Activate the Supabase MCP server** (optional, not blocking): generate a Personal
+   Access Token, set `SUPABASE_ACCESS_TOKEN` locally, restart Claude Code. It's read-write
+   — treat its write tools with the same caution as `supabase db push`.
 
 ## Open product decisions (defaults chosen, need confirmation)
 
-- **Overall aggregation**: `max_theme_v1` (server-derived max) — evaluation
-  default, not final policy. Replaceable without rewriting history.
-- **OpenAI model**: not chosen. Must be a **pinned snapshot** confirmed on the
-  account, selected via the 3F evaluation (not by price). Structured outputs
-  confirmed on gpt-4o-mini / gpt-4o-2024-08-06+ incl. gpt-5.6; cheapest official
-  tiers gpt-5.4-nano ($0.20/$1.25), gpt-5.4-mini ($0.75/$4.50). Cost is trivial
-  (~cents/mo); Batch API **deferred**.
+- **Overall aggregation**: `max_theme_v1` (server-derived max) — evaluation default, not
+  final policy. Replaceable without rewriting history.
+- **OpenAI model**: **pinned to `gpt-5.4-nano-2026-03-17`** (400k context / 128k max output;
+  structured outputs via the Responses API confirmed live). Chosen pragmatically from the
+  3E validation, not a full 3F rubric — 3F may still revise it before production scores go
+  live. Cost trivial (~cents/mo); Batch API deferred.
 - **API surface**: Responses API (per Phase 3B decision).
-- **`included_in_generation`**: stored derived compatibility field now; a
-  separate manual editorial-selection field comes with the review phase.
-- **Supabase MCP scope**: set up read-write rather than read-only (user's explicit
-  choice this session). Revisit if write-through-MCP proves risky once it's actually
-  used.
+- **`included_in_generation`**: stored derived compatibility field now; a separate manual
+  editorial-selection field comes with the review phase.
+- **Supabase MCP scope**: read-write (user's explicit choice). Revisit if that proves too
+  permissive once actually used.
 
 ## Hard constraints / gotchas
 
-- Never enable cron without explicit approval. Never make a `dry_run=false` or
-  live OpenAI call without explicit approval.
+- Never enable cron without explicit approval. Never make a `dry_run=false` or live
+  OpenAI call without explicit approval.
 - Service-role / secret keys never reach the frontend; only URL + publishable key.
 - `load_legacy.sql` truncates — safe only on an empty target; destructive once a
   pipeline has written real data.
-- Fratelli/MASAF `rapidapi_identifier`s are canonicalized (not the exact proven
-  forms) — pin the proven form before any live call to those, as done for EC.
+- Fratelli/MASAF `rapidapi_identifier`s are canonicalized (not the exact proven forms) —
+  pin the proven form before any live call to those, as done for EC.
 - `db reset` occasionally trips a container-restart timeout; just re-run.
-- On this machine, `node`/`npm`/`npx` are installed at `C:\Program Files\nodejs` but
-  are **not on PATH** in the Bash tool's shell — prefix commands with
-  `export PATH="/c/Program Files/nodejs:$PATH"` or call PowerShell instead.
-- The Supabase MCP server in `.mcp.json` is **read-write** and scoped to the live
-  cloud project — once activated, treat its write-capable tools with the same
-  caution as `supabase db push` (confirm before any state-changing call).
+- If ports 54321–54329 are already bound by another local Supabase project, `supabase
+  start` fails with "port is already allocated" — stop the other project or remap ports
+  in `supabase/config.toml`.
+- The Supabase MCP server in `.mcp.json` is **read-write** and scoped to the live cloud
+  project — once activated, treat its write-capable tools with the same caution as
+  `supabase db push` (confirm before any state-changing call).
