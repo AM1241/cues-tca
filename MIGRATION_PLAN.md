@@ -177,13 +177,17 @@ Validated against the cloud on 2026-07-23. Full record in `docs/phase-2-completi
     after the push is 133 legacy `scoring_results` linked, 0 jobs, no request.
   - Verified: `scripts/verify_scoring.sql` (37 assertions, 0 failures); Phase 1/2
     regressions still green.
-- [ ] **3C — `score-worker` Edge Function.** OpenAI Responses API (`/v1/responses`,
-  `text.format` strict json_schema, `store:false`, schema built dynamically from the
-  request's `config_snapshot`). Internal-secret auth (reuse `_shared/auth.ts`). Flow:
-  reap → `pgmq.read` → build prompt → call OpenAI → validate → `complete_scoring_job` /
-  `record_scoring_failure` / `dead_letter_scoring_job`. No silent fallback — handle
-  refusal / incomplete (max tokens) / content-filter / empty / 429 / 5xx / timeout / 4xx.
-  Offline tests with a scripted OpenAI, mirroring the `ingest` harness.
+- [~] **3C — `score-worker` Edge Function. In progress locally — WIP, not deployed.**
+  Local draft only: migration `0006_scoring_worker.sql` (not applied to cloud),
+  `_shared/openai.ts`, `score-worker/{index,queue,prompt}.ts` + offline tests. `deno check`
+  clean; offline suite 12/12 passing against the local stack with a scripted OpenAI — no
+  real OpenAI call has been made, nothing deployed, no scoring request created anywhere.
+  Remaining before this can be marked done: atomic claim/lease (`processing_token`),
+  stale-worker rejection, immutable prompt snapshot in `scoring_requests`, correct
+  OpenAI error disposition (refusal/content-filter → immediate dead-letter; auth/shape
+  errors → circuit-break; only transient errors retry), DB-completion failures must not
+  consume a business retry, hard SQL assertions, stronger test isolation, and a full
+  `ingest` regression re-run. See `docs/SESSION_HANDOFF.md` for the exact state.
 - [ ] **3D — model + prompt.** Port the richer per-theme prompt from the dead
   `llm_batch_scoring_service.py` (not the live integer-only one). Pin a specific OpenAI
   model snapshot (not yet chosen — see Open product decisions below).

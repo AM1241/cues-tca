@@ -1,19 +1,94 @@
 # Session handoff — CUES Editorial Cloud
 
-Last updated: 2026-07-23 (session 3 — frontend). Read this first, then `MIGRATION_PLAN.md`
-and the `docs/phase-*-completion.md` records. This file is the single "where are we"
-pointer between working sessions.
+Last updated: 2026-07-23 (session 4 — score-worker draft, WIP checkpoint). Read this first,
+then `MIGRATION_PLAN.md` and the `docs/phase-*-completion.md` records. This file is the
+single "where are we" pointer between working sessions.
 
 ## One-paragraph state
 
 Phases 0, 1 and 2 are **complete and live on the cloud**. Phase 3A/3B (scoring design +
-database layer) are **complete and applied to the cloud** — `0005_scoring.sql` is live,
-types are regenerated and committed. The `score-worker` Edge Function (3C) is **not built**;
-no OpenAI call has ever been made; cron is not enabled anywhere. **Phase 6 (frontend) is now
-in progress in parallel** — 5 of 6 routes built against the cloud seed (Posts, Sources,
-Objective, Review, Export) plus an email+password auth gate; only Generate remains a
-placeholder (blocked on Phase 5). The legacy system (`../cues-tca-editorial-agent` Docker
-container + volume) is untouched and remains authoritative until Phase 7.
+database layer) are **complete and applied to the cloud** — `0005_scoring.sql` is live and
+**immutable** (only status transitions, per its own guard trigger), types are regenerated
+and committed. **Phase 3C (`score-worker`) is IN PROGRESS — local WIP, not approved, not
+cloud-ready.** See "Phase 3C — exact state" below. Phase 6 (frontend) is in progress in
+parallel — 5 of 6 routes built against the cloud seed (Posts, Sources, Objective, Review,
+Export) plus an email+password auth gate; only Generate remains a placeholder (blocked on
+Phase 5). The legacy system (`../cues-tca-editorial-agent` Docker container + volume) is
+untouched and remains authoritative until Phase 7.
+
+## Phase 3C — exact state (session 4)
+
+**`Phase 3C is IN PROGRESS — local WIP, not approved, not cloud-ready.`**
+
+This session wrote a first draft of the `score-worker` Edge Function and iterated on its
+offline test harness. Nothing from this session has been applied, deployed, or invoked
+against the cloud project or a real OpenAI endpoint.
+
+Confirmed this session:
+- `deno check` passes clean on all four new TypeScript files.
+- The score-worker offline test suite passed **12/12** against the local stack, using a
+  fully scripted OpenAI client (`__tests__/fixtures.ts`) — no network call to the real API
+  ever happened.
+- `git diff --check` clean (only benign CRLF-normalization notices, no real whitespace
+  errors); a secret/key-pattern scan of the new files found nothing.
+
+Explicitly NOT done, NOT applied, NOT run this session:
+- **`0006_scoring_worker.sql` has NOT been applied to the cloud.** It exists only as a local
+  migration file. `supabase migration list` against the remote still stops at `0005`.
+- **`score-worker` has NOT been deployed** (no `supabase functions deploy`).
+- **No OpenAI call has ever been made** — every test run uses the scripted client.
+- **No scoring request has been created or activated**, on cloud or locally, this session.
+- **No cron / scheduler was touched or enabled** — triggering remains on-demand only, per
+  the plan revision already on `main`.
+- **The full `ingest` regression suite was not reconfirmed this session.** An earlier
+  attempt to rerun it timed out before completing; its pass/fail status needs a clean
+  re-run in a future session before treating it as unaffected.
+
+New draft files (uncommitted at the start of this checkpoint, committed by it):
+
+| File | What it currently implements |
+|---|---|
+| `supabase/migrations/0006_scoring_worker.sql` | One `SECURITY DEFINER` wrapper RPC, `read_scoring_jobs(p_vt, p_qty)`, so PostgREST (which only exposes `public`/`graphql_public`, not `pgmq`) can drain the `scoring_jobs` queue. Nothing else. |
+| `supabase/functions/_shared/openai.ts` | Responses API client (`/v1/responses`, `store:false`, strict `json_schema`). Typed failure modes: `refusal`, `incomplete`, `content_filter`, `empty_output`, `invalid_json`, `schema_mismatch`, `rate_limit`, `server_error`, `network`, `timeout`, `client_error`. Currently treats retry eligibility as a flat `retryable` flag per failure type — see blockers below. |
+| `supabase/functions/score-worker/index.ts` | Handler: internal-secret auth only (no editor/browser path), reads a bounded batch (`batch_size`, default 10, max 25), processes jobs sequentially, one job's failure doesn't abort the batch. Model/prompt/config always read from the job's `scoring_requests` row, never from the request body. |
+| `supabase/functions/score-worker/queue.ts` | Thin wrappers over `read_scoring_jobs`, `scoring_requests`/`raw_posts` lookups, `complete_scoring_job`, `record_scoring_failure`. |
+| `supabase/functions/score-worker/prompt.ts` | Per-theme scoring prompt (ported from the legacy dead code's richer rubric, not the live integer-only one) + a strict JSON schema built dynamically from the request's `config_snapshot.themes`. |
+| `supabase/functions/score-worker/__tests__/{fixtures,handler_test}.ts` | Scripted-OpenAI test harness mirroring `ingest/__tests__/`; 12 cases covering auth, batch-size validation, happy path, idempotency, refusal handling, 3-strikes dead-letter, partial-batch-failure isolation, and that `model_snapshot` can't be overridden by the caller. |
+
+### Remaining blockers before 3C can be considered done
+
+1. **Atomic claim/lease with a `processing_token`.** Today a read just bumps pgmq's
+   visibility timeout; nothing stamps which invocation owns a job, so two overlapping
+   worker calls could both believe they own the same job.
+2. **Stale/superseded worker rejection.** A slow worker finishing an old batch must not be
+   able to write a result after a newer invocation has already reclaimed the same job.
+3. **Immutable prompt snapshot stored in `scoring_requests`.** `config_snapshot` and
+   `model_snapshot` are captured per-request; the prompt *text* itself is not, so a later
+   prompt edit can't be distinguished from the one actually used for a historical result.
+4. **Correct OpenAI error disposition / circuit-break behavior.** Every failure currently
+   goes through the same per-job retry counter. Needed: refusal/content-filter → dead-letter
+   immediately (retrying changes nothing); 401/403 or 400/422 → circuit-break the whole
+   batch rather than spending one retry per job on a problem identical for all of them;
+   429/5xx/timeout/network → the existing retry path only.
+5. **Database completion failures must not consume a business retry.** If `complete_scoring_job`
+   itself fails after a successful OpenAI call, that's an infrastructure fault, not a
+   scoring failure, and shouldn't burn one of the job's 3 allowed attempts.
+6. **Hard SQL assertions**, extending the `scripts/verify_scoring.sql` pattern to
+   score-worker's own state transitions, not just app-level Deno tests.
+7. **Stronger test isolation.** This session hit two real bugs in the test harness itself
+   (shared-queue pollution across `it()` blocks in the same file; a backoff-timing
+   assumption that doesn't hold against pgmq's real visibility semantics — `pgmq.read`
+   cannot reveal a message before its `vt` has actually passed). The dead-letter test was
+   rewritten to call `record_scoring_failure` directly for attempts 2–3 instead of relying
+   on wall-clock backoff expiry; that pattern should be reviewed, not assumed correct.
+8. **Full `ingest` regression suite** needs a clean, completed re-run to confirm the new
+   shared file (`_shared/openai.ts`) and migration introduce no regression.
+9. **A comment inaccuracy in the draft** (about legacy per-theme scores) needs correcting
+   before this is reviewable — flagged, not yet fixed.
+
+None of these are cloud-facing risks by themselves (nothing has been applied or deployed),
+but all of them are correctness risks for real editorial data once 3C does go live, and
+should be resolved before `0006` is pushed or `score-worker` is deployed.
 
 ## What happened this session (session 3 — frontend)
 
