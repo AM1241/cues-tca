@@ -26,11 +26,32 @@ const emptyForm: FormState = {
   lookback_days: 30,
 }
 
+type CollectResult = {
+  source_id: string
+  name: string
+  status: string
+  error_code?: string
+  posts_inserted?: number
+  posts_skipped_duplicate?: number
+}
+
+// Turn one source's ingest result into a short human line for the toast.
+function summariseResult(r: CollectResult): string {
+  if (r.status === 'skipped') return `${r.name}: skipped (${r.error_code ?? 'skipped'})`
+  const inserted = r.posts_inserted ?? 0
+  const dupes = r.posts_skipped_duplicate ?? 0
+  const bits = [`${inserted} new`]
+  if (dupes) bits.push(`${dupes} duplicate${dupes === 1 ? '' : 's'}`)
+  return `${r.name}: ${bits.join(', ')}`
+}
+
 export function Sources() {
   const toast = useToast()
   const [sources, setSources] = useState<Source[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [editing, setEditing] = useState<Source | 'new' | null>(null)
+  // Which source id is collecting, or 'all' for the header run, or null.
+  const [collecting, setCollecting] = useState<string | 'all' | null>(null)
 
   async function load() {
     const { data, error } = await supabase
@@ -44,6 +65,33 @@ export function Sources() {
   useEffect(() => {
     load()
   }, [])
+
+  // Invoke the deployed `ingest` Edge Function. Omitting source_ids collects
+  // every enabled source; the function honours `enabled` server-side and
+  // returns a per-source breakdown. Auth is the logged-in editor's JWT.
+  async function collect(target: Source | 'all') {
+    if (collecting) return
+    setCollecting(target === 'all' ? 'all' : target.id)
+    const body = target === 'all' ? {} : { source_ids: [target.id] }
+    const { data, error } = await supabase.functions.invoke('ingest', { body })
+    setCollecting(null)
+
+    if (error) {
+      toast.error(error.message)
+      return
+    }
+    const results: CollectResult[] = (data?.results as CollectResult[]) ?? []
+    if (results.length === 0) {
+      toast.error('Ingest returned no results.')
+    } else if (results.length === 1) {
+      toast.success(summariseResult(results[0]))
+    } else {
+      const total = results.reduce((n, r) => n + (r.posts_inserted ?? 0), 0)
+      toast.success(`Collected ${results.length} sources — ${total} new posts`)
+    }
+    // Refresh so last_fetched_at (and disabled-skip behaviour) show through.
+    load()
+  }
 
   async function toggleEnabled(s: Source) {
     // Optimistic: flip locally, revert on failure.
@@ -76,12 +124,21 @@ export function Sources() {
             {sources.filter((s) => s.enabled).length} of {sources.length} enabled
           </p>
         </div>
-        <button
-          onClick={() => setEditing('new')}
-          className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800"
-        >
-          Add source
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => collect('all')}
+            disabled={collecting !== null || sources.every((s) => !s.enabled)}
+            className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          >
+            {collecting === 'all' ? 'Collecting…' : 'Collect all enabled'}
+          </button>
+          <button
+            onClick={() => setEditing('new')}
+            className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800"
+          >
+            Add source
+          </button>
+        </div>
       </div>
 
       <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
@@ -138,12 +195,22 @@ export function Sources() {
                   </button>
                 </td>
                 <td className="px-4 py-3 text-right">
-                  <button
-                    onClick={() => setEditing(s)}
-                    className="text-sm font-medium text-slate-500 hover:text-slate-900"
-                  >
-                    Edit
-                  </button>
+                  <div className="flex items-center justify-end gap-3">
+                    <button
+                      onClick={() => collect(s)}
+                      disabled={collecting !== null || !s.enabled}
+                      title={s.enabled ? 'Collect posts now' : 'Enable the source to collect'}
+                      className="text-sm font-medium text-slate-500 hover:text-slate-900 disabled:opacity-40"
+                    >
+                      {collecting === s.id ? 'Collecting…' : 'Collect'}
+                    </button>
+                    <button
+                      onClick={() => setEditing(s)}
+                      className="text-sm font-medium text-slate-500 hover:text-slate-900"
+                    >
+                      Edit
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
