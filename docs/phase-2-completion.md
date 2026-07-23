@@ -69,20 +69,39 @@ deferred until strictly newest-first behaviour is validated live.
 
 ## Live validation
 
-All provider_requests figures matched the RapidAPI dashboard delta exactly.
+All recorded/reconciled provider_requests comparisons matched the RapidAPI
+dashboard delta.
 
 | run | source | dry_run | provider_requests | outcome |
 |---|---|---|---|---|
-| GBfoods dry run | GBfoods (broken) | true | 3 | 404 → `source_not_found` (the diagnosis) |
+| GBfoods dry run | GBfoods (broken) | true | 3 | HTTP 404, persisted `error_code = server_error` (retryable — 3 requests) |
 | EC dry run | European Commission | true | 2 | 98 fetched, 97 out-of-window, 1 eligible, 0 written |
 | `7044ff8d…` first real | European Commission | false | 2 | **posts_inserted = 1** |
 | `4d4646e3…` second real | European Commission | false | 2 | **posts_inserted = 0**, metadata_refreshed = 1, content_changed = 0 |
 
-**Idempotency proof:** the first real run inserted the single eligible post; the
-second identical run inserted zero, re-saw the same post and refreshed only its
-mutable metadata (`last_seen_at` and provider facts), and did not overwrite
-`post_text` or `content_hash`. Text changes, when they occur, are parked in
-`raw_post_content_changes` (still 0) rather than applied in place.
+The GBfoods dry run happened **before** the 404-classification fix, so it
+persisted the 404 as the retryable `server_error` and cost three requests. That
+run is exactly what **exposed** the misclassification. The subsequent fix
+(`0004`, function v4) makes future 404 responses `source_not_found`,
+**non-retryable**, at **one** provider request — but the historical row remains
+`server_error` and is not rewritten.
+
+**Idempotency proof.** The first real run inserted the single eligible post; the
+second identical run inserted zero and re-saw the same post. Two independent
+pieces of evidence, neither of which re-derives a value from its own definition:
+
+- **Metadata refresh:** the post's `last_seen_at` moved forward to the second
+  run's window while `collected_at` (first sighting) stayed put — verifiable as
+  `last_seen_at > collected_at`, aligned to the second run's
+  `started_at`/`finished_at`.
+- **Text immutability:** `posts_content_changed = 0` on both runs and
+  `raw_post_content_changes = 0` cloud-wide, so no observed-text divergence was
+  recorded; the upsert path that guarantees this (metadata-only update on an
+  existing row, changed text parked rather than applied) is covered by the
+  offline upsert / content-change tests. Immutability is asserted from these,
+  not from recomputing `md5(post_text)` — that column is generated as
+  `md5(post_text)`, so comparing it to `md5(post_text)` is circular and proves
+  nothing.
 
 ## Final cloud row counts
 

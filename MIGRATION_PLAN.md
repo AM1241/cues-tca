@@ -152,8 +152,9 @@ Validated against the cloud on 2026-07-23. Full record in `docs/phase-2-completi
   times lands in a dead-letter table visible in the UI.
 - Optional: `score-batch-submit` / `score-batch-poll` using the OpenAI Batch API for bulk
   re-scoring runs, polled by cron. Same prompt, same writer.
-- **Check:** re-scoring all 133 posts completes unattended and every row has non-zero
-  per-theme scores.
+- **Check:** re-scoring all currently available raw posts completes unattended and every
+  row has non-zero per-theme scores. (134 at the Phase 2 completion snapshot — 133 legacy
+  plus the one European Commission post ingested during Phase 2 validation.)
 
 ### Phase 4 — Anonymise & cluster
 
