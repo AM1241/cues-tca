@@ -8,7 +8,13 @@
  * and Italian public bodies replaced despite keep_public_bodies.
  */
 import { assertEquals } from "jsr:@std/assert@1.0.19";
-import { bucketLargeNumbers, bucketPercentages, isPublicBody } from "../deterministic.ts";
+import {
+  applyDeterministicReplacement,
+  bucketLargeNumbers,
+  bucketPercentages,
+  isPublicBody,
+  sourceNameVariants,
+} from "../deterministic.ts";
 
 const generalize = (s: string) => bucketPercentages(bucketLargeNumbers(s));
 
@@ -55,4 +61,71 @@ Deno.test("isPublicBody does not preserve private companies", () => {
   assertEquals(isPublicBody("Barilla"), false);
   assertEquals(isPublicBody("Ferrero S.p.A."), false);
   assertEquals(isPublicBody("GBfoods Italy"), false);
+});
+
+// The cases below are drawn from the first WIDENED run (49 posts,
+// 2026-07-24), which leaked "GBfoods": stage 1 only matched the exact
+// catalogue label "STAR / GBfoods Italy LinkedIn", and stage 2's prompt tells
+// the model not to report the source's own name.
+
+Deno.test("isPublicBody matches the institutions the widened run replaced", () => {
+  assertEquals(isPublicBody("MASAF"), true);
+  assertEquals(isPublicBody("UNESCO"), true);
+  assertEquals(isPublicBody("Camera dei Deputati"), true);
+  assertEquals(isPublicBody("Ismea"), true);
+});
+
+const cfg = { anonymizeCompanies: true, keepPublicBodies: true, companyAliases: {} };
+
+Deno.test("catalogue labels expand to the forms used in body text", () => {
+  assertEquals(sourceNameVariants("STAR / GBfoods Italy LinkedIn"), [
+    "STAR / GBfoods Italy LinkedIn",
+    "STAR / GBfoods Italy",
+    "GBfoods Italy",
+    "GBfoods",
+    "STAR",
+  ]);
+});
+
+Deno.test("short forms of the source name no longer survive stage 1", () => {
+  const { text, replacements } = applyDeterministicReplacement(
+    "Sustainability matters. GBfoods is committed to zero-waste manufacturing. STAR agrees.",
+    "STAR / GBfoods Italy LinkedIn",
+    cfg,
+  );
+  assertEquals(
+    text,
+    "Sustainability matters. a food-sector organization is committed to zero-waste manufacturing. a food-sector organization agrees.",
+  );
+  assertEquals(replacements.map((r) => r.original).sort(), ["GBfoods", "STAR"]);
+});
+
+Deno.test("generic variant fragments are not replaced on their own", () => {
+  const { text } = applyDeterministicReplacement(
+    "Il Made in Italy cresce. GBfoodsX non c'entra.",
+    "STAR / GBfoods Italy LinkedIn",
+    cfg,
+  );
+  // "Italy" alone is a stopword and "GBfoodsX" is a different word.
+  assertEquals(text, "Il Made in Italy cresce. GBfoodsX non c'entra.");
+});
+
+Deno.test("a source that is a public body under any variant is fully preserved", () => {
+  const { text, replacements, generalizedSourceName } = applyDeterministicReplacement(
+    "Si riunisce oggi al MASAF la cabina di regia.",
+    "MASAF LinkedIn",
+    cfg,
+  );
+  assertEquals(text, "Si riunisce oggi al MASAF la cabina di regia.");
+  assertEquals(replacements, []);
+  assertEquals(generalizedSourceName, "MASAF LinkedIn");
+});
+
+Deno.test("keep_public_bodies=false replaces the ministry like any source", () => {
+  const { text } = applyDeterministicReplacement(
+    "Si riunisce oggi al MASAF la cabina di regia.",
+    "MASAF LinkedIn",
+    { ...cfg, keepPublicBodies: false },
+  );
+  assertEquals(text, "Si riunisce oggi al a food-sector organization la cabina di regia.");
 });

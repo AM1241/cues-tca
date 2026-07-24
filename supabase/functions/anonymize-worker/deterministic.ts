@@ -16,7 +16,10 @@
  */
 
 // Public bodies are never anonymised regardless of anonymize_companies —
-// mirrors the legacy hardcoded preservation list.
+// mirrors the legacy hardcoded preservation list. The Italian institutions
+// were added after the first widened run (2026-07-24): the extractor returned
+// them as entities and, absent from this list, they were replaced — MASAF
+// inconsistently so, because the model sometimes judged it to be the source.
 const PUBLIC_BODIES = [
   "European Commission",
   "European Union",
@@ -27,6 +30,15 @@ const PUBLIC_BODIES = [
   "OECD",
   "United Nations",
   "UN",
+  "UNESCO",
+  "MASAF",
+  "ISMEA",
+  "CREA",
+  "INAIL",
+  "AGEA",
+  "Agenzia ICE",
+  "Camera dei Deputati",
+  "Senato della Repubblica",
 ];
 
 export interface Replacement {
@@ -85,10 +97,47 @@ export function isPublicBody(name: string): boolean {
   return PUBLIC_BODY_PATTERNS.some((re) => re.test(name));
 }
 
+// Variant fragments that are too generic to replace on their own — the
+// country or platform half of a label like "GBfoods Italy LinkedIn".
+const SOURCE_VARIANT_STOPWORDS = new Set([
+  "linkedin",
+  "italy",
+  "italia",
+  "food",
+  "foods",
+  "group",
+  "gruppo",
+]);
+
 /**
- * Deterministic pass over one post's text. Replaces the source's own name
- * (and any configured alias target found in the text) with a generic
- * phrase, unless the source itself is a preserved public body.
+ * Name forms under which a source may appear in body text. Source labels are
+ * catalogue names ("STAR / GBfoods Italy LinkedIn") that never occur verbatim
+ * in a post — the text says "GBfoods". Stage 2's prompt tells the model the
+ * source has already been handled and must not be reported again, so any form
+ * missed here survives BOTH stages: the first widened run (2026-07-24) leaked
+ * "GBfoods" exactly this way.
+ */
+export function sourceNameVariants(sourceName: string): string[] {
+  const variants = new Set<string>([sourceName.trim()]);
+  const base = sourceName.replace(/\s+linkedin\s*$/i, "").trim();
+  if (base) variants.add(base);
+  for (const part of base.split("/")) {
+    const p = part.trim();
+    if (!p) continue;
+    variants.add(p);
+    const noCountry = p.replace(/\s+(italy|italia)\s*$/i, "").trim();
+    if (noCountry) variants.add(noCountry);
+  }
+  return [...variants]
+    .filter((v) => v.length >= 4 && !SOURCE_VARIANT_STOPWORDS.has(v.toLowerCase()))
+    .sort((a, b) => b.length - a.length);
+}
+
+/**
+ * Deterministic pass over one post's text. Replaces every variant of the
+ * source's own name (and any configured alias target found in the text) with
+ * a generic phrase, unless the source itself is a preserved public body under
+ * any of its variants ("MASAF LinkedIn" is the ministry, not a company).
  */
 export function applyDeterministicReplacement(
   text: string,
@@ -98,18 +147,26 @@ export function applyDeterministicReplacement(
   const replacements: Replacement[] = [];
   let result = text;
 
-  const preserveSource = config.keepPublicBodies && isPublicBody(sourceName);
+  const variants = sourceNameVariants(sourceName);
+  const preserveSource = config.keepPublicBodies && variants.some(isPublicBody);
   const generic = "a food-sector organization";
 
   if (config.anonymizeCompanies && !preserveSource) {
     const alias = config.companyAliases[sourceName];
     const target = alias ?? generic;
 
-    if (result.includes(sourceName)) {
-      const re = new RegExp(escapeRegExp(sourceName), "g");
+    for (const variant of variants) {
+      // Unicode lookarounds rather than \b: the corpus is Italian and \b
+      // misfires next to accented letters.
+      const re = new RegExp(
+        `(?<![\\p{L}\\p{N}])${escapeRegExp(variant)}(?![\\p{L}\\p{N}])`,
+        "gu",
+      );
+      if (!re.test(result)) continue;
+      re.lastIndex = 0;
       result = result.replace(re, target);
       replacements.push({
-        original: sourceName,
+        original: variant,
         replacement: target,
         source: alias ? "company_alias" : "source_name",
       });
