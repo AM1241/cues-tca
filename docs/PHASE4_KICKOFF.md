@@ -2,11 +2,16 @@
 
 ## Start here
 
-- **Branch/commit:** start from `origin/phase3c-circuit-break` (as of this writing,
-  `e1652c58df1ce5307ef1a131056991a3f46d4047`), or a later commit on `main` once that
-  branch's PR has been merged. Do not start from `origin/phase-3-score-worker`,
+- **Branch/commit:** start from `origin/phase3c-circuit-break` — canonical handoff
+  commit `e34d2a2b77eeaef7db781ea50e6d9a67991bc0dc` (this is the branch HEAD, including
+  the finalized documentation) — or a later commit on `main` once that branch's PR has
+  been merged. Do not start from `origin/phase-3-score-worker`,
   `origin/phase3c-reconciliation`, or `phase3c-test-foundation` — superseded
   intermediate branches that don't contain the circuit-break/lock-order fixes.
+- **Deployed Phase 3 application-code commit:** `e1652c58df1ce5307ef1a131056991a3f46d4047`
+  — this is the commit that was actually applied to cloud (migrations 0011–0013,
+  `score-worker` redeploy) and validated by the smoke test. It is an ancestor of the
+  handoff commit above (only documentation changed since); it is not the branch HEAD.
 
 ```bash
 git fetch origin
@@ -77,9 +82,11 @@ checked out) on a new branch from origin/phase3c-circuit-break.
 Read, in order: CLAUDE.md, docs/SESSION_HANDOFF.md, docs/PHASE4_KICKOFF.md,
 MIGRATION_PLAN.md (Phase 4 section), docs/legacy-system.md, docs/editorial-brief.md.
 
-Phase 3 (ingest, scoring, circuit-break hardening) is complete and deployed to cloud
-as of commit e1652c58df1ce5307ef1a131056991a3f46d4047 — do not re-audit or re-verify
-it; docs/SESSION_HANDOFF.md is authoritative on its state.
+Phase 3 (ingest, scoring, circuit-break hardening) is complete. The deployed
+application-code commit is e1652c58df1ce5307ef1a131056991a3f46d4047 (applied to cloud);
+the branch HEAD / canonical handoff commit is e34d2a2b77eeaef7db781ea50e6d9a67991bc0dc
+(adds only finalized documentation on top). Do not re-audit or re-verify Phase 3;
+docs/SESSION_HANDOFF.md is authoritative on its state.
 
 Do not start implementing Phase 4 yet. First help me pin down the actual product
 requirements for Phase 4 (anonymisation approach, clustering approach, what counts as

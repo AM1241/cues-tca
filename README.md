@@ -7,8 +7,9 @@ LinkedIn-ready editorial copy for human approval.
 Supabase (Postgres + Edge Functions + Auth) with a static React frontend on Netlify.
 Internal tool for the CUES editorial team.
 
-**Status: Phase 0 complete** — scaffold only. See [MIGRATION_PLAN.md](MIGRATION_PLAN.md)
-for the phased plan and current progress.
+**Status: Phase 3 core complete and deployed.** See
+[docs/SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md) and
+[MIGRATION_PLAN.md](MIGRATION_PLAN.md) for the phased plan and current progress.
 
 ## Layout
 
