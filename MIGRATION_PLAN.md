@@ -189,30 +189,65 @@ Validated against the cloud on 2026-07-23. Full record in `docs/phase-2-completi
   template is stored on the request (`0010`, `public.scoring_prompt_template()`) and the
   worker renders from it, not a hardcoded constant (#3); DB-completion failures return
   `infra_error` and do **not** burn a business retry (#5); extended `verify_scoring.sql`
-  assertions (#6); per-test request isolation (#7); comment fix (#9). **Still open: #8**
-  full `ingest` regression re-run — blocked on the 133-post legacy seed, not on this machine.
+  assertions (#6); per-test request isolation (#7); comment fix (#9).
+- [x] **3C (continued) — request-wide circuit-break hardening, deployed to cloud
+  (2026-07-24, session 7).** Migrations `0011_scoring_request_circuit_break.sql`,
+  `0012_scoring_circuit_break_lock_order.sql`, `0013_scoring_enqueue_lock_order.sql`
+  applied to cloud; `score-worker` redeployed. `0011`: a request-wide client error
+  (400/401/403/404/422) now dead-letters every pending/processing sibling job under the
+  same request via `cancel_scoring_request_siblings`, not just the triggering job —
+  `service_role` cannot call that function directly, only `record_scoring_failure` can.
+  `0012`/`0013`: `complete_scoring_job`, `record_scoring_failure`, and `enqueue_scoring_job`
+  all lock the `scoring_requests` row first, before any job row — closing a real race where
+  a job could be enqueued, or left non-terminal, around the exact moment a circuit-break
+  closes the request. Deno suite: 32 steps passed. Two real two-session RPC concurrency
+  probes (not simulated) confirmed both lock orderings serialize correctly with no
+  deadlock and no orphaned non-terminal job. `verify_scoring.sql` passed seedless
+  (`require_legacy_seed=0`, exit 0, explicit rollback). A controlled cloud smoke test
+  scored one real job end to end (`failure_count=0`, exactly one result, a second drain
+  invocation made zero further OpenAI calls), then closed its evaluation request; queue
+  and active-request count returned to empty/zero. No cron, backfill, or production
+  scoring request was created. **Phase 3 core functionality is complete as of this
+  session** — see `docs/SESSION_HANDOFF.md` for full session detail.
 - [x] **3D — model + prompt.** Richer per-theme rubric prompt ported and, as of
   `0010`, stored on the request itself (`public.scoring_prompt_template()`), not
   hardcoded. Model pinned to the dated snapshot **`gpt-5.4-nano-2026-03-17`**
   (400k context / 128k max output; structured outputs via the Responses API
-  confirmed). Chosen pragmatically from the 3E validation, not a full 3F rubric —
-  3F may still revise it before production scores go live.
-- [x] **3E — controlled cloud calls done (2026-07-24).** Two rounds against the deployed
-  worker on evaluation requests (non-production, nothing promoted to `current_result_id`):
-  a 3-post spread (92 sustainability / 85 food+tradition / 0 World-Cup noise) proved the
-  mechanism, then a 2-post smoke test on the pinned `gpt-5.4-nano-2026-03-17` after the 3C
-  hardening. Total spend well under $0.01. `llm_used=true`, structured outputs + strict
-  schema + our parser all confirmed live.
-- [ ] **3F — sample evaluation.** Score a ~24-post sample (incl. the 7 historically
-  inconsistent rows) against a written rubric, then `open_production_scoring_request` +
-  backfill. Promotion gate before real scores become current.
-- [ ] **3G — repeat-drain loop.** Confirm the worker can be re-invoked until the queue is
-  empty (chunked draining) without exceeding wall-clock, and that cost + reliability from
-  3E/3F are acceptable. Triggering stays on-demand (button / internal-secret path).
-- **Check:** re-scoring all currently available raw posts completes (across as many worker
-  invocations as the queue needs) and every row has non-zero per-theme scores. (134 at the
-  Phase 2 completion snapshot — 133 legacy plus the one European Commission post ingested
-  during Phase 2 validation.)
+  confirmed). Chosen pragmatically from the 3E validation, not a full rubric review —
+  the optional follow-up evaluation below may still revise it before scoring at
+  production scale.
+- [x] **3E — controlled cloud calls done (2026-07-24, sessions 6 and 7).** Three rounds
+  against the deployed worker on evaluation requests (non-production, nothing promoted to
+  `current_result_id`): a 3-post spread (92 sustainability / 85 food+tradition / 0
+  World-Cup noise), a 2-post smoke test after the session-6 hardening, and a 1-post smoke
+  test after the session-7 circuit-break hardening. Total spend well under $0.01.
+  `llm_used=true`, structured outputs + strict schema + our parser all confirmed live.
+
+**Completed Phase 3 core work:** schema (3B), worker deployment + lease/prompt-snapshot
+hardening (3C), request-wide circuit-break + full lock ordering (3C continued), model/prompt
+pinning (3D), and controlled live validation (3E) — all applied to cloud, all verified.
+Migrations **0001–0013** are on cloud; `score-worker` is deployed and hardened;
+local verification (Deno suite, seedless SQL assertions, two-session concurrency probes)
+and a controlled real-OpenAI cloud smoke test all passed.
+
+**Optional follow-up validation (non-blocking, not required for Phase 3 to be considered
+done):**
+
+- [ ] **Strict 133-row legacy regression** — needs the 133-post legacy seed via
+  `../cues-tca-editorial-agent`, not present on every machine. The scoring/circuit-break
+  changes don't touch `ingest` or the legacy data path; this is a coverage nice-to-have,
+  not an indication anything is broken.
+- [ ] **Sample evaluation against a written rubric** — score a ~24-post sample (incl. the
+  7 historically inconsistent rows), then `open_production_scoring_request` + backfill.
+  This is the gate before real scores are promoted via `set_current_scoring_result` and
+  become what editors see — a product/quality decision, not a Phase 3 implementation gap.
+- [ ] **Repeat-drain loop at scale** — confirm the worker can be re-invoked until the queue
+  is empty across many posts without exceeding wall-clock, and that cost/reliability hold
+  up. Triggering stays on-demand (button / internal-secret path).
+
+Both of the last two require explicit go-ahead on OpenAI spend before running.
+
+**Phase 4 work is not yet defined** — see `docs/PHASE4_KICKOFF.md`.
 
 ### Phase 4 — Anonymise & cluster
 
