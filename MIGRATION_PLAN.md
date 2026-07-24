@@ -311,13 +311,19 @@ Original architectural sketch (superseded by `PHASE4_REQUIREMENTS.md`, kept for 
 - **Check:** clusters are semantically coherent on the real 133 posts and no longer collapse
   into the single "Objective Context" fallback.
 
-### Phase 5 — Generation
+### Phase 5 — Generation — CORE COMPLETE
+
+**Shipped 2026-07-24 as cluster-based generation** — `generate` Edge Function
+(deployed, ACTIVE), migration `0016`, `post` + `carousel` output types only
+(no `newsletter`, no `post+carousel` — see `docs/PHASE5_FRONTEND_HANDOFF.md`,
+which is the authoritative contract). Results are append-only
+`cluster_generation_results` rows with full traceability snapshots; no
+approve/edit/regenerate workflow yet (Phase 7). First real cloud execution
+2026-07-24: one cluster, both output types, `status=completed`.
 
 > The section below is the original architectural sketch, written before Phase 4
-> existed in its current form. It is **not yet a confirmed spec** — see
-> `docs/PHASE5_KICKOFF.md` for the starting context and the open product decisions
-> that must be resolved (output formats, one-per-cluster vs. one-per-run, review
-> workflow explicitly out of initial scope, etc.) before implementation begins.
+> existed in its current form. It was **superseded** by the shipped
+> implementation above — kept for history.
 
 - Edge Function `generate`: port the prompt builder and the four output formats
   (`post`, `carousel`, `post+carousel`, `newsletter`) close to verbatim — this is the best
@@ -361,8 +367,12 @@ Progress (2026-07-23, built against the cloud seed data, in parallel with Phase 
   (needs `generate`).
 - [x] **Export** — client-side Markdown + JSON of an asset (or all in a status filter) with
   traceability; copy + download. DOCX deferred to Phase 7.
-- [ ] **Generate** — placeholder only. The form + `generation_requests` insert can be built
-  now, but it produces nothing until the `generate` Edge Function (Phase 5) exists.
+- [x] **Generate** (2026-07-24) — bound per `PHASE5_FRONTEND_HANDOFF.md`: the action lives
+  on the Clusters view (per-run cluster selection, `label_failed` greyed out, post/carousel
+  output types, synchronous invoke with inline results incl. the partial-failure state);
+  the `/generate` route is the read-only generation history over
+  `cluster_generation_requests` + `cluster_generation_results`. No realtime needed —
+  `generate` is synchronous.
 - [ ] Realtime job-status subscription — deferred until the Phase 3 scoring worker emits
   status.
 
