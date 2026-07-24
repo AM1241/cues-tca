@@ -5,6 +5,7 @@ const routes = [
   { to: '/posts', label: 'Posts' },
   { to: '/sources', label: 'Sources' },
   { to: '/objective', label: 'Objective' },
+  { to: '/clusters', label: 'Clusters' },
   { to: '/generate', label: 'Generate' },
   { to: '/review', label: 'Review' },
   { to: '/export', label: 'Export' },

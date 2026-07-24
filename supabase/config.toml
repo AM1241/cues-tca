@@ -476,3 +476,12 @@ verify_jwt = false
 # reject the opaque internal secret before our code runs.
 [functions.score-worker]
 verify_jwt = false
+
+# anonymize-worker: internal-secret-only, same reasoning as score-worker.
+[functions.anonymize-worker]
+verify_jwt = false
+
+# cluster: dual auth (internal secret OR an editor's real Bearer token), same
+# as ingest — _shared/auth.ts is the actual gate either way.
+[functions.cluster]
+verify_jwt = false

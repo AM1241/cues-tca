@@ -5,6 +5,7 @@ import { Layout } from './components/Layout'
 import { Posts } from './routes/Posts'
 import { Sources } from './routes/Sources'
 import { Objective } from './routes/Objective'
+import { Clusters } from './routes/Clusters'
 import { Review } from './routes/Review'
 import { Export } from './routes/Export'
 import { Placeholder } from './routes/Placeholder'
@@ -66,6 +67,7 @@ function App() {
           <Route path="/posts" element={<Posts />} />
           <Route path="/sources" element={<Sources />} />
           <Route path="/objective" element={<Objective />} />
+          <Route path="/clusters" element={<Clusters />} />
           <Route path="/generate" element={<Placeholder title="Generate" />} />
           <Route path="/review" element={<Review />} />
           <Route path="/export" element={<Export />} />
