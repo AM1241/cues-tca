@@ -1,7 +1,15 @@
 [build]
   base = "frontend"
-  command = "npm run build"
+  # npm ci, not npm run build's implicit install: reproducible from
+  # package-lock.json rather than whatever happens to already be in
+  # node_modules or a floating semver resolution.
+  command = "npm ci && npm run build"
   publish = "dist"
+
+[build.environment]
+  # Node 22 (current LTS) — not this machine's locally installed version,
+  # which floats ahead of what's actually supported for production builds.
+  NODE_VERSION = "22"
 
 # SPA: every route falls through to index.html so client-side routing works
 # on deep links (/review/:id) and on the magic-link callback.
