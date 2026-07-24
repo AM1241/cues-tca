@@ -45,9 +45,44 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function isPublicBody(name: string): boolean {
-  const lower = name.toLowerCase();
-  return PUBLIC_BODIES.some((b) => b.toLowerCase() === lower);
+/**
+ * Markers that identify a public institution by wording rather than by exact
+ * name. The corpus is largely Italian-language, so the exact-match list above
+ * (English/EU bodies only) never fired on things like "Carabinieri per la
+ * Tutela Agroalimentare" or "AUSL" — the first real run replaced both with
+ * "another food-sector organization".
+ *
+ * These patterns deliberately match unambiguous state-institution wording
+ * only. Erring towards preserving is the safe direction: leaving a public body
+ * named is what keep_public_bodies asks for, whereas failing to anonymise a
+ * private company would be an actual leak.
+ */
+const PUBLIC_BODY_PATTERNS: RegExp[] = [
+  /\bcarabinier/i,
+  /\bguardia di finanza\b/i,
+  /\bpolizia\b/i,
+  /\bprefettura\b/i,
+  /\bprocura\b/i,
+  /\bminister/i,
+  /\bministry\b/i,
+  /\bausl\b/i,
+  /\bas[lp]\b/i,
+  /\bicqrf\b/i,
+  /\bispettorato\b/i,
+  /\bagenzia delle dogane\b/i,
+  /\bregione\b/i,
+  /\bcomune di\b/i,
+  /\bprovincia di\b/i,
+  /\bcommissione europea\b/i,
+  /\bunione europea\b/i,
+  /\beuropean commission\b/i,
+  /\bparlamento europeo\b/i,
+];
+
+export function isPublicBody(name: string): boolean {
+  const lower = name.toLowerCase().trim();
+  if (PUBLIC_BODIES.some((b) => b.toLowerCase() === lower)) return true;
+  return PUBLIC_BODY_PATTERNS.some((re) => re.test(name));
 }
 
 /**
@@ -88,9 +123,15 @@ export function applyDeterministicReplacement(
   return { text: result, replacements, generalizedSourceName };
 }
 
-/** Bucket a percentage into a coarse range, e.g. "37%" -> "30-40%". */
+/**
+ * Bucket a percentage into a coarse range, e.g. "37%" -> "30-40%".
+ *
+ * The decimal separator may be "." or "," — the corpus is Italian, and a
+ * "\.\d+"-only pattern matched the fractional digit on its own: "+25,7%"
+ * became "+25,0-10%". The lookbehind stops a match starting mid-number.
+ */
 export function bucketPercentages(text: string): string {
-  return text.replace(/\b(\d{1,3})(\.\d+)?%/g, (_match, whole: string) => {
+  return text.replace(/(?<![\d.,])(\d{1,3})(?:[.,]\d+)?%/g, (_match, whole: string) => {
     const n = Number(whole);
     if (!Number.isFinite(n) || n < 0 || n > 100) return _match;
     const lower = Math.floor(n / 10) * 10;
@@ -99,11 +140,23 @@ export function bucketPercentages(text: string): string {
   });
 }
 
-/** Bucket large plain numbers (>= 1000) into an order-of-magnitude range. */
+/** A four-digit year, not a quantity to be generalised. */
+function isYear(n: number, digits: number): boolean {
+  return digits === 4 && n >= 1900 && n <= 2099;
+}
+
+/**
+ * Bucket large plain numbers (>= 1000) into an order-of-magnitude range.
+ *
+ * Years are exempt: the first real run turned "tra il 2021 e il 2025" into
+ * "tra il 2000-3000 e il 2000-3000", which destroys the meaning of any post
+ * that cites a period, a regulation year or a plan.
+ */
 export function bucketLargeNumbers(text: string): string {
   return text.replace(/\b(\d{4,})\b/g, (match) => {
     const n = Number(match);
     if (!Number.isFinite(n)) return match;
+    if (isYear(n, match.length)) return match;
     const magnitude = 10 ** Math.floor(Math.log10(n));
     const lower = Math.floor(n / magnitude) * magnitude;
     const upper = lower + magnitude;

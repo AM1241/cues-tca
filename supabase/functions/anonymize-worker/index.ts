@@ -30,7 +30,7 @@ import { authenticate } from "../_shared/auth.ts";
 import { serviceClient } from "../_shared/db.ts";
 import { RequestError } from "../_shared/errors.ts";
 import { callOpenAi, OpenAiError, type CallOpenAiOptions } from "../_shared/openai.ts";
-import { applyDeterministicReplacement, type Replacement } from "./deterministic.ts";
+import { applyDeterministicReplacement, isPublicBody, type Replacement } from "./deterministic.ts";
 import { buildEntityExtractionPrompt, buildEntityExtractionSchema, parseEntityExtractionResult } from "./entity.ts";
 import {
   backfillJobs,
@@ -125,6 +125,12 @@ async function processJob(
   const generic = "another food-sector organization";
   for (const entity of entities) {
     if (!entity || !finalText.includes(entity)) continue;
+    // The prompt already asks the model to skip public bodies, but a prompt
+    // instruction is not an enforcement point: the first real run returned
+    // "Carabinieri per la Tutela Agroalimentare" and "AUSL" as entities and
+    // they were replaced. keep_public_bodies is re-checked here, against the
+    // model's output, so the config flag decides rather than the model.
+    if (config.keep_public_bodies && isPublicBody(entity)) continue;
     finalText = finalText.split(entity).join(generic);
     replacements.push({ original: entity, replacement: generic, source: "entity_extraction" });
   }
