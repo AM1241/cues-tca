@@ -12,6 +12,17 @@ export interface QueueMessage {
 /** Generous relative to a deterministic pass + one LLM call; mirrors score-worker's VT. */
 export const VISIBILITY_TIMEOUT_SECONDS = 120;
 
+/**
+ * Enqueue eligible scored-but-not-anonymised posts. The RPC is service_role
+ * only by design (0014), so this is the only way a UI caller can reach it —
+ * behind the function's own auth gate, never over PostgREST.
+ */
+export async function backfillJobs(db: SupabaseClient): Promise<number> {
+  const { data, error } = await db.rpc("backfill_anonymize_jobs", { p_min_relevance: null });
+  if (error) throw new Error(`backfill_anonymize_jobs failed: ${error.message}`);
+  return (data ?? 0) as number;
+}
+
 export async function readJobs(
   db: SupabaseClient,
   qty: number,

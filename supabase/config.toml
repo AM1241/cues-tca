@@ -471,13 +471,14 @@ enabled = true
 [functions.ingest]
 verify_jwt = false
 
-# score-worker gates on the internal secret (apikey header) in _shared/auth.ts,
-# exactly like ingest; the platform's verify_jwt only understands JWTs and would
-# reject the opaque internal secret before our code runs.
+# score-worker gates in _shared/auth.ts, exactly like ingest: the internal
+# secret (apikey header) or an admin editor's Bearer token. The platform's
+# verify_jwt only understands JWTs and would reject the opaque internal secret
+# before our code runs, so the gate has to live in our code.
 [functions.score-worker]
 verify_jwt = false
 
-# anonymize-worker: internal-secret-only, same reasoning as score-worker.
+# anonymize-worker: dual auth, same reasoning as score-worker.
 [functions.anonymize-worker]
 verify_jwt = false
 

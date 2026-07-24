@@ -92,6 +92,7 @@ export function Clusters() {
   const [periodStart, setPeriodStart] = useState(daysAgo(30))
   const [periodEnd, setPeriodEnd] = useState(daysAgo(0))
   const [running, setRunning] = useState(false)
+  const [anonymising, setAnonymising] = useState(false)
 
   async function loadAnonymised() {
     const { data, error } = await supabase
@@ -225,6 +226,40 @@ export function Clusters() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedRunId])
 
+  // Enqueue eligible scored posts and drain the anonymise queue. `backfill` is
+  // handled inside the function because backfill_anonymize_jobs() is
+  // service_role-only and deliberately not reachable over PostgREST.
+  async function anonymiseNow() {
+    if (anonymising) return
+    setAnonymising(true)
+    const { data: sessionData } = await supabase.auth.getSession()
+    const token = sessionData.session?.access_token
+    const { data, error } = await supabase.functions.invoke('anonymize-worker', {
+      body: { backfill: true, batch_size: 25 },
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    })
+    setAnonymising(false)
+
+    if (error) {
+      toast.error(error.message)
+      return
+    }
+    if (data?.ok === false) {
+      toast.error(data.error ?? 'Anonymisation failed')
+      return
+    }
+    const t = data?.totals
+    if (!t || (t.jobs_read === 0 && t.enqueued === 0)) {
+      toast.success('Nothing to anonymise — no eligible scored posts.')
+      return
+    }
+    const parts = [`${t.anonymized} anonymised`]
+    if (t.dead_lettered) parts.push(`${t.dead_lettered} dead-lettered`)
+    if (t.retried) parts.push(`${t.retried} retrying`)
+    toast.success(`${t.enqueued} enqueued, ${t.jobs_read} read — ${parts.join(', ')}`)
+    await loadAnonymised()
+  }
+
   async function runClustering() {
     setRunning(true)
     const { data: sessionData } = await supabase.auth.getSession()
@@ -308,8 +343,15 @@ export function Clusters() {
             />
           </label>
           <button
+            onClick={anonymiseNow}
+            disabled={anonymising || running}
+            className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          >
+            {anonymising ? 'Anonymising…' : 'Anonymise now'}
+          </button>
+          <button
             onClick={runClustering}
-            disabled={running}
+            disabled={running || anonymising}
             className="rounded-md bg-slate-900 px-4 py-1.5 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
           >
             {running ? 'Running…' : 'Run clustering'}

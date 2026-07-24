@@ -10,9 +10,9 @@
  *
  *   { "batch_size": 1..25? }   // default 10
  *
- * Internal-secret auth only (cron / backfill) — there is no browser path for
- * this function; scoring is driven entirely by the queue, not by a user
- * clicking a button per post.
+ * Dual auth (cron / backfill secret, or an admin editor's token) — scoring is
+ * still driven entirely by the queue, never per post; the browser path only
+ * drains whatever the queue already holds.
  *
  * One job's failure never aborts the batch: each job is wrapped so a thrown
  * error is recorded via record_scoring_failure and the loop continues.
@@ -177,13 +177,12 @@ export async function handleScoreWorker(req: Request, deps: ScoreWorkerDeps = {}
       }
     }
 
-    // Auth first, same as ingest: nothing is read from the queue until the
-    // caller is verified. This function has no editor path — only the
-    // internal secret (cron / backfill) may drain the queue.
-    const actor = await authenticate(req, body as Record<string, unknown>);
-    if (actor.kind !== "internal") {
-      throw new RequestError(403, "score-worker is driven by the queue, not by a user request.");
-    }
+    // Auth first, same as ingest and cluster: nothing is read from the queue
+    // until the caller is verified. Two ways in — the internal secret
+    // (cron / backfill), or an admin editor's Bearer token, because the product
+    // drives every stage from a button in the UI. _shared/auth.ts is the gate
+    // either way, and it is what enforces the admin-only rule on the editor path.
+    await authenticate(req, body as Record<string, unknown>);
 
     const batchSize = parseBatchSize(body as Record<string, unknown>);
 

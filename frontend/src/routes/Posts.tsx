@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { Spinner, ErrorNotice } from '../components/ui'
+import { useToast } from '../components/toast-context'
 
 // analyzed_posts joined to its raw_post and that post's source. relevance_scores
 // is a jsonb map { theme: 0-100 }; overall_relevance is the server-derived score.
@@ -40,12 +41,15 @@ export function Posts() {
   const [rows, setRows] = useState<PostRow[] | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  const [scoring, setScoring] = useState(false)
+  const toast = useToast()
+
   const [sourceFilter, setSourceFilter] = useState('all')
   const [minScore, setMinScore] = useState(0)
   const [onlyIncluded, setOnlyIncluded] = useState(false)
 
-  useEffect(() => {
-    supabase
+  const load = useCallback(async () => {
+    const { data, error } = await supabase
       .from('analyzed_posts')
       .select(
         `id, overall_relevance, reason_for_score, included_in_generation, relevance_scores,
@@ -53,11 +57,48 @@ export function Posts() {
            sources!inner ( name ) )`,
       )
       .order('overall_relevance', { ascending: false })
-      .then(({ data, error }) => {
-        if (error) setError(error.message)
-        else setRows((data ?? []) as unknown as PostRow[])
-      })
+    if (error) setError(error.message)
+    else setRows((data ?? []) as unknown as PostRow[])
   }, [])
+
+  useEffect(() => {
+    load()
+  }, [load])
+
+  // Drain the scoring queue. Jobs are enqueued by a trigger on raw_posts
+  // insert, so this never creates work — it only processes what ingest left
+  // behind. batch_size is capped at 25 server-side.
+  async function scoreNow() {
+    if (scoring) return
+    setScoring(true)
+    const { data: sessionData } = await supabase.auth.getSession()
+    const token = sessionData.session?.access_token
+    const { data, error } = await supabase.functions.invoke('score-worker', {
+      body: { batch_size: 25 },
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    })
+    setScoring(false)
+
+    if (error) {
+      toast.error(error.message)
+      return
+    }
+    if (data?.ok === false) {
+      toast.error(data.error ?? 'Scoring failed')
+      return
+    }
+    const t = data?.totals
+    if (!t || t.jobs_read === 0) {
+      toast.success('Scoring queue is empty — nothing to score.')
+      return
+    }
+    const parts = [`${t.scored} scored`]
+    if (t.dead_lettered) parts.push(`${t.dead_lettered} dead-lettered`)
+    if (t.retried) parts.push(`${t.retried} retrying`)
+    if (t.circuit_break) parts.push(`${t.circuit_break} circuit-broken`)
+    toast.success(`${t.jobs_read} job(s) read — ${parts.join(', ')}`)
+    await load()
+  }
 
   const sourceNames = useMemo(() => {
     if (!rows) return []
@@ -94,6 +135,13 @@ export function Posts() {
         </div>
 
         <div className="flex items-end gap-4">
+          <button
+            onClick={scoreNow}
+            disabled={scoring}
+            className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          >
+            {scoring ? 'Scoring…' : 'Score now'}
+          </button>
           <label className="text-sm">
             <span className="mb-1 block text-slate-600">Source</span>
             <select

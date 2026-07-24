@@ -10,9 +10,9 @@
  *
  *   { "batch_size": 1..25? }   // default 10
  *
- * Internal-secret auth only, same as score-worker — anonymisation is driven
- * by an operator calling backfill_anonymize_jobs() then draining this
- * function, not by a per-post UI action.
+ * Dual auth, same as score-worker — anonymisation is driven by
+ * backfill_anonymize_jobs() populating the queue and then draining this
+ * function, never by a per-post UI action.
  *
  * Fail-loud (PHASE4_REQUIREMENTS.md §1): if the LLM entity-extraction call
  * fails, the post is NOT completed under a success state — the failure is
@@ -33,6 +33,7 @@ import { callOpenAi, OpenAiError, type CallOpenAiOptions } from "../_shared/open
 import { applyDeterministicReplacement, type Replacement } from "./deterministic.ts";
 import { buildEntityExtractionPrompt, buildEntityExtractionSchema, parseEntityExtractionResult } from "./entity.ts";
 import {
+  backfillJobs,
   completeJob,
   getConfig,
   getRawPost,
@@ -172,12 +173,9 @@ export async function handleAnonymizeWorker(req: Request, deps: AnonymizeWorkerD
       }
     }
 
-    // Internal-secret only, same as score-worker: this function is driven by
-    // the queue (an operator's backfill call), not a per-post UI action.
-    const actor = await authenticate(req, body as Record<string, unknown>);
-    if (actor.kind !== "internal") {
-      throw new RequestError(403, "anonymize-worker is driven by the queue, not by a user request.");
-    }
+    // Dual auth, same as score-worker: the internal secret (an operator's
+    // backfill call) or an admin editor draining the queue from the UI.
+    await authenticate(req, body as Record<string, unknown>);
 
     const batchSize = parseBatchSize(body as Record<string, unknown>);
 
@@ -185,6 +183,15 @@ export async function handleAnonymizeWorker(req: Request, deps: AnonymizeWorkerD
     if (!apiKey) throw new RequestError(500, "OPENAI_API_KEY is not configured.");
 
     const db = deps.db ?? serviceClient();
+
+    // `backfill: true` enqueues eligible scored posts before draining. Off by
+    // default so a plain drain stays a pure drain (what cron/backfill callers
+    // already rely on); the UI sets it, because a browser cannot call the
+    // service_role-only RPC itself.
+    const enqueued = (body as Record<string, unknown>).backfill === true
+      ? await backfillJobs(db)
+      : 0;
+
     const messages = await readJobs(db, batchSize);
 
     const results: JobOutcome[] = [];
@@ -196,6 +203,7 @@ export async function handleAnonymizeWorker(req: Request, deps: AnonymizeWorkerD
     }
 
     const totals = {
+      enqueued,
       jobs_read: messages.length,
       anonymized: results.filter((r) => r.status === "anonymized").length,
       duplicate: results.filter((r) => r.status === "duplicate").length,
