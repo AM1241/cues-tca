@@ -247,16 +247,60 @@ done):**
 
 Both of the last two require explicit go-ahead on OpenAI spend before running.
 
-**Phase 4 work is not yet defined** — see `docs/PHASE4_KICKOFF.md`.
+**Phase 4 is complete** — see `docs/PHASE4_COMPLETION.md`. (`docs/PHASE4_KICKOFF.md`
+remains as the historical record of how Phase 4 was started.)
 
-### Phase 4 — Anonymise & cluster
+### Phase 4 — Anonymise & cluster ✅ IMPLEMENTED, DEPLOYED, SMOKE-VERIFIED
 
-> The section below is the original architectural sketch, written before Phase 3
-> existed in its current form. It is **not** the spec — see
-> `docs/PHASE4_REQUIREMENTS.md` for the confirmed product requirements and
-> acceptance criteria (job architecture, failure modes, clustering run model,
-> config knobs, test scope). Where the two disagree, `PHASE4_REQUIREMENTS.md`
-> wins.
+> The section immediately below is the original architectural sketch, written
+> before Phase 3 existed in its current form, kept for history. The confirmed
+> spec was `docs/PHASE4_REQUIREMENTS.md`; the confirmed closure record is
+> `docs/PHASE4_COMPLETION.md` — read that for the actual implementation shape,
+> verification results, and the intentionally deferred real-content validation.
+
+- [x] **4A — schema + Edge Functions**, migrations `0014_anonymize_schema.sql` /
+  `0015_clustering.sql`. Built, tested, and applied to cloud
+  (`supabase db push`; confirmed via `supabase migration list`, local and
+  remote both show 0014/0015). `anonymize-worker` and `cluster` Edge
+  Functions deployed, `ACTIVE`, v1, `verify_jwt=false`.
+  - `anonymize_results` (append-only, immutability-trigger-enforced) +
+    `anonymized_posts_current.current_result_id` (current projection
+    pointer), mirroring the `scoring_results` pattern.
+  - `anonymize_results(id, raw_post_id)` composite-unique constraint with
+    composite FKs from `post_embeddings`/`clustering_run_posts` — the
+    database rejects a `raw_post_id` paired with another post's
+    `anonymize_result_id`.
+  - `clustering_runs` (immutable run definition, snapshotted config) +
+    `clustering_run_posts.embedding_status` (persisted per-post embedding
+    audit trail, `pending|embedded|failed`).
+  - `complete_clustering_run` computes centroids using only the run's own
+    `embedding_model` — never averages embeddings from a different model —
+    and hard-fails on any assigned post missing an embedding under that
+    model.
+  - Fail-loud throughout: no silent fallback on an LLM failure in either
+    function.
+- [x] **4B — verification.** Local: Deno offline suites (64 steps, 0 failed),
+  `scripts/verify_phase4.sql` (exit 0, `ON_ERROR_STOP=1`), `deno check`
+  clean, frontend typecheck/build clean, browser check of the run-failure
+  UI indicator clean. Cloud: schema push verified object-by-object (8 new
+  tables, RLS on all 8, 11 new RPCs, new config columns); both functions
+  deployed and confirmed `ACTIVE`; no-op smoke checks against cloud
+  (`anonymize-worker` empty-queue `jobs_read=0`; `cluster` zero-eligible
+  window `eligible=0, run_id=null`) with zero OpenAI calls and zero new rows
+  anywhere. Full detail: `docs/PHASE4_COMPLETION.md`.
+- [ ] **4C — real-content validation (intentionally deferred).** Running
+  `anonymize-worker` + `cluster` against a small representative set of real
+  scored posts, with real OpenAI calls, has **not** been done. This is a
+  deliberate product decision, not a blocker — see
+  `docs/PHASE4_COMPLETION.md` for the bounded stop conditions the first
+  execution should honor.
+
+**Phase 4 core implementation is complete as of this session** (schema,
+Edge Functions, local + cloud no-op verification, all applied to cloud). See
+`docs/PHASE4_COMPLETION.md` for full detail and `docs/PHASE5_KICKOFF.md` for
+how Phase 5 starts without re-auditing this work.
+
+Original architectural sketch (superseded by `PHASE4_REQUIREMENTS.md`, kept for history):
 
 - Edge Function `anonymize`: LLM entity extraction, then the legacy deterministic replacement
   (port `anonymization_service.py` closely — the public-body preservation list and the
@@ -268,6 +312,12 @@ Both of the last two require explicit go-ahead on OpenAI spend before running.
   into the single "Objective Context" fallback.
 
 ### Phase 5 — Generation
+
+> The section below is the original architectural sketch, written before Phase 4
+> existed in its current form. It is **not yet a confirmed spec** — see
+> `docs/PHASE5_KICKOFF.md` for the starting context and the open product decisions
+> that must be resolved (output formats, one-per-cluster vs. one-per-run, review
+> workflow explicitly out of initial scope, etc.) before implementation begins.
 
 - Edge Function `generate`: port the prompt builder and the four output formats
   (`post`, `carousel`, `post+carousel`, `newsletter`) close to verbatim — this is the best
