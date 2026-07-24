@@ -89,7 +89,7 @@ export async function recordFailure(
     jobId: string; msgId: number; rawPostId: string; requestId: string; processingToken: string | null;
     failureType: string; errorCode?: string; errorMessage?: string; providerResponse?: unknown;
   },
-): Promise<"retry" | "dead_letter" | "superseded"> {
+): Promise<"retry" | "dead_letter" | "superseded" | "circuit_break"> {
   const { data, error } = await db.rpc("record_scoring_failure", {
     p_job_id: args.jobId,
     p_msg_id: args.msgId,
@@ -102,5 +102,5 @@ export async function recordFailure(
     p_processing_token: args.processingToken,
   });
   if (error) throw new Error(`record_scoring_failure failed: ${error.message}`);
-  return data as "retry" | "dead_letter" | "superseded";
+  return data as "retry" | "dead_letter" | "superseded" | "circuit_break";
 }

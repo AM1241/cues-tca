@@ -55,17 +55,6 @@ begin
 end
 $$;
 
--- Verification state that must survive a `rollback to s` inside a later
--- section (a savepoint rollback undoes regular table writes made after the
--- savepoint, but NOT the temp table's row once created here, before any
--- savepoint exists). Read once, right before the final `rollback;`, so every
--- later section still gets to run regardless of what this one finds.
-create temp table pg_verify_findings (
-  finding      text primary key,
-  gap_present  boolean not null,
-  detail       text
-);
-
 -- =============================================================================
 -- Self-contained fixtures — no section below may depend on rows this script
 -- did not create itself. Previously every section did `select id into v_sid
@@ -644,12 +633,22 @@ begin
 end $blk$;
 rollback to s;
 
-\echo '######## P. 0008/0009 circuit-break: 400/401/403/404/422 close the request, failure_count still increments ########'
+\echo '######## P. 0011 circuit-break: 400/401/403/404/422 close the request via circuit_break, no business retry consumed ########'
+-- Superseded by 0011: record_scoring_failure now returns 'circuit_break' for
+-- these five codes (not 'dead_letter' — that outcome is reserved for
+-- per-job-permanent failures: refusal/content_filter/exhausted, see O/O2/I),
+-- and failure_count is NOT incremented for this disposition — the call that
+-- happened is recorded as attempts=1 in scoring_dead_letter (a real provider
+-- call occurred) while failure_count (the business-retry counter) is left at
+-- its pre-call value, since a request-wide circuit-break consumes zero of
+-- the job's 3 allowed business retries. This loop covers each code
+-- individually and in isolation (own request, own job); Section P2 below
+-- covers the sibling-cancellation mechanics this triggers in depth.
 savepoint s;
 do $blk$
 declare
   v_sid uuid; v_req uuid; v_code text;
-  v_rp uuid; v_job uuid; v_msg bigint; v_o text; v_fc int; v_req_status text;
+  v_rp uuid; v_job uuid; v_msg bigint; v_o text; v_fc int; v_req_status text; v_attempts int;
 begin
   v_sid := pg_temp.verify_source_id();
   foreach v_code in array array['400','401','403','404','422'] loop
@@ -661,50 +660,48 @@ begin
     v_o := public.record_scoring_failure(v_job,v_msg,v_rp,v_req,'client_error',v_code,'bad request');
     select failure_count into v_fc from public.scoring_job_state where id=v_job;
     select status into v_req_status from public.scoring_requests where id=v_req;
+    select attempts into v_attempts from public.scoring_dead_letter where job_id=v_job;
 
-    perform pg_temp.expect_eq(format('client_error %s -> dead_letter (circuit-break)', v_code), v_o, 'dead_letter');
-    -- Documented, exact behavior for this code: failure_count IS incremented
-    -- and persisted (0->1) before the circuit-break logic runs; it is NOT
-    -- left unchanged. What IS true: no 2nd or 3rd attempt is ever spent —
-    -- the job is dead-lettered on the very first call for this failure type.
-    perform pg_temp.expect_eq(format('client_error %s: failure_count IS incremented once (0->1)', v_code), v_fc, 1);
+    perform pg_temp.expect_eq(format('client_error %s -> circuit_break', v_code), v_o, 'circuit_break');
+    perform pg_temp.expect_eq(format('client_error %s: job status is dead_letter', v_code),
+      (select status from public.scoring_job_state where id=v_job), 'dead_letter');
+    perform pg_temp.expect_eq(format('client_error %s: failure_count is NOT incremented (infra-level, not a business retry)', v_code), v_fc, 0);
+    perform pg_temp.expect_eq(format('client_error %s: the real provider call IS recorded as attempts=1', v_code), v_attempts, 1);
     perform pg_temp.expect_eq(format('client_error %s: scoring_requests.status becomes closed', v_code), v_req_status, 'closed');
   end loop;
 end $blk$;
 rollback to s;
 
-\echo '######## P2. KNOWN RELEASE-BLOCKING GAP: closing a request does not stop an already-queued sibling job ########'
--- This section reports a real, unresolved gap found during the 0007-0010
--- reconciliation audit — it does NOT assert the gap as a passing invariant.
+\echo '######## P2. 0011 circuit-break: closed request has zero claimable queued siblings ########'
+-- Formerly a known, unresolved, release-blocking gap (see git history):
 -- read_scoring_jobs / complete_scoring_job / record_scoring_failure never
--- check scoring_requests.status. A job that was pending BEFORE its request
--- closed remains claimable, will be sent to OpenAI, and will individually
--- retry/dead-letter through the normal path — the circuit-break only stops
--- NEW enqueues (enqueue_scoring_job DOES check status='active' and raises
--- otherwise), not jobs already in the queue.
---
--- verify_scoring.sql CANNOT be described as fully green while this gap
--- exists: this DO block deliberately does not use pg_temp.expect_* (which
--- would make "the bug is present" the passing condition). It prints the
--- measured outcome as a NOTICE and, at the end of the script, this section's
--- result is surfaced again in the final summary as an explicit, unresolved
--- finding — not folded into the pass count.
--- IMPORTANT: `ROLLBACK TO SAVEPOINT` undoes every DML statement issued since
--- that savepoint — including an INSERT into pg_verify_findings, even though
--- pg_verify_findings itself was CREATEd before any savepoint existed. Only
--- the temp table's existence survives; rows written after the savepoint do
--- not. So the finding is written to a psql CLIENT variable (via \gset, which
--- runs client-side and is unaffected by what the server later rolls back)
--- BEFORE `rollback to s`, then re-inserted into pg_verify_findings from that
--- client variable AFTER the rollback, once the savepoint's rollback can no
--- longer touch it.
+-- checked scoring_requests.status, so a job already queued before its
+-- request closed remained claimable and would still reach OpenAI. Migration
+-- 0011 (cancel_scoring_request_siblings, invoked from record_scoring_failure
+-- on a request-wide-permanent client_error) fixes this by bulk-terminalizing
+-- every sibling in the same transaction that closes the request. This
+-- section now HARD-ASSERTS the fix — a regression here fails the script.
 savepoint s;
 do $blk$
-declare v_sid uuid; v_req uuid; v_rp1 uuid; v_rp2 uuid; v_job1 uuid; v_job2 uuid; v_msg1 bigint;
-        v_claimed_after_close int;
+declare v_sid uuid; v_req uuid; v_rp1 uuid; v_rp2 uuid; v_rp3 uuid;
+        v_job1 uuid; v_job2 uuid; v_job3 uuid; v_msg1 bigint; v_msg3 bigint;
+        v_claimed_after_close int; v_tok3 uuid; v_stale_complete text; v_stale_fail text;
 begin
   v_sid := pg_temp.verify_source_id();
   v_req := pg_temp.mk_request(); perform public.activate_scoring_request(v_req);
+
+  -- job3 is enqueued and claimed FIRST, in isolation, so it alone gets a
+  -- real processing_token while job1/job2 don't exist yet — job1's OWN
+  -- direct record_scoring_failure call below (with the default NULL token)
+  -- must still match job1's own row, which is only true if job1 was never
+  -- itself claimed by a read_scoring_jobs call.
+  insert into public.raw_posts (source_id,source_url,external_post_id,post_text,published_at)
+  values (v_sid,'u','9300000000000000022','p',now()) returning id into v_rp3;
+  select id,msg_id into v_job3,v_msg3 from public.scoring_job_state where raw_post_id=v_rp3;
+  perform 1 from public.read_scoring_jobs(120, 100); -- claims ONLY job3 at this point
+  select processing_token into v_tok3 from public.scoring_job_state where id = v_job3;
+  perform pg_temp.expect_true('job3 was claimed (processing) before the circuit-break', v_tok3 is not null);
+
   insert into public.raw_posts (source_id,source_url,external_post_id,post_text,published_at)
   values (v_sid,'u','9300000000000000020','p',now()) returning id into v_rp1;
   insert into public.raw_posts (source_id,source_url,external_post_id,post_text,published_at)
@@ -712,45 +709,179 @@ begin
   select id,msg_id into v_job1,v_msg1 from public.scoring_job_state where raw_post_id=v_rp1;
   select id into v_job2 from public.scoring_job_state where raw_post_id=v_rp2;
 
-  -- job1 fails with a circuit-break error and closes the request. This part
-  -- of the circuit-break IS a working invariant, so it IS hard-asserted.
-  perform public.record_scoring_failure(v_job1,v_msg1,v_rp1,v_req,'client_error','401','auth failed');
+  -- job1 fails with a circuit-break error and closes the request. job1 was
+  -- never claimed via read_scoring_jobs, so its processing_token is still
+  -- NULL — matching the default p_processing_token this direct call passes.
+  perform pg_temp.expect_eq('record_scoring_failure returns circuit_break',
+    public.record_scoring_failure(v_job1, v_msg1, v_rp1, v_req, 'client_error', '401', 'auth failed'), 'circuit_break');
+
   perform pg_temp.expect_eq('request is closed after the circuit-break',
     (select status from public.scoring_requests where id=v_req), 'closed');
-  perform pg_temp.expect_eq('sibling job2 is still pending, untouched by the close',
-    (select status from public.scoring_job_state where id=v_job2), 'pending');
 
-  -- Measure whether job2's message is STILL claimable despite its request
-  -- being closed. This is reported, not asserted either way, because a
-  -- future fix changing this count to 0 must not fail this script, and the
-  -- current gap-present count of 1 must not be celebrated as "green".
+  -- 0012 fix: the TRIGGERING job (job1) also has its own lease state cleared,
+  -- not just its siblings' — job1 is just as terminal and must not retain a
+  -- token a stale worker could still reference.
+  perform pg_temp.expect_eq('triggering job (job1) status', (select status from public.scoring_job_state where id=v_job1), 'dead_letter');
+  perform pg_temp.expect_true('triggering job processing_token cleared', (select processing_token from public.scoring_job_state where id=v_job1) is null);
+  perform pg_temp.expect_true('triggering job leased_at cleared', (select leased_at from public.scoring_job_state where id=v_job1) is null);
+  perform pg_temp.expect_true('triggering job next_attempt_at cleared', (select next_attempt_at from public.scoring_job_state where id=v_job1) is null);
+  perform pg_temp.expect_eq('triggering job failure_count still unchanged (not a business retry)',
+    (select failure_count from public.scoring_job_state where id=v_job1), 0);
+
+  -- job2 (was pending): terminal, request_closed, no business retry burned, lease clear.
+  perform pg_temp.expect_eq('pending sibling (job2) status', (select status from public.scoring_job_state where id=v_job2), 'dead_letter');
+  perform pg_temp.expect_eq('pending sibling last_failure_type', (select last_failure_type from public.scoring_job_state where id=v_job2), 'request_closed');
+  perform pg_temp.expect_eq('pending sibling failure_count unchanged', (select failure_count from public.scoring_job_state where id=v_job2), 0);
+  perform pg_temp.expect_true('pending sibling processing_token cleared', (select processing_token from public.scoring_job_state where id=v_job2) is null);
+  perform pg_temp.expect_true('pending sibling leased_at cleared', (select leased_at from public.scoring_job_state where id=v_job2) is null);
+  perform pg_temp.expect_true('pending sibling next_attempt_at cleared', (select next_attempt_at from public.scoring_job_state where id=v_job2) is null);
+  perform pg_temp.expect_eq('pending sibling has exactly one scoring_dead_letter row',
+    (select count(*) from public.scoring_dead_letter where job_id=v_job2), 1::bigint);
+  perform pg_temp.expect_eq('pending sibling dead_letter failure_type', (select failure_type from public.scoring_dead_letter where job_id=v_job2), 'request_closed');
+
+  -- job3 (was processing, real lease token): same terminal outcome, token cleared.
+  perform pg_temp.expect_eq('processing sibling (job3) status', (select status from public.scoring_job_state where id=v_job3), 'dead_letter');
+  perform pg_temp.expect_true('processing sibling processing_token cleared', (select processing_token from public.scoring_job_state where id=v_job3) is null);
+  perform pg_temp.expect_eq('processing sibling failure_count unchanged', (select failure_count from public.scoring_job_state where id=v_job3), 0);
+
+  -- Zero claimable siblings left in the queue for this request.
   select count(*) into v_claimed_after_close
-    from public.read_scoring_jobs(120, 100) r where (r.message->>'job_id')::uuid = v_job2;
-  if v_claimed_after_close not in (0, 1) then
-    raise exception 'ASSERTION FAILED: unexpected claim count % for job % (expected 0 or 1)', v_claimed_after_close, v_job2;
-  end if;
+    from public.read_scoring_jobs(120, 100) r
+    where (r.message->>'job_id')::uuid in (v_job2, v_job3);
+  perform pg_temp.expect_eq('zero claimable queued siblings after the circuit-break', v_claimed_after_close, 0);
 
-  -- Result is left in a temp row that the client reads via \gset immediately
-  -- below (before `rollback to s` — see the note above this block).
-  create temp table p2_result as
-  select (v_claimed_after_close = 1) as gap_present, v_job2::text as job2, v_req::text as req;
+  -- Stale worker holding job3's pre-cancellation token: completion is
+  -- superseded, writes nothing, does not resurrect the job.
+  v_stale_complete := public.complete_scoring_job(v_job3, v_msg3, v_rp3, v_req,
+    '{"sustainability":10,"innovation":10,"talent_development":10,"food_safety":10,"supply_chain":10,"tradition":10}'::jsonb,
+    'stale', null, v_tok3);
+  perform pg_temp.expect_eq('stale completion on a cancelled sibling -> superseded', v_stale_complete, 'superseded');
+  perform pg_temp.expect_eq('stale completion writes no result',
+    (select count(*) from public.scoring_results where raw_post_id=v_rp3 and scoring_request_id=v_req), 0::bigint);
+
+  v_stale_fail := public.record_scoring_failure(v_job3, v_msg3, v_rp3, v_req, 'server_error', '500', 'stale retry', null, v_tok3);
+  perform pg_temp.expect_eq('stale failure on a cancelled sibling -> superseded', v_stale_fail, 'superseded');
+  perform pg_temp.expect_eq('stale failure does not increment failure_count', (select failure_count from public.scoring_job_state where id=v_job3), 0);
+  perform pg_temp.expect_eq('stale failure does not create a second dead_letter row',
+    (select count(*) from public.scoring_dead_letter where job_id=v_job3), 1::bigint);
+
+  -- Idempotency via the actual public surface: job1 is already dead_letter,
+  -- so a second record_scoring_failure call for it hits the status guard and
+  -- returns 'superseded' WITHOUT re-running the circuit-break/cancellation
+  -- body — no duplicate dead_letter rows for either sibling.
+  perform pg_temp.expect_eq('repeating job1''s own failure call after cancellation -> superseded',
+    public.record_scoring_failure(v_job1, v_msg1, v_rp1, v_req, 'client_error', '401', 'auth failed'), 'superseded');
+  perform pg_temp.expect_eq('repeating cancellation creates no duplicate dead_letter row for job2',
+    (select count(*) from public.scoring_dead_letter where job_id=v_job2), 1::bigint);
+  perform pg_temp.expect_eq('repeating cancellation creates no duplicate dead_letter row for job3',
+    (select count(*) from public.scoring_dead_letter where job_id=v_job3), 1::bigint);
 end $blk$;
-
-select gap_present as p2_gap_present, job2 as p2_job2, req as p2_req from p2_result \gset
-drop table p2_result;
-
-\if :p2_gap_present
-\echo 'GAP CONFIRMED (release-blocking, unresolved): read_scoring_jobs claimed a job whose request was already closed. A worker invocation reading this batch would call OpenAI for it despite the circuit-break.'
-\else
-\echo 'GAP APPEARS RESOLVED: read_scoring_jobs did NOT claim the job under the closed request — if intentional, promote this check to a hard pg_temp.expect_eq(..., 0) assertion.'
-\endif
-
 rollback to s;
 
-insert into pg_verify_findings (finding, gap_present, detail) values
-  ('closed_request_queued_job_claimable', :'p2_gap_present',
-   format('job %s under closed request %s: claimable-after-close=%s', :'p2_job2', :'p2_req', :'p2_gap_present'))
-  on conflict (finding) do update set gap_present = excluded.gap_present, detail = excluded.detail;
+\echo '######## P3. 0012: cancel_scoring_request_siblings is not directly executable by service_role ########'
+-- The helper is internal-only (called from inside record_scoring_failure,
+-- itself SECURITY DEFINER, same owner) and must not be a standalone RPC
+-- surface an Edge Function (which connects as service_role) could invoke
+-- directly, bypassing record_scoring_failure's own validation.
+select pg_temp.expect_true(
+  'service_role has NO execute privilege on cancel_scoring_request_siblings',
+  not has_function_privilege('service_role', 'public.cancel_scoring_request_siblings(uuid,uuid,text)', 'execute')
+);
+
+\echo '######## P4. 0012: completion winning the request lock first leaves a succeeded job untouched by a later circuit-break ########'
+savepoint s;
+do $blk$
+declare v_sid uuid; v_req uuid; v_rp_ok uuid; v_rp_bad uuid; v_job_ok uuid; v_msg_ok bigint; v_job_bad uuid; v_msg_bad bigint;
+        v_scores jsonb := '{"sustainability":10,"innovation":80,"talent_development":5,"food_safety":9,"supply_chain":7,"tradition":4}'::jsonb;
+begin
+  v_sid := pg_temp.verify_source_id();
+  v_req := pg_temp.mk_request(); perform public.activate_scoring_request(v_req);
+  insert into public.raw_posts (source_id,source_url,external_post_id,post_text,published_at)
+  values (v_sid,'u','9300000000000000023','p',now()) returning id into v_rp_ok;
+  insert into public.raw_posts (source_id,source_url,external_post_id,post_text,published_at)
+  values (v_sid,'u','9300000000000000024','p',now()) returning id into v_rp_bad;
+  select id,msg_id into v_job_ok,v_msg_ok from public.scoring_job_state where raw_post_id=v_rp_ok;
+  select id,msg_id into v_job_bad,v_msg_bad from public.scoring_job_state where raw_post_id=v_rp_bad;
+
+  -- Completion "wins" (runs first, commits its own request-lock-then-job-lock
+  -- sequence to completion) before the circuit-break on the sibling even starts.
+  perform pg_temp.expect_eq('completion wins first -> inserted',
+    public.complete_scoring_job(v_job_ok, v_msg_ok, v_rp_ok, v_req, v_scores, 'r'), 'inserted');
+  perform pg_temp.expect_eq('completed job status is succeeded',
+    (select status from public.scoring_job_state where id=v_job_ok), 'succeeded');
+
+  -- Now the sibling circuit-breaks the SAME request.
+  perform pg_temp.expect_eq('sibling circuit-break after the fact -> circuit_break',
+    public.record_scoring_failure(v_job_bad, v_msg_bad, v_rp_bad, v_req, 'client_error', '401', 'auth failed'), 'circuit_break');
+
+  -- The already-succeeded job must be completely untouched by the bulk
+  -- sibling cancellation (its status filter is status IN ('pending','processing')).
+  perform pg_temp.expect_eq('succeeded job status is unchanged by the later circuit-break',
+    (select status from public.scoring_job_state where id=v_job_ok), 'succeeded');
+  perform pg_temp.expect_eq('succeeded job failure_count is unchanged', (select failure_count from public.scoring_job_state where id=v_job_ok), 0);
+  perform pg_temp.expect_true('succeeded job last_failure_type is unchanged (still null)',
+    (select last_failure_type from public.scoring_job_state where id=v_job_ok) is null);
+  perform pg_temp.expect_eq('the succeeded job''s real result is still exactly one row',
+    (select count(*) from public.scoring_results where raw_post_id=v_rp_ok and scoring_request_id=v_req), 1::bigint);
+end $blk$;
+rollback to s;
+
+\echo '######## P5. 0013: enqueue_scoring_job locks the request first, same as complete/record_scoring_failure ########'
+savepoint s;
+do $blk$
+declare v_sid uuid; v_req uuid; v_rp_early uuid; v_rp_trig uuid; v_rp_late uuid;
+        v_job_early uuid; v_job_trig uuid; v_msg_trig bigint; v_raised boolean;
+begin
+  v_sid := pg_temp.verify_source_id();
+  v_req := pg_temp.mk_request(); perform public.activate_scoring_request(v_req);
+
+  -- (a) enqueue against an already-closed request creates no job/message.
+  perform public.close_scoring_request(v_req);
+  insert into public.raw_posts (source_id,source_url,external_post_id,post_text,published_at)
+  values (v_sid,'u','9300000000000000030','p',now()) returning id into v_rp_late;
+  v_raised := false;
+  begin perform public.enqueue_scoring_job(v_rp_late, v_req); exception when others then v_raised := true; end;
+  perform pg_temp.expect_true('enqueue against an already-closed request raises', v_raised);
+  perform pg_temp.expect_eq('no job row was created for the rejected enqueue',
+    (select count(*) from public.scoring_job_state where raw_post_id=v_rp_late), 0::bigint);
+
+  -- (b) a job enqueued BEFORE the request closes is subsequently terminalized.
+  -- v_req is 'production'-purpose, so trg_enqueue_scoring_on_raw_post auto-enqueues
+  -- these inserts; look the job rows up by raw_post_id rather than trusting
+  -- enqueue_scoring_job's return value, since an explicit call here would just hit
+  -- the idempotent on-conflict no-op and return null.
+  v_req := pg_temp.mk_request(); perform public.activate_scoring_request(v_req);
+  insert into public.raw_posts (source_id,source_url,external_post_id,post_text,published_at)
+  values (v_sid,'u','9300000000000000031','p',now()) returning id into v_rp_early;
+  select id into v_job_early from public.scoring_job_state where raw_post_id=v_rp_early;
+  perform pg_temp.expect_eq('early job is pending right after enqueue',
+    (select status from public.scoring_job_state where id=v_job_early), 'pending');
+
+  insert into public.raw_posts (source_id,source_url,external_post_id,post_text,published_at)
+  values (v_sid,'u','9300000000000000032','p',now()) returning id into v_rp_trig;
+  select id into v_job_trig from public.scoring_job_state where raw_post_id=v_rp_trig;
+  select msg_id into v_msg_trig from public.scoring_job_state where id=v_job_trig;
+  perform public.record_scoring_failure(v_job_trig, v_msg_trig, v_rp_trig, v_req, 'client_error', '401', 'auth failed');
+
+  perform pg_temp.expect_eq('early-enqueued job is terminalized as a sibling after the close',
+    (select status from public.scoring_job_state where id=v_job_early), 'dead_letter');
+  perform pg_temp.expect_eq('early-enqueued job carries the request_closed reason',
+    (select last_failure_type from public.scoring_job_state where id=v_job_early), 'request_closed');
+
+  -- (c) circuit-break-before-enqueue causes the later enqueue to fail.
+  insert into public.raw_posts (source_id,source_url,external_post_id,post_text,published_at)
+  values (v_sid,'u','9300000000000000033','p',now()) returning id into v_rp_late;
+  v_raised := false;
+  begin perform public.enqueue_scoring_job(v_rp_late, v_req); exception when others then v_raised := true; end;
+  perform pg_temp.expect_true('enqueue after an in-flight circuit-break already closed the request raises', v_raised);
+  perform pg_temp.expect_eq('no job row was created for that late enqueue',
+    (select count(*) from public.scoring_job_state where raw_post_id=v_rp_late), 0::bigint);
+
+  -- (d) no pending/processing jobs remain under the closed request at all.
+  perform pg_temp.expect_eq('zero pending/processing jobs remain under the closed request',
+    (select count(*) from public.scoring_job_state where scoring_request_id=v_req and status in ('pending','processing')), 0::bigint);
+end $blk$;
+rollback to s;
 
 \echo '######## Q. DB-completion failure must not increase the business failure_count ########'
 -- Primary proof: an ACTUAL induced complete_scoring_job failure (invalid
@@ -817,46 +948,18 @@ select relname, relrowsecurity from pg_class
 where relnamespace='public'::regnamespace
   and relname in ('scoring_themes','scoring_requests','scoring_results','scoring_job_state','scoring_dead_letter') order by 1;
 
-\echo '######## FINAL: release-blocking findings ########'
--- Every other section above has already run by this point, regardless of
--- what this check finds. This is the ONE place in the file where a known,
--- reported gap is turned into a hard failure — deliberately last, so it
--- cannot mask or shortcut any other section's assertions.
---
--- Explicit ROLLBACK happens BEFORE the pass/fail decision below, not after
--- (and not merely implied by session/script termination): the gap state is
--- pulled out of the (about-to-be-destroyed) temp table into psql CLIENT
--- variables via \gset first, then ROLLBACK runs unconditionally, and only
--- after that does the script decide whether to exit non-zero. This
--- guarantees the transaction is always cleanly rolled back even in the
--- gap-present case — the non-zero exit is a client-side psql decision made
--- after the database is already back to its pre-script state, not something
--- that depends on the transaction being aborted to roll back.
-do $blk$
-declare v_gap_present boolean; v_detail text;
-begin
-  select gap_present, detail into v_gap_present, v_detail
-    from pg_verify_findings where finding = 'closed_request_queued_job_claimable';
-  if v_gap_present is null then
-    raise exception 'ASSERTION FAILED: expected finding closed_request_queued_job_claimable was never recorded — Section P2 did not run';
-  end if;
-end $blk$;
-
-select
-  gap_present as final_gap_present,
-  coalesce(detail, '(no detail)') as final_gap_detail
-from pg_verify_findings where finding = 'closed_request_queued_job_claimable' \gset
-
+\echo '######## FINAL ########'
+-- Every section above (A through Q, M) has now run. Every invariant this
+-- script knows how to check — including the formerly-release-blocking
+-- Section P2 circuit-break gap, now fixed by migration 0011 — is asserted
+-- via pg_temp.expect_*, which RAISEs and aborts the script immediately on
+-- any mismatch (psql -v ON_ERROR_STOP=1 then exits non-zero at that exact
+-- point). Reaching this line at all means every hard assertion in the file
+-- passed. The explicit ROLLBACK below is unconditional and is the only
+-- outcome from here — there is no separate deferred pass/fail decision left
+-- to make (pg_verify_findings and its \gset handoff, used only to survive
+-- Section P2's own `rollback to s` while the gap was still failing, are no
+-- longer needed now that P2 asserts inline and lets a real failure abort the
+-- whole script rather than being deferred to a final summary check).
 rollback;
-
-\echo 'Explicit ROLLBACK executed. Transaction ended; database is back to its pre-script state.'
-
-\if :final_gap_present
-\echo 'closed request still has claimable queued jobs'
-\echo 'Detail:' :'final_gap_detail'
-\echo 'This is the sole expected release-blocking failure. Every other Phase 3 verification section above passed.'
-\warn 'verify_scoring.sql: FAIL — closed request still has claimable queued jobs'
-select 1/0;
-\else
-\echo 'OK: closed-request circuit-break gap is resolved.' :'final_gap_detail'
-\endif
+\echo 'Explicit ROLLBACK executed. Every Phase 3 verification section passed. Database is back to its pre-script state.'

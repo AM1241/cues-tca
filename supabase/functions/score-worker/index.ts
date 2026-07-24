@@ -60,7 +60,7 @@ function parseBatchSize(body: Record<string, unknown>): number {
 interface JobOutcome {
   job_id: string;
   raw_post_id: string;
-  status: "scored" | "duplicate" | "retry" | "dead_letter" | "superseded" | "infra_error";
+  status: "scored" | "duplicate" | "retry" | "dead_letter" | "superseded" | "infra_error" | "circuit_break";
   error_code?: string;
 }
 
@@ -70,15 +70,39 @@ async function processJob(
   requestCache: Map<string, ScoringRequestRow>,
   apiKey: string,
   deps: ScoreWorkerDeps,
+  closedRequestIds: Set<string>,
 ): Promise<JobOutcome> {
   const { job_id: jobId, raw_post_id: rawPostId, scoring_request_id: requestId } = msg.message;
   const token = msg.processing_token;
   const call = deps.callOpenAiImpl ?? callOpenAi;
 
+  // A sibling job earlier in THIS SAME batch may have already circuit-broken
+  // this request (in-memory, checked before any DB round-trip or OpenAI
+  // call). This is required, not just an optimization: relying solely on the
+  // DB state and letting complete_scoring_job/record_scoring_failure return
+  // 'superseded' after the fact would still spend a real OpenAI call on a
+  // request already known to be broken — the whole point of the circuit
+  // break is to prevent that call from happening at all. Cross-worker
+  // closures (a different invocation closed the request between reads) are
+  // caught by the fresh scoring_requests.status re-check below, since
+  // requestCache is only populated once per batch and could be stale.
+  if (closedRequestIds.has(requestId)) {
+    return { job_id: jobId, raw_post_id: rawPostId, status: "circuit_break", error_code: "request_closed" };
+  }
+
   let request = requestCache.get(requestId);
   if (!request) {
     request = await getScoringRequest(db, requestId);
     requestCache.set(requestId, request);
+  }
+
+  // Cross-worker guard: this request's status was cached (possibly stale) or
+  // fetched just now — either way, re-check it fresh immediately before the
+  // paid call, since a concurrent worker on a different job under the same
+  // request could have closed it since requestCache was populated.
+  if (request.status !== "active") {
+    closedRequestIds.add(requestId);
+    return { job_id: jobId, raw_post_id: rawPostId, status: "circuit_break", error_code: "request_closed" };
   }
 
   const themes = request.config_snapshot.themes;
@@ -107,6 +131,7 @@ async function processJob(
       failureType, errorCode: oe?.httpStatus?.toString(), errorMessage: (e as Error).message,
       providerResponse: oe?.rawResponse,
     });
+    if (outcome === "circuit_break") closedRequestIds.add(requestId);
     return { job_id: jobId, raw_post_id: rawPostId, status: outcome, error_code: failureType };
   }
 
@@ -169,9 +194,16 @@ export async function handleScoreWorker(req: Request, deps: ScoreWorkerDeps = {}
     const messages = await readJobs(db, batchSize);
 
     const requestCache = new Map<string, ScoringRequestRow>();
+    // Requests this batch has itself circuit-broken. Checked before every
+    // OpenAI call in processJob so a later job in the SAME batch, under the
+    // SAME request, never reaches OpenAI once an earlier job in this batch
+    // has already learned the request is closed — the DB round-trip that
+    // would also catch this (complete/record returning 'superseded' or the
+    // fresh status re-check) happens too late to prevent that call.
+    const closedRequestIds = new Set<string>();
     const results: JobOutcome[] = [];
     for (const msg of messages) {
-      results.push(await processJob(db, msg, requestCache, apiKey, deps));
+      results.push(await processJob(db, msg, requestCache, apiKey, deps, closedRequestIds));
     }
 
     const totals = {
@@ -182,6 +214,7 @@ export async function handleScoreWorker(req: Request, deps: ScoreWorkerDeps = {}
       dead_lettered: results.filter((r) => r.status === "dead_letter").length,
       superseded: results.filter((r) => r.status === "superseded").length,
       infra_error: results.filter((r) => r.status === "infra_error").length,
+      circuit_break: results.filter((r) => r.status === "circuit_break").length,
     };
 
     return jsonResponse({ ok: true, totals, results }, 200, origin);

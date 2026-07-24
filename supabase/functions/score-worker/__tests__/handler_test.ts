@@ -669,37 +669,436 @@ Deno.test({
         assert(calls[0].input.includes("- innovation (innovation)"), "{{THEMES}} interpolated from the snapshot");
       });
 
-      // This test uses its OWN request (it closes it as the circuit-break under
-      // test), so it no longer has to run last — the shared evalRequestId is
-      // unaffected regardless of ordering (blocker #7).
-      await runStep("an auth error dead-letters the job and closes the request (circuit-break)", async () => {
+      // =====================================================================
+      // REQUEST-WIDE CIRCUIT-BREAK — migration 0011
+      // =====================================================================
+      // Every test in this block uses its OWN request (each closes it as the
+      // circuit-break under test), so none of them have to run in a specific
+      // order relative to the shared evalRequestId.
+
+      await runStep("401 circuit-break closes the request without increasing business failure_count", async () => {
         await drainAmbientQueueNoise();
         const cbReq = await makeEvalRequest();
-        const { jobId: failingJobId } = await enqueueUnder(cbReq, "First job under a doomed request.");
-        const { jobId: siblingJobId } = await enqueueUnder(cbReq, "Second job, never gets read this batch.");
+        const { jobId } = await enqueueUnder(cbReq, "First job under a doomed request.");
         const { callOpenAiImpl } = scriptedOpenAi([{ throws: "client_error", httpStatus: 401 }]);
 
         const res = await handleScoreWorker(request({ batch_size: 1 }, INTERNAL_SECRET), { db, callOpenAiImpl });
         const body = await res.json();
-        assertEquals(body.totals.dead_lettered, 1);
+        assertEquals(body.totals.circuit_break, 1);
+        assertEquals(body.results[0].status, "circuit_break");
+
+        const { data: job } = await db
+          .from("scoring_job_state").select("status, failure_count, processing_token, leased_at, next_attempt_at")
+          .eq("id", jobId).single();
+        assertEquals(job!.status, "dead_letter");
+        assertEquals(job!.failure_count, 0, "circuit-break is infrastructure-level, not a burned business retry");
+        // 0012 fix: the TRIGGERING job's own lease is also cleared (0011 only
+        // cleared siblings' leases, leaving the triggering job's token/lease
+        // dangling even though it too is now terminal).
+        assertEquals(job!.processing_token, null, "the triggering job's own lease token is cleared too, not just siblings'");
+        assertEquals(job!.leased_at, null);
+        assertEquals(job!.next_attempt_at, null);
+
+        const { data: dl } = await db.from("scoring_dead_letter").select("failure_type, attempts").eq("job_id", jobId).single();
+        assertEquals(dl!.failure_type, "client_error");
+        assertEquals(dl!.attempts, 1, "the real provider-call count is still recorded, distinct from failure_count");
+
+        const { data: req } = await db.from("scoring_requests").select("status").eq("id", cbReq).single();
+        assertEquals(req!.status, "closed");
+      });
+
+      await runStep("400 and 422 follow the same request-level circuit-break behavior", async () => {
+        await drainAmbientQueueNoise();
+        for (const httpStatus of [400, 422]) {
+          const cbReq = await makeEvalRequest();
+          const { jobId } = await enqueueUnder(cbReq, `Job under a request that will 400/422 (${httpStatus}).`);
+          const { callOpenAiImpl } = scriptedOpenAi([{ throws: "client_error", httpStatus }]);
+
+          const res = await handleScoreWorker(request({ batch_size: 1 }, INTERNAL_SECRET), { db, callOpenAiImpl });
+          assertEquals((await res.json()).totals.circuit_break, 1, `status ${httpStatus}`);
+
+          const { data: job } = await db.from("scoring_job_state").select("status, failure_count").eq("id", jobId).single();
+          assertEquals(job!.status, "dead_letter", `status ${httpStatus}`);
+          assertEquals(job!.failure_count, 0, `status ${httpStatus}: no business retry consumed`);
+
+          const { data: req } = await db.from("scoring_requests").select("status").eq("id", cbReq).single();
+          assertEquals(req!.status, "closed", `status ${httpStatus}`);
+        }
+      });
+
+      await runStep("404 (model not found) is a request-wide circuit-break, not a per-post retry", async () => {
+        // Explicit decision (documented in 0011 and MIGRATION_PLAN.md): 404 from
+        // OpenAI's /v1/responses means the pinned model_snapshot doesn't exist.
+        // model_snapshot is immutable per request and identical for every job
+        // under it, so 404 on one job means every sibling will 404 too — a
+        // request-wide configuration defect, grouped with 400/401/403/422.
+        await drainAmbientQueueNoise();
+        const cbReq = await makeEvalRequest();
+        const { jobId } = await enqueueUnder(cbReq, "Job under a request pinned to a since-deleted model.");
+        const { callOpenAiImpl } = scriptedOpenAi([{ throws: "client_error", httpStatus: 404 }]);
+
+        const res = await handleScoreWorker(request({ batch_size: 1 }, INTERNAL_SECRET), { db, callOpenAiImpl });
+        assertEquals((await res.json()).totals.circuit_break, 1);
+
+        const { data: job } = await db.from("scoring_job_state").select("status, failure_count").eq("id", jobId).single();
+        assertEquals(job!.status, "dead_letter");
+        assertEquals(job!.failure_count, 0);
+
+        const { data: req } = await db.from("scoring_requests").select("status").eq("id", cbReq).single();
+        assertEquals(req!.status, "closed");
+      });
+
+      await runStep("a pending sibling becomes dead_letter/request_closed when the request circuit-breaks", async () => {
+        await drainAmbientQueueNoise();
+        const cbReq = await makeEvalRequest();
+        const { jobId: failingJobId } = await enqueueUnder(cbReq, "First job under a doomed request.");
+        const { jobId: siblingJobId } = await enqueueUnder(cbReq, "Second job, never read in this batch.");
+        const { callOpenAiImpl } = scriptedOpenAi([{ throws: "client_error", httpStatus: 401 }]);
+
+        await handleScoreWorker(request({ batch_size: 1 }, INTERNAL_SECRET), { db, callOpenAiImpl });
 
         const { data: failingJob } = await db.from("scoring_job_state").select("status").eq("id", failingJobId).single();
         assertEquals(failingJob!.status, "dead_letter");
 
-        const { data: req } = await db.from("scoring_requests").select("status").eq("id", cbReq).single();
-        assertEquals(req!.status, "closed", "every other job under this request would fail identically, so draining stops");
+        // The sibling was NEVER read by the worker (batch_size 1) — this
+        // proves cancellation happens synchronously inside record_scoring_failure
+        // itself, not merely "the next time something touches it".
+        const { data: siblingJob } = await db
+          .from("scoring_job_state").select("status, last_failure_type, processing_token, leased_at, next_attempt_at, failure_count")
+          .eq("id", siblingJobId).single();
+        assertEquals(siblingJob!.status, "dead_letter");
+        assertEquals(siblingJob!.last_failure_type, "request_closed");
+        assertEquals(siblingJob!.processing_token, null);
+        assertEquals(siblingJob!.leased_at, null);
+        assertEquals(siblingJob!.next_attempt_at, null);
+        assertEquals(siblingJob!.failure_count, 0, "sibling cancellation is not a business retry");
 
-        // The sibling wasn't read this batch (batch_size 1) but its request is
-        // now closed, which is what stops trg_enqueue_scoring_on_raw_post
-        // feeding it more NEW jobs. KNOWN GAP (see file header / reconciliation
-        // notes): a job that was already claimable BEFORE the close — like this
-        // sibling — is not itself blocked from being claimed and sent to OpenAI
-        // by a later read_scoring_jobs call; nothing in read_scoring_jobs joins
-        // to scoring_requests.status. This assertion only proves the sibling
-        // wasn't read in THIS batch (batch_size 1), not that a later batch
-        // couldn't still claim and pay to score it.
-        const { data: siblingJob } = await db.from("scoring_job_state").select("status").eq("id", siblingJobId).single();
-        assertEquals(siblingJob!.status, "pending");
+        const { data: siblingDl } = await db
+          .from("scoring_dead_letter").select("failure_type").eq("job_id", siblingJobId).single();
+        assertEquals(siblingDl!.failure_type, "request_closed");
+      });
+
+      await runStep("a processing sibling has its lease token invalidated by the circuit-break", async () => {
+        await drainAmbientQueueNoise();
+        const cbReq = await makeEvalRequest();
+        const { rawPostId: failingRawPostId, jobId: failingJobId } = await enqueueUnder(cbReq, "First job under a doomed request.");
+        const { jobId: siblingJobId } = await enqueueUnder(cbReq, "Second job, claimed but not completed.");
+
+        // Claim BOTH messages the way the worker does, so the sibling is
+        // 'processing' with a real (non-null) processing_token when the
+        // circuit-break fires — not merely 'pending'.
+        const { data: claimed } = await db.rpc("read_scoring_jobs", { p_vt: 120, p_qty: 50 });
+        const claims = claimed as { msg_id: number; message: { job_id: string }; processing_token: string }[];
+        const failingClaim = claims.find((c) => c.message.job_id === failingJobId)!;
+        const siblingClaim = claims.find((c) => c.message.job_id === siblingJobId)!;
+        assert(siblingClaim?.processing_token, "the sibling was actually claimed (processing) before the circuit-break");
+
+        const { error } = await db.rpc("record_scoring_failure", {
+          p_job_id: failingJobId, p_msg_id: failingClaim.msg_id, p_raw_post_id: failingRawPostId,
+          p_scoring_request_id: cbReq, p_failure_type: "client_error", p_error_code: "401", p_error_message: "auth failed",
+          p_processing_token: failingClaim.processing_token,
+        });
+        if (error) throw error;
+
+        const { data: siblingJob } = await db
+          .from("scoring_job_state").select("status, processing_token, leased_at").eq("id", siblingJobId).single();
+        assertEquals(siblingJob!.status, "dead_letter");
+        assertEquals(siblingJob!.processing_token, null, "the sibling's lease token is cleared, not left dangling");
+        assertEquals(siblingJob!.leased_at, null);
+      });
+
+      await runStep("a stale completion after cancellation returns superseded and writes no result", async () => {
+        await drainAmbientQueueNoise();
+        const cbReq = await makeEvalRequest();
+        const { jobId: failingJobId } = await enqueueUnder(cbReq, "First job under a doomed request.");
+        const { rawPostId: siblingRawPostId, jobId: siblingJobId } = await enqueueUnder(cbReq, "Second job, claimed then cancelled.");
+
+        const { data: claimed } = await db.rpc("read_scoring_jobs", { p_vt: 120, p_qty: 50 });
+        const claims = claimed as { msg_id: number; message: { job_id: string }; processing_token: string }[];
+        const failingClaim = claims.find((c) => c.message.job_id === failingJobId)!;
+        const siblingClaim = claims.find((c) => c.message.job_id === siblingJobId)!;
+        const staleToken = siblingClaim.processing_token;
+
+        const { data: failingRow } = await db.from("scoring_job_state").select("raw_post_id").eq("id", failingJobId).single();
+        await db.rpc("record_scoring_failure", {
+          p_job_id: failingJobId, p_msg_id: failingClaim.msg_id, p_raw_post_id: failingRow!.raw_post_id,
+          p_scoring_request_id: cbReq, p_failure_type: "client_error", p_error_code: "401", p_error_message: "auth failed",
+          p_processing_token: failingClaim.processing_token,
+        });
+
+        // The stale worker, still holding its now-invalidated token, tries to complete.
+        const { data: staleOutcome } = await db.rpc("complete_scoring_job", {
+          p_job_id: siblingJobId, p_msg_id: siblingClaim.msg_id, p_raw_post_id: siblingRawPostId,
+          p_scoring_request_id: cbReq, p_theme_scores: themeScores(), p_reason: "stale completion attempt",
+          p_processing_token: staleToken,
+        });
+        assertEquals(staleOutcome, "superseded");
+
+        const { count } = await db
+          .from("scoring_results").select("*", { count: "exact", head: true })
+          .eq("raw_post_id", siblingRawPostId).eq("scoring_request_id", cbReq);
+        assertEquals(count, 0, "a superseded stale completion never writes a result");
+      });
+
+      await runStep("a stale failure after cancellation returns superseded and does not increment failure_count", async () => {
+        await drainAmbientQueueNoise();
+        const cbReq = await makeEvalRequest();
+        const { jobId: failingJobId } = await enqueueUnder(cbReq, "First job under a doomed request.");
+        const { rawPostId: siblingRawPostId, jobId: siblingJobId } = await enqueueUnder(cbReq, "Second job, claimed then cancelled.");
+
+        const { data: claimed } = await db.rpc("read_scoring_jobs", { p_vt: 120, p_qty: 50 });
+        const claims = claimed as { msg_id: number; message: { job_id: string }; processing_token: string }[];
+        const failingClaim = claims.find((c) => c.message.job_id === failingJobId)!;
+        const siblingClaim = claims.find((c) => c.message.job_id === siblingJobId)!;
+        const staleToken = siblingClaim.processing_token;
+
+        const { data: failingRow } = await db.from("scoring_job_state").select("raw_post_id").eq("id", failingJobId).single();
+        await db.rpc("record_scoring_failure", {
+          p_job_id: failingJobId, p_msg_id: failingClaim.msg_id, p_raw_post_id: failingRow!.raw_post_id,
+          p_scoring_request_id: cbReq, p_failure_type: "client_error", p_error_code: "401", p_error_message: "auth failed",
+          p_processing_token: failingClaim.processing_token,
+        });
+
+        const { data: staleOutcome } = await db.rpc("record_scoring_failure", {
+          p_job_id: siblingJobId, p_msg_id: siblingClaim.msg_id, p_raw_post_id: siblingRawPostId,
+          p_scoring_request_id: cbReq, p_failure_type: "server_error", p_error_code: "500", p_error_message: "stale worker retry",
+          p_processing_token: staleToken,
+        });
+        assertEquals(staleOutcome, "superseded");
+
+        const { data: siblingJob } = await db.from("scoring_job_state").select("failure_count, status").eq("id", siblingJobId).single();
+        assertEquals(siblingJob!.failure_count, 0, "a superseded stale failure never increments failure_count");
+        assertEquals(siblingJob!.status, "dead_letter", "the job stays terminal, the stale call did not resurrect it");
+      });
+
+      await runStep("a later sibling in the same already-read batch never calls OpenAI once the request circuit-breaks", async () => {
+        await drainAmbientQueueNoise();
+        const cbReq = await makeEvalRequest();
+        await enqueueUnder(cbReq, "First job — circuit-breaks the request.");
+        await enqueueUnder(cbReq, "Second job — must NOT reach OpenAI.");
+
+        // Both jobs are read in ONE batch (batch_size 5): the second job's
+        // in-memory closedRequestIds guard, not a DB round-trip, is what must
+        // stop it from ever calling the scripted OpenAI client.
+        const { callOpenAiImpl, calls } = scriptedOpenAi([{ throws: "client_error", httpStatus: 401 }]);
+        const res = await handleScoreWorker(request({ batch_size: 5 }, INTERNAL_SECRET), { db, callOpenAiImpl });
+        const body = await res.json();
+
+        assertEquals(calls.length, 1, "the second job must never call OpenAI at all, not even once");
+        assertEquals(body.totals.circuit_break, 2, "both the triggering job and the in-batch sibling report circuit_break");
+      });
+
+      await runStep("repeating the cancellation path is idempotent and creates no duplicate dead-letter rows", async () => {
+        await drainAmbientQueueNoise();
+        const cbReq = await makeEvalRequest();
+        const { jobId: failingJobId } = await enqueueUnder(cbReq, "First job under a doomed request.");
+        const { jobId: siblingJobId } = await enqueueUnder(cbReq, "Second job, cancelled as a sibling.");
+        const { data: failingRow } = await db.from("scoring_job_state").select("raw_post_id, msg_id").eq("id", failingJobId).single();
+
+        // Claim once (as the worker would), fail once — this cancels the sibling.
+        const { data: claimed } = await db.rpc("read_scoring_jobs", { p_vt: 120, p_qty: 50 });
+        const failingClaim = (claimed as { msg_id: number; message: { job_id: string }; processing_token: string }[])
+          .find((c) => c.message.job_id === failingJobId)!;
+        await db.rpc("record_scoring_failure", {
+          p_job_id: failingJobId, p_msg_id: failingClaim.msg_id, p_raw_post_id: failingRow!.raw_post_id,
+          p_scoring_request_id: cbReq, p_failure_type: "client_error", p_error_code: "401", p_error_message: "auth failed",
+          p_processing_token: failingClaim.processing_token,
+        });
+
+        // Repeat via the actual public surface (record_scoring_failure), not
+        // the internal helper directly — 0012 revokes execute on
+        // cancel_scoring_request_siblings from every role including
+        // service_role, so it is no longer callable from a test/Edge
+        // Function at all. The triggering job is now 'dead_letter', so this
+        // second call hits the lease/status check and returns 'superseded'
+        // WITHOUT re-running the circuit-break body — idempotency here is
+        // enforced one layer up, by the same status guard every other
+        // stale-call path already relies on.
+        const { data: secondOutcome, error: secondCallErr } = await db.rpc("record_scoring_failure", {
+          p_job_id: failingJobId, p_msg_id: failingClaim.msg_id, p_raw_post_id: failingRow!.raw_post_id,
+          p_scoring_request_id: cbReq, p_failure_type: "client_error", p_error_code: "401", p_error_message: "auth failed",
+          p_processing_token: failingClaim.processing_token,
+        });
+        if (secondCallErr) throw secondCallErr;
+        assertEquals(secondOutcome, "superseded", "the triggering job is already terminal; repeating its own failure call is a no-op");
+
+        const { count: dlCount } = await db
+          .from("scoring_dead_letter").select("*", { count: "exact", head: true }).eq("job_id", siblingJobId);
+        assertEquals(dlCount, 1, "no duplicate dead_letter row from repeating cancellation");
+
+        const { data: siblingJob } = await db.from("scoring_job_state").select("status, failure_count").eq("id", siblingJobId).single();
+        assertEquals(siblingJob!.status, "dead_letter");
+        assertEquals(siblingJob!.failure_count, 0);
+      });
+
+      await runStep("a succeeded job is not altered by a later request cancellation", async () => {
+        await drainAmbientQueueNoise();
+        const cbReq = await makeEvalRequest();
+        const { jobId: succeededJobId } = await enqueueUnder(cbReq, "This one succeeds before the request breaks.");
+        const { jobId: failingJobId } = await enqueueUnder(cbReq, "This one triggers the circuit-break.");
+
+        const { callOpenAiImpl } = scriptedOpenAi([
+          { result: { theme_scores: themeScores({ innovation: 50 }), reason: "scored fine" } },
+        ]);
+        // Score the first job for real via the worker (batch_size 1 so only it is read).
+        const firstRes = await handleScoreWorker(request({ batch_size: 1 }, INTERNAL_SECRET), { db, callOpenAiImpl });
+        assertEquals((await firstRes.json()).totals.scored, 1);
+
+        const { data: succeededBefore } = await db
+          .from("scoring_job_state").select("status, updated_at").eq("id", succeededJobId).single();
+        assertEquals(succeededBefore!.status, "succeeded");
+
+        // Now the second job circuit-breaks the SAME request.
+        const { callOpenAiImpl: failCallImpl } = scriptedOpenAi([{ throws: "client_error", httpStatus: 401 }]);
+        await handleScoreWorker(request({ batch_size: 1 }, INTERNAL_SECRET), { db, callOpenAiImpl: failCallImpl });
+
+        const { data: succeededAfter } = await db
+          .from("scoring_job_state").select("status, failure_count, last_failure_type").eq("id", succeededJobId).single();
+        assertEquals(succeededAfter!.status, "succeeded", "a succeeded job is never touched by sibling cancellation");
+        assertEquals(succeededAfter!.failure_count, 0);
+        assertEquals(succeededAfter!.last_failure_type, null);
+
+        const { count: resultCount } = await db
+          .from("scoring_results").select("*", { count: "exact", head: true })
+          .eq("scoring_request_id", cbReq);
+        assertEquals(resultCount, 1, "the succeeded job's real result is still exactly one row, untouched");
+        // Together with "a stale completion after cancellation returns
+        // superseded" above, this covers both serialization orders under the
+        // 0012 request-first lock order: completion winning first (this
+        // test) leaves the succeeded job untouched by a later circuit-break;
+        // circuit-break winning first (the stale-completion test) makes a
+        // later completion attempt return 'superseded', never 'inserted'.
+      });
+
+      await runStep("cancel_scoring_request_siblings is not directly executable by the service-role test client", async () => {
+        // 0012: the helper is only meant to be called internally from inside
+        // record_scoring_failure (itself SECURITY DEFINER, same owner) — it
+        // must not be a standalone RPC surface. The Deno test client
+        // connects as service_role (same role the deployed Edge Function
+        // uses), so this proves an Edge Function cannot call it directly either.
+        const { error } = await db.rpc("cancel_scoring_request_siblings", {
+          p_scoring_request_id: evalRequestId, p_triggering_job_id: crypto.randomUUID(), p_reason: "request_closed",
+        });
+        assert(error, "calling the helper directly must fail — it is not granted to service_role");
+        assert(
+          /permission denied/i.test(error.message),
+          `expected a permission-denied error, got: ${error.message}`,
+        );
+      });
+
+      // =====================================================================
+      // ENQUEUE LOCK ORDER — migration 0013
+      // =====================================================================
+      await runStep("enqueue against an already-closed request creates no job and no queue message", async () => {
+        const cbReq = await makeEvalRequest();
+        await db.rpc("close_scoring_request", { p_request_id: cbReq });
+
+        const { data: rawPostId, error: rpErr } = await db
+          .from("raw_posts")
+          .insert({
+            source_id: sourceId, source_url: `https://example.test/post-${crypto.randomUUID()}`,
+            external_post_id: crypto.randomUUID(), post_text: "post under an already-closed request",
+            published_at: new Date().toISOString(),
+          })
+          .select("id").single();
+        if (rpErr) throw rpErr;
+        rawPostIds.push(rawPostId!.id as string);
+
+        const { error } = await db.rpc("enqueue_scoring_job", {
+          p_raw_post_id: rawPostId!.id, p_scoring_request_id: cbReq,
+        });
+        assert(error, "enqueue against a closed request must raise, not silently succeed");
+        assert(/not active/i.test(error.message), `expected a not-active error, got: ${error.message}`);
+
+        const { count: jobCount } = await db
+          .from("scoring_job_state").select("*", { count: "exact", head: true })
+          .eq("raw_post_id", rawPostId!.id).eq("scoring_request_id", cbReq);
+        assertEquals(jobCount, 0, "no job row was created");
+      });
+
+      await runStep("a job enqueued before the request closes is subsequently terminalized", async () => {
+        const cbReq = await makeEvalRequest();
+        const { jobId } = await enqueueUnder(cbReq, "Enqueued while the request was still active.");
+
+        const { data: job } = await db.from("scoring_job_state").select("status").eq("id", jobId).single();
+        assertEquals(job!.status, "pending", "sanity check: the job exists and is pending before the close");
+
+        // Close the request via the same circuit-break path a real 401 would take.
+        const { jobId: triggerJobId } = await enqueueUnder(cbReq, "Triggers the circuit-break.");
+        const { data: triggerRow } = await db.from("scoring_job_state").select("raw_post_id, msg_id").eq("id", triggerJobId).single();
+        await db.rpc("record_scoring_failure", {
+          p_job_id: triggerJobId, p_msg_id: triggerRow!.msg_id, p_raw_post_id: triggerRow!.raw_post_id,
+          p_scoring_request_id: cbReq, p_failure_type: "client_error", p_error_code: "401", p_error_message: "auth failed",
+        });
+
+        const { data: jobAfter } = await db.from("scoring_job_state").select("status, last_failure_type").eq("id", jobId).single();
+        assertEquals(jobAfter!.status, "dead_letter", "the pre-existing job is terminalized as a sibling");
+        assertEquals(jobAfter!.last_failure_type, "request_closed");
+      });
+
+      await runStep("circuit-break-before-enqueue causes the later enqueue to fail", async () => {
+        const cbReq = await makeEvalRequest();
+        const { jobId: triggerJobId } = await enqueueUnder(cbReq, "Triggers the circuit-break first.");
+        const { data: triggerRow } = await db.from("scoring_job_state").select("raw_post_id, msg_id").eq("id", triggerJobId).single();
+        await db.rpc("record_scoring_failure", {
+          p_job_id: triggerJobId, p_msg_id: triggerRow!.msg_id, p_raw_post_id: triggerRow!.raw_post_id,
+          p_scoring_request_id: cbReq, p_failure_type: "client_error", p_error_code: "401", p_error_message: "auth failed",
+        });
+
+        const { data: reqAfter } = await db.from("scoring_requests").select("status").eq("id", cbReq).single();
+        assertEquals(reqAfter!.status, "closed");
+
+        // A later enqueue attempt against the now-closed request must fail —
+        // circuit-break won the request lock first, so status is already
+        // 'closed' by the time enqueue's own (now-locking) read runs.
+        const { data: rawPostId, error: rpErr } = await db
+          .from("raw_posts")
+          .insert({
+            source_id: sourceId, source_url: `https://example.test/post-${crypto.randomUUID()}`,
+            external_post_id: crypto.randomUUID(), post_text: "post enqueued after the circuit-break already closed the request",
+            published_at: new Date().toISOString(),
+          })
+          .select("id").single();
+        if (rpErr) throw rpErr;
+        rawPostIds.push(rawPostId!.id as string);
+
+        const { error } = await db.rpc("enqueue_scoring_job", {
+          p_raw_post_id: rawPostId!.id, p_scoring_request_id: cbReq,
+        });
+        assert(error, "enqueue after the circuit-break has already closed the request must raise");
+        assert(/not active/i.test(error.message), `expected a not-active error, got: ${error.message}`);
+      });
+
+      await runStep("no pending or processing jobs remain under a closed request, end to end", async () => {
+        const cbReq = await makeEvalRequest();
+        const { jobId: earlyJobId } = await enqueueUnder(cbReq, "Enqueued before the close.");
+        const { jobId: triggerJobId } = await enqueueUnder(cbReq, "Triggers the circuit-break.");
+        const { data: triggerRow } = await db.from("scoring_job_state").select("raw_post_id, msg_id").eq("id", triggerJobId).single();
+        await db.rpc("record_scoring_failure", {
+          p_job_id: triggerJobId, p_msg_id: triggerRow!.msg_id, p_raw_post_id: triggerRow!.raw_post_id,
+          p_scoring_request_id: cbReq, p_failure_type: "client_error", p_error_code: "401", p_error_message: "auth failed",
+        });
+
+        // A late enqueue attempt (post-close) must also fail, contributing no job.
+        const { data: rawPostId } = await db
+          .from("raw_posts")
+          .insert({
+            source_id: sourceId, source_url: `https://example.test/post-${crypto.randomUUID()}`,
+            external_post_id: crypto.randomUUID(), post_text: "late post, must not enqueue",
+            published_at: new Date().toISOString(),
+          })
+          .select("id").single();
+        rawPostIds.push(rawPostId!.id as string);
+        // Expected to fail (request is closed) — the Supabase client resolves
+        // with { error }, it does not throw, so this is just discarded; only
+        // the resulting row count below is what this test actually checks.
+        await db.rpc("enqueue_scoring_job", { p_raw_post_id: rawPostId!.id, p_scoring_request_id: cbReq });
+
+        const { count: nonTerminalCount } = await db
+          .from("scoring_job_state").select("*", { count: "exact", head: true })
+          .eq("scoring_request_id", cbReq).in("status", ["pending", "processing"]);
+        assertEquals(nonTerminalCount, 0, "zero pending/processing jobs remain under the closed request");
+        assert([earlyJobId, triggerJobId].every((id) => id), "sanity: both jobs were created before assertions ran");
       });
     } finally {
       await t.step("zzz teardown", teardown);
