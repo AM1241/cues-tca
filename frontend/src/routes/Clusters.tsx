@@ -2,6 +2,12 @@ import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useToast } from '../components/toast-context'
 import { Spinner, EmptyState, ErrorNotice } from '../components/ui'
+import {
+  GenerationResultCard,
+  GenerationErrorList,
+  type GenerationResultView,
+  type GenerationErrorView,
+} from '../components/generation'
 
 // anonymized_posts_current joined to its raw_post and source, for the
 // inspection list. replacements is the audit trail written by anonymize-worker.
@@ -93,6 +99,16 @@ export function Clusters() {
   const [periodEnd, setPeriodEnd] = useState(daysAgo(0))
   const [running, setRunning] = useState(false)
   const [anonymising, setAnonymising] = useState(false)
+
+  // Generate (Phase 5 binding — see PHASE5_FRONTEND_HANDOFF.md). Selection is
+  // per-run: switching runs clears it, because cluster_ids are only valid
+  // against their own clustering_run_id (422 otherwise).
+  const [selectedClusterIds, setSelectedClusterIds] = useState<Set<string>>(new Set())
+  const [wantPost, setWantPost] = useState(true)
+  const [wantCarousel, setWantCarousel] = useState(true)
+  const [generating, setGenerating] = useState(false)
+  const [genResults, setGenResults] = useState<GenerationResultView[] | null>(null)
+  const [genErrors, setGenErrors] = useState<GenerationErrorView[]>([])
   // Each job is one real LLM entity-extraction call. Defaults low on purpose:
   // PHASE4_COMPLETION.md requires the first real run to be bounded and read
   // before scaling up. Backfill enqueues everything eligible either way; this
@@ -172,6 +188,7 @@ export function Clusters() {
   }, [])
 
   useEffect(() => {
+    setSelectedClusterIds(new Set())
     if (!selectedRunId) {
       setClustersById(new Map())
       setAssignmentByPost(new Map())
@@ -302,6 +319,67 @@ export function Clusters() {
     setSelectedRunId(data?.run_id ?? null)
   }
 
+  // Synchronous by design — the function blocks until every requested cluster
+  // is done (several seconds per cluster), so the response carries the full
+  // outcome and no polling is needed.
+  async function generateNow() {
+    if (generating || !selectedRunId || selectedClusterIds.size === 0) return
+    const output_types = [...(wantPost ? ['post'] : []), ...(wantCarousel ? ['carousel'] : [])]
+    if (output_types.length === 0) {
+      toast.error('Pick at least one output type.')
+      return
+    }
+    setGenerating(true)
+    setGenResults(null)
+    setGenErrors([])
+    const { data: sessionData } = await supabase.auth.getSession()
+    const token = sessionData.session?.access_token
+    const { data, error } = await supabase.functions.invoke('generate', {
+      body: {
+        clustering_run_id: selectedRunId,
+        cluster_ids: [...selectedClusterIds],
+        output_types,
+      },
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    })
+    setGenerating(false)
+
+    if (error) {
+      // Upfront validation errors (400/404/422) are non-2xx: nothing was
+      // created, and the real reason is in the response body, not in
+      // supabase-js's generic "non-2xx status code" message.
+      let message = error.message
+      try {
+        const body = await (error as { context?: Response }).context?.json()
+        if (body?.error) message = body.error
+      } catch {
+        /* body already consumed or not JSON — keep the generic message */
+      }
+      toast.error(message)
+      return
+    }
+
+    setGenResults((data?.results ?? []) as GenerationResultView[])
+    setGenErrors((data?.errors ?? []) as GenerationErrorView[])
+    if (data?.ok) {
+      toast.success(`Generated ${data.results.length} cluster(s)`)
+    } else {
+      // 200 + ok:false is partial/total generation failure: a request row
+      // exists, successful clusters have real results, failed ones are in
+      // `errors` — show both rather than discarding the successes.
+      toast.error(data?.error ?? 'Generation failed')
+    }
+  }
+
+  function toggleCluster(id: string) {
+    setSelectedClusterIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
   const selected = useMemo(
     () => rows?.find((r) => r.raw_post_id === selectedId) ?? null,
     [rows, selectedId],
@@ -310,6 +388,17 @@ export function Clusters() {
     () => failedRows.find((r) => r.raw_post_id === selectedId) ?? null,
     [failedRows, selectedId],
   )
+  const selectedRun = useMemo(
+    () => runs?.find((r) => r.id === selectedRunId) ?? null,
+    [runs, selectedRunId],
+  )
+  const postCountByCluster = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const clusterId of assignmentByPost.values()) {
+      counts.set(clusterId, (counts.get(clusterId) ?? 0) + 1)
+    }
+    return counts
+  }, [assignmentByPost])
 
   if (error) return <ErrorNotice message={error} />
   if (!rows) return <Spinner label="Loading anonymised posts…" />
@@ -416,6 +505,102 @@ export function Clusters() {
             ))}
           </ul>
         </details>
+      )}
+
+      {/* Generate — only offered for a completed run, per the handoff: the
+          backend rejects incomplete/failed runs anyway, so don't offer them. */}
+      {selectedRun?.status === 'completed' && clustersById.size > 0 && (
+        <div className="mb-6 rounded-lg border border-slate-200 bg-white p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-900">Generate editorial copy</h2>
+              <p className="mt-0.5 text-xs text-slate-500">
+                Select clusters from this run — generation takes several seconds per cluster.
+              </p>
+            </div>
+            <div className="flex items-center gap-4">
+              <label className="flex items-center gap-1.5 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={wantPost}
+                  onChange={(e) => setWantPost(e.target.checked)}
+                  className="rounded border-slate-300"
+                />
+                Post
+              </label>
+              <label className="flex items-center gap-1.5 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={wantCarousel}
+                  onChange={(e) => setWantCarousel(e.target.checked)}
+                  className="rounded border-slate-300"
+                />
+                Carousel
+              </label>
+              <button
+                onClick={generateNow}
+                disabled={generating || selectedClusterIds.size === 0}
+                className="rounded-md bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+              >
+                {generating
+                  ? 'Generating…'
+                  : `Generate${selectedClusterIds.size > 0 ? ` (${selectedClusterIds.size})` : ''}`}
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-3 flex flex-wrap gap-2">
+            {[...clustersById.values()].map((c) => {
+              const count = postCountByCluster.get(c.id) ?? 0
+              const checked = selectedClusterIds.has(c.id)
+              // label_failed clusters are not selectable: the backend rejects
+              // them per-cluster, so grey them out instead of offering them.
+              return (
+                <button
+                  key={c.id}
+                  onClick={() => !c.label_failed && toggleCluster(c.id)}
+                  disabled={c.label_failed || generating}
+                  title={c.label_failed ? 'Labelling failed for this cluster — not eligible for generation' : undefined}
+                  className={`rounded-md border px-2.5 py-1 text-xs font-medium transition ${
+                    c.label_failed
+                      ? 'cursor-not-allowed border-amber-200 bg-amber-50 text-amber-500'
+                      : checked
+                        ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
+                        : 'border-slate-200 bg-white text-slate-600 hover:border-slate-400'
+                  }`}
+                >
+                  {c.label} · {count}
+                </button>
+              )
+            })}
+          </div>
+
+          {(genResults !== null || genErrors.length > 0) && (
+            <div className="mt-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-slate-700">
+                  {genResults && genResults.length > 0
+                    ? `${genResults.length} result${genResults.length === 1 ? '' : 's'}`
+                    : 'No results'}
+                </h3>
+                <button
+                  onClick={() => {
+                    setGenResults(null)
+                    setGenErrors([])
+                  }}
+                  className="text-xs text-slate-500 hover:underline"
+                >
+                  Dismiss
+                </button>
+              </div>
+              <GenerationErrorList
+                errors={genErrors}
+                labelFor={(id) => clustersById.get(id)?.label ?? id}
+              />
+              {genResults?.map((r) => <GenerationResultCard key={r.cluster_id} result={r} />)}
+            </div>
+          )}
+        </div>
       )}
 
       <div className="grid grid-cols-[1fr_1.6fr] gap-6">
