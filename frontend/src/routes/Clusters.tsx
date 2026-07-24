@@ -93,6 +93,11 @@ export function Clusters() {
   const [periodEnd, setPeriodEnd] = useState(daysAgo(0))
   const [running, setRunning] = useState(false)
   const [anonymising, setAnonymising] = useState(false)
+  // Each job is one real LLM entity-extraction call. Defaults low on purpose:
+  // PHASE4_COMPLETION.md requires the first real run to be bounded and read
+  // before scaling up. Backfill enqueues everything eligible either way; this
+  // caps only how many are drained per click.
+  const [anonBatch, setAnonBatch] = useState(5)
 
   async function loadAnonymised() {
     const { data, error } = await supabase
@@ -235,7 +240,7 @@ export function Clusters() {
     const { data: sessionData } = await supabase.auth.getSession()
     const token = sessionData.session?.access_token
     const { data, error } = await supabase.functions.invoke('anonymize-worker', {
-      body: { backfill: true, batch_size: 25 },
+      body: { backfill: true, batch_size: anonBatch },
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     })
     setAnonymising(false)
@@ -340,6 +345,19 @@ export function Clusters() {
               value={periodEnd}
               onChange={(e) => setPeriodEnd(e.target.value)}
               className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+            />
+          </label>
+          <label className="text-sm">
+            <span className="mb-1 block text-slate-600">Batch</span>
+            <input
+              type="number"
+              min={1}
+              max={25}
+              value={anonBatch}
+              onChange={(e) =>
+                setAnonBatch(Math.max(1, Math.min(25, Number(e.target.value) || 1)))
+              }
+              className="w-16 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
             />
           </label>
           <button
