@@ -251,6 +251,13 @@ Both of the last two require explicit go-ahead on OpenAI spend before running.
 
 ### Phase 4 — Anonymise & cluster
 
+> The section below is the original architectural sketch, written before Phase 3
+> existed in its current form. It is **not** the spec — see
+> `docs/PHASE4_REQUIREMENTS.md` for the confirmed product requirements and
+> acceptance criteria (job architecture, failure modes, clustering run model,
+> config knobs, test scope). Where the two disagree, `PHASE4_REQUIREMENTS.md`
+> wins.
+
 - Edge Function `anonymize`: LLM entity extraction, then the legacy deterministic replacement
   (port `anonymization_service.py` closely — the public-body preservation list and the
   `replacements` audit trail are correct and worth keeping). Upsert into
