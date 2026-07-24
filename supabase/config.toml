@@ -485,3 +485,8 @@ verify_jwt = false
 # as ingest — _shared/auth.ts is the actual gate either way.
 [functions.cluster]
 verify_jwt = false
+
+# generate: dual auth, same as cluster — the frontend's cluster-selection UI
+# is the primary caller, via a real editor Bearer token.
+[functions.generate]
+verify_jwt = false

@@ -337,6 +337,164 @@ export type Database = {
           },
         ]
       }
+      cluster_generation_request_errors: {
+        Row: {
+          cluster_id: string
+          created_at: string
+          error_message: string
+          error_type: string
+          generation_request_id: string
+          id: string
+        }
+        Insert: {
+          cluster_id: string
+          created_at?: string
+          error_message: string
+          error_type: string
+          generation_request_id: string
+          id?: string
+        }
+        Update: {
+          cluster_id?: string
+          created_at?: string
+          error_message?: string
+          error_type?: string
+          generation_request_id?: string
+          id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cluster_generation_request_errors_generation_request_id_fkey"
+            columns: ["generation_request_id"]
+            isOneToOne: false
+            referencedRelation: "cluster_generation_requests"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      cluster_generation_requests: {
+        Row: {
+          clustering_run_id: string
+          completed_at: string | null
+          created_at: string
+          created_by: string | null
+          error_message: string | null
+          id: string
+          output_types: string[]
+          requested_cluster_ids: string[]
+          status: string
+        }
+        Insert: {
+          clustering_run_id: string
+          completed_at?: string | null
+          created_at?: string
+          created_by?: string | null
+          error_message?: string | null
+          id?: string
+          output_types: string[]
+          requested_cluster_ids: string[]
+          status?: string
+        }
+        Update: {
+          clustering_run_id?: string
+          completed_at?: string | null
+          created_at?: string
+          created_by?: string | null
+          error_message?: string | null
+          id?: string
+          output_types?: string[]
+          requested_cluster_ids?: string[]
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cluster_generation_requests_clustering_run_id_fkey"
+            columns: ["clustering_run_id"]
+            isOneToOne: false
+            referencedRelation: "clustering_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      cluster_generation_results: {
+        Row: {
+          anonymize_result_ids: string[]
+          carousel_output: Json | null
+          cluster_id: string
+          cluster_label: string
+          clustering_run_id: string
+          config_snapshot: Json
+          created_at: string
+          generation_request_id: string
+          id: string
+          model: string
+          output_types: string[]
+          post_output: Json | null
+          prompt_hash: string
+          prompt_version: string
+          provider_response: Json | null
+          raw_post_ids: string[]
+        }
+        Insert: {
+          anonymize_result_ids: string[]
+          carousel_output?: Json | null
+          cluster_id: string
+          cluster_label: string
+          clustering_run_id: string
+          config_snapshot: Json
+          created_at?: string
+          generation_request_id: string
+          id?: string
+          model: string
+          output_types: string[]
+          post_output?: Json | null
+          prompt_hash: string
+          prompt_version: string
+          provider_response?: Json | null
+          raw_post_ids: string[]
+        }
+        Update: {
+          anonymize_result_ids?: string[]
+          carousel_output?: Json | null
+          cluster_id?: string
+          cluster_label?: string
+          clustering_run_id?: string
+          config_snapshot?: Json
+          created_at?: string
+          generation_request_id?: string
+          id?: string
+          model?: string
+          output_types?: string[]
+          post_output?: Json | null
+          prompt_hash?: string
+          prompt_version?: string
+          provider_response?: Json | null
+          raw_post_ids?: string[]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cluster_generation_results_cluster_id_fkey"
+            columns: ["cluster_id"]
+            isOneToOne: false
+            referencedRelation: "clusters"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cluster_generation_results_clustering_run_id_fkey"
+            columns: ["clustering_run_id"]
+            isOneToOne: false
+            referencedRelation: "clustering_runs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cluster_generation_results_generation_request_id_fkey"
+            columns: ["generation_request_id"]
+            isOneToOne: false
+            referencedRelation: "cluster_generation_requests"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       clustering_run_posts: {
         Row: {
           anonymize_result_id: string
@@ -1494,6 +1652,24 @@ export type Database = {
         }
         Returns: string
       }
+      complete_cluster_generation_result: {
+        Args: {
+          p_anonymize_result_ids: string[]
+          p_carousel_output: Json
+          p_cluster_id: string
+          p_cluster_label: string
+          p_config_snapshot: Json
+          p_model: string
+          p_output_types: string[]
+          p_post_output: Json
+          p_prompt_hash: string
+          p_prompt_version: string
+          p_provider_response?: Json
+          p_raw_post_ids: string[]
+          p_request_id: string
+        }
+        Returns: string
+      }
       complete_clustering_run: {
         Args: { p_clusters: Json; p_run_id: string }
         Returns: undefined
@@ -1508,6 +1684,14 @@ export type Database = {
           p_reason: string
           p_scoring_request_id: string
           p_theme_scores: Json
+        }
+        Returns: string
+      }
+      create_cluster_generation_request: {
+        Args: {
+          p_clustering_run_id: string
+          p_output_types: string[]
+          p_requested_cluster_ids: string[]
         }
         Returns: string
       }
@@ -1572,6 +1756,10 @@ export type Database = {
         Returns: undefined
       }
       finalize_ingest_run: { Args: { p_run_id: string }; Returns: string }
+      finish_cluster_generation_request: {
+        Args: { p_request_id: string }
+        Returns: string
+      }
       import_legacy_analyses: { Args: never; Returns: number }
       is_editor: { Args: never; Returns: boolean }
       open_production_scoring_request: {
@@ -1620,6 +1808,15 @@ export type Database = {
           p_raw_post_id: string
         }
         Returns: string
+      }
+      record_cluster_generation_error: {
+        Args: {
+          p_cluster_id: string
+          p_error_message: string
+          p_error_type: string
+          p_request_id: string
+        }
+        Returns: undefined
       }
       record_clustering_run_input: {
         Args: { p_input: Json; p_run_id: string }
