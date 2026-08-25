@@ -1,108 +1,191 @@
 # Session handoff — CUES Editorial Cloud
 
-Last updated: 2026-07-24 (session 10 — merge to main, first real Phase 4/5
-executions, Generate binding). Read this first, then `MIGRATION_PLAN.md`.
-This file is the single "where are we" pointer between working sessions.
+Last updated: 2026-08-25 (session 11 — production audit: CORS blocker found and
+fixed, `score-worker` v7 provenance resolved, stale Netlify deploy identified).
+Read this first, then `MIGRATION_PLAN.md`. This file is the single "where are
+we" pointer between working sessions.
+
+> Keep writing state here. Claude Code deletes local session transcripts after
+> `cleanupPeriodDays` (default 30), and the session 1–10 transcripts were lost
+> that way on 2026-08-25. This file and the git history are the only durable
+> record.
 
 ## Plain-language state (read this first)
 
-**The full pipeline — ingest → score → anonymise → cluster → generate — has
-now run end to end against cloud with real data and real OpenAI calls.** All
-implementation branches are merged; `main` and `phase6-frontend-binding`
-point at the same commit, and Netlify deploys from `phase6-frontend-binding`
-(see `docs/NETLIFY_DEPLOYMENT.md`).
+**Session 11 ran no pipeline stages and changed no application code.** It was an
+audit of what is actually deployed versus what is in this repo. Cloud data is
+exactly what session 10 left behind. Three things came out of it that were not
+previously known, and one production blocker was fixed.
 
 | Piece | Status |
 |---|---|
 | `ingest` | live since Phase 2, unchanged |
-| `score-worker` | cloud `v7` works but **could not be diffed against this repo** (deployed from a colleague's checkout). Repo version NOT deployed — blocked on confirming v7's provenance with its author. "Score now" in the UI 403s until resolved. |
-| `anonymize-worker` | **redeployed this session** with the source-name-variants fix (see below); all 51 eligible posts anonymised through it |
-| `cluster` | first real run this session: 51/51 embedded, 4 labeled clusters, 0 failures |
-| `generate` | first real run this session: 1 cluster, post + carousel, `status=completed` |
-| Frontend | all six stages bound; Generate action on Clusters view + read-only history on `/generate`. Deployed via Netlify from `phase6-frontend-binding`. |
+| `score-worker` | cloud `v7` **provenance resolved this session** — it is this repo's code plus one deliberate internal-only guard (see below). "Score now" still 403s, now for a known and correct reason. |
+| `anonymize-worker` | unchanged since session 10; all 51 eligible posts anonymised |
+| `cluster` | unchanged; 1 run, 4 labeled clusters |
+| `generate` | unchanged; 1 request, 1 result |
+| Edge Function CORS | **fixed this session** — the production origin was rejected at preflight on all five functions |
+| Frontend (repo) | all six stages bound, Generate action + history present at `8bcc9c1` |
+| Frontend (deployed) | **stale — serving a pre-`814ebfc` build.** `/generate` is still the "Not built yet" placeholder in production. |
 
-## What happened this session (10)
+## What happened this session (11)
 
-1. **Merged everything to `main`**: `phase6-frontend-binding` (fast-forward)
-   + `phase5-generation` (clean merge — the predicted `config.toml` conflict
-   auto-resolved) + the colleague's Netlify prep commit (`5bcd509`).
-   `main` == `phase6-frontend-binding`; both pushed.
-2. **Widened the anonymise run** from 2 to all 51 eligible posts, in bounded
-   batches (10/25/14), zero failures — and the watching paid off:
-   - **Leak found**: "GBfoods" survived anonymisation. Root cause is an
-     inter-stage contract bug: stage 1 only replaced the exact catalogue
-     label ("STAR / GBfoods Italy LinkedIn", which never appears in body
-     text) while stage 2's prompt tells the model *not* to report the
-     source's own name — so short forms fell through both stages.
-   - **Fix deployed**: stage 1 now expands the label into the name forms
-     posts actually use (strip " LinkedIn", split on "/", strip trailing
-     country), each guarded per-variant by `isPublicBody`. MASAF, ISMEA,
-     CREA, INAIL, AGEA, UNESCO, Agenzia ICE, Camera dei Deputati added to
-     the exact-name preservation list (the model had been replacing them,
-     MASAF inconsistently). 15/15 offline tests + the 12-step DB-backed
-     handler suite pass; commit `081f986`.
-   - **All 51 posts re-anonymised** under the fixed worker (requeue via
-     `anonymize_job_state` reset + fresh `pgmq.send`, mirroring backfill).
-     Verified: no company-name survivals, MASAF consistently preserved
-     (`generalized_source_name = 'MASAF LinkedIn'`), no listed institution
-     replaced anywhere.
-3. **The "30 legacy rows" question resolved itself**: backfill eligibility is
-   `current_result_id IS NULL`, which the legacy-loaded rows satisfied, so
-   the widened run replaced them in place with real pipeline output.
-   `anonymized_posts_current` = 51 rows, all pipeline-produced, zero legacy
-   remnants, zero still-eligible.
-4. **First real clustering run** (period 2025-07-01 → 2026-07-24): 51
-   eligible, 51 embedded, 4 Italian-labeled clusters (2–3 posts each), 41
-   unclustered, no label failures.
-5. **First real generation**: 1 cluster ("Più controlli, più sicurezza…"),
-   post + carousel, `gpt-5.4-nano`, `generate_v1`, request `completed`,
-   result row carries the full traceability snapshot (3 posts).
-6. **Generate bound in the frontend** (commit `814ebfc`): action on the
-   Clusters view, read-only history on `/generate` (replaces the
-   placeholder). Typecheck, build, and oxlint clean.
+1. **CORS was the real production blocker, not the `score-worker` 403.**
+   Every Edge Function rejected `https://cues-tca.netlify.app` at preflight —
+   HTTP 403, no `Access-Control-Allow-Origin` — while accepting
+   `http://localhost:5173`. The `ALLOWED_ORIGINS` secret existed but did not
+   contain the production origin: step C.2 of `docs/NETLIFY_DEPLOYMENT.md` was
+   never completed. Consequence: **every action button in production was dead**
+   — Collect, Score, Anonymise, Run clustering, Generate. Reads were unaffected
+   (PostgREST/RLS, not Edge Functions), so the app looked healthy.
+
+   Fixed by setting the secret to a superset that preserves local dev:
+
+   ```
+   ALLOWED_ORIGINS="http://localhost:5173,http://127.0.0.1:5173,https://cues-tca.netlify.app"
+   ```
+
+   No redeploy needed — `_shared/cors.ts` reads it per request. Verified: all
+   ten function×origin preflight combinations now return 204 with the correct
+   `Access-Control-Allow-Origin`.
+
+   **Deploy previews still will not work.** `isAllowedOrigin` uses an exact
+   `Array.includes()`, so the `https://*--<site>.netlify.app` wildcard that
+   `NETLIFY_DEPLOYMENT.md` suggests works for Supabase Auth redirect URLs but
+   not for CORS. Functional previews need prefix matching in `cors.ts`.
+
+2. **`score-worker` v7 provenance is resolved — stop treating it as unknown.**
+   The deployed eszip bundles of all five functions were downloaded via the
+   Management API (`GET /v1/projects/{ref}/functions/{slug}/body`), unpacked
+   with `@deno/eszip`, and compared against this repo after type-erasure
+   through the same compiler. (The deployed code is transpiled and reformatted,
+   so a raw text diff is meaningless — it reports every single file as
+   different, including functions we know were deployed from here.)
+
+   Across all 41 deployed modules there is **exactly one semantic difference**,
+   in `score-worker/index.ts`:
+
+   ```js
+   // cloud v7 — present
+   const actor = await authenticate(req, body);
+   if (actor.kind !== "internal") {
+     throw new RequestError(403, "score-worker is driven by the queue, not by a user request.");
+   }
+
+   // this repo — absent
+   await authenticate(req, body);
+   ```
+
+   Everything else differs only in bundler emit (dropped redundant parens, a
+   class-field initializer moved into the constructor). Cloud v7 is this repo's
+   `score-worker` plus a deliberate internal-only invocation guard. Confirmed
+   end to end in production after the CORS fix — clicking "Score now" now
+   reaches the function and returns
+   `{"ok":false,"error":"score-worker is driven by the queue, not by a user request."}`.
+
+   **The remaining decision is a design one, not archaeology:** either drop the
+   guard so allowlisted admins can drain the queue from the UI, or keep it and
+   route "Score now" through the internal-secret path. Do not re-enqueue the 47
+   unscored posts until this is settled.
+
+3. **The Netlify deploy is one commit behind, and has been since 2026-07-24.**
+   The served bundle contains no reference to `cluster_generation_requests`,
+   `cluster_generation_results`, `carousel`, or the generation-history view,
+   and it *does* contain the string `"Not built yet — Phase 6."`. That is the
+   state before `814ebfc` ("bind Generate to cluster selection and add history
+   view"). Confirmed in the live UI: `/generate` renders the placeholder and no
+   Generate action exists on the Clusters view.
+
+   `origin/main` and `origin/phase6-frontend-binding` are both at `8bcc9c1`,
+   equal to local HEAD — **nothing is unpushed.** The build did not run, failed,
+   or is wired to something other than the expected branch. Netlify's deploy log
+   is the next place to look. Note that with `base = "frontend"` in
+   `netlify.toml`, Netlify can skip builds for commits touching no files under
+   `frontend/`, which would explain why the docs-only tip commit `8bcc9c1`
+   produced no deploy.
+
+4. **Generated content cannot be reviewed or exported — the two halves are not
+   connected.** `Review.tsx` and `Export.tsx` read `editorial_assets`;
+   `generate` writes `cluster_generation_results`. All 15 `editorial_assets`
+   rows are legacy (created 2026-06-26 → 2026-07-01, all `draft`, none
+   approved), and `cluster_generation_results` has no `status`, `approved_by`,
+   or `approval_notes` columns at all. The review workflow currently operates
+   entirely on dead legacy data. This is the substance of Phase 7.
+
+5. **Anonymisation leak in the Clusters view (display-only).**
+   `anonymized_posts_current` has no title column — the anonymiser only
+   processes `post_text` — but `Clusters.tsx:623` renders `raw_posts.post_title`
+   *in preference to* the anonymised text. Exactly one of the 180 raw posts
+   carries a title, and it is `"GBfoods Sustainability Initiative"`, so the
+   source company name is displayed verbatim in the very list an editor uses to
+   inspect anonymisation. The `anonymized_text` column itself is clean (0 of 51
+   contain the name) and `generate` reads only `anonymized_posts_current`, so
+   nothing leaks into generated copy. Any future titled post bypasses
+   anonymisation in this view.
+
+6. **Smaller observations from the live walkthrough** (all seven routes, signed
+   in as the single allowlisted editor):
+   - `/export` opens empty: the default status filter is `approved` and every
+     asset is `draft`.
+   - Every row on `/posts` shows the reason *"Simulated LLM semantic scoring
+     (source-aware, context-based)"* — the 133 legacy analyses. No post
+     currently visible to an editor carries a real LLM score.
+   - The corpus encoding corruption is visible on every screen (`qualit?`,
+     `L?Italia`, `????`), including the editor's own `full_name` in
+     `public.editors`.
+   - Stage-2 over-replacement produces ungrammatical Italian, e.g. *"Si è
+     riunita oggi al MASAF la another food-sector organization"*.
+   - `routes/Placeholder.tsx` is now unreferenced — `App.tsx` imports every
+     route directly.
 
 ## Known issues / decisions for next session
 
-- **Corpus-wide encoding corruption (pre-existing, upstream of Phase 4):**
-  non-ASCII characters (accents, curly quotes) are literal `?` in
-  `raw_posts.post_text` — verified at the byte level (`ascii()=63`) on the
-  RAW rows, so ingest or the RapidAPI provider mangled them. Anonymise
-  faithfully preserves the corruption; cluster labels are clean because
-  they're LLM-written. Worth fixing at ingest and re-collecting, or
-  accepting for editorial copy (generate outputs read fine regardless).
-- **Stage-2 over-replacement (safe direction, quality cost):** the entity
-  extractor replaces regions (Lombardia, Veneto), generic phrases ("Made in
-  Italy", "GDO"), people (Al Bano, Ministro Lollobrigida), and event names
-  with "another food-sector organization". No leak risk, but it degrades
-  the text `generate` reads. Tightening the prompt or the merge guard is a
-  candidate follow-up, not urgent.
-- **`score-worker` deploy still blocked** on v7 provenance (see table).
-  The 47 unscored posts stay unscored until that's resolved — re-enqueueing
-  them is pointless before a trusted worker is deployed.
-- **Secret hygiene:** `frontend/.env.local` holds a Supabase PAT
-  (`SUPABASE_ACCESS_TOKEN`) and the DB password — gitignored, but rotate
-  the PAT and move it out of the frontend directory. Flagged in
-  `docs/PHASE6_FRONTEND_BINDING.md` too.
-- A temporary admin editor (`temp-anonymize-widen@cues-internal.test`) was
-  created for this session's function calls and **deleted afterwards**
-  (auth user + `editors` row; `created_by` on the generation request is
-  null by FK `on delete set null`). The real allowlist is 1 editor.
+- **`score-worker` guard** — design decision, see item 2. Blocks the 47
+  unscored posts.
+- **Netlify rebuild** — see item 3. Until it runs, production has no Generate.
+- **Phase 7 bridge** — migration `0017` adding review columns to
+  `cluster_generation_results`, plus rewiring `Review.tsx` / `Export.tsx`.
+  Regeneration-with-feedback and DOCX export are still unbuilt.
+- **Title anonymisation** — either anonymise titles in the worker, or stop
+  preferring the raw title in `Clusters.tsx`. The second is a one-line fix.
+- **Encoding corruption** — still unaddressed at ingest, still cosmetic-only for
+  generated copy.
+- **Secret hygiene** — `frontend/.env.local` still holds the Supabase PAT and
+  the DB password. Gitignored, but it does not belong in the frontend
+  directory. `SUPABASE_ACCESS_TOKEN` is better set as a user environment
+  variable, which is also where the Supabase MCP server reads it from.
 
-## Cloud vs local — exact state (verified end of session 10)
+## Cloud vs local — exact state (verified 2026-08-25)
 
 | | Cloud (`bxaovkzemfyxrxbcqask`) | Local stack |
 |---|---|---|
-| Migrations | 0001–0016 | 0001–0016 (`supabase db reset` re-run this session; local had drifted to pre-0014 and was reset) |
-| Data | 180 raw_posts · 133 analyzed · 51 anonymized (all pipeline-produced) · 1 clustering run (4 clusters) · 1 generation request (completed) + 1 result | empty (reset) |
-| Functions | ingest, score-worker v7 (unverified provenance), anonymize-worker (**fixed version**), cluster, generate — all ACTIVE | — |
-| Branches | `main` == `phase6-frontend-binding` == Netlify deploy branch | — |
+| Migrations | 0001–0016 — identical set to `supabase/migrations/` | as of session 10 |
+| Data | 180 raw_posts · 133 analyzed (47 raw unscored) · 51 anonymized (0 still eligible) · 51 embedded · 4 clusters / 10 assignments · 1 cluster generation request + 1 result · 15 legacy editorial_assets, all draft | — |
+| Functions | ingest v8, score-worker v7, anonymize-worker v6, cluster v3, generate v1 — all ACTIVE, all verified against this repo | — |
+| Secrets | `ALLOWED_ORIGINS` updated this session; others unchanged | — |
+| Config | `min_relevance_score` 50 · `cluster_similarity_threshold` 0.75 · `min_cluster_size` 2 · 6 themes | — |
+| Branches | `main` == `phase6-frontend-binding` == `8bcc9c1`, pushed | — |
+| Netlify | serving a pre-`814ebfc` build | — |
+
+## Verifying deployed functions against this repo
+
+Worth repeating whenever a deployment's provenance is in doubt:
+
+1. `GET https://api.supabase.com/v1/projects/{ref}/functions/{slug}/body` with
+   the PAT returns an ESZIP2 archive.
+2. Unpack it with `@deno/eszip`: `Parser.createInstance()` → `parseBytes()` →
+   `load()` → `getModuleSource(spec)` for each `functions/…` specifier.
+3. Compare against the repo only after running **both** sides through
+   `ts.transpileModule` (type erasure, comments stripped) and stripping
+   whitespace. Trailing commas and redundant parens still differ after that —
+   normalise `,}` `,)` `,]` before concluding anything.
 
 ## How to continue
 
-1. Resolve `score-worker` v7 provenance with its author → deploy repo
-   version → re-enqueue the 47 unscored posts → "Score now" works.
-2. Decide on the encoding corruption (fix ingest + re-collect vs. accept).
-3. Optional: tighten stage-2 over-replacement.
-4. Phase 7 per `MIGRATION_PLAN.md`: review workflow over generation results
-   (approve/edit/regenerate), DOCX export, production smoke on the Netlify
-   URL (`docs/NETLIFY_DEPLOYMENT.md` §C checklist).
+1. Get the Netlify build running; confirm the live bundle stops containing
+   `"Not built yet"` and starts containing `cluster_generation_results`.
+2. Settle the `score-worker` guard, then drain the 47 unscored posts.
+3. Phase 7 per `MIGRATION_PLAN.md`: the review/export bridge first — it is the
+   thing standing between "the pipeline runs" and "an editor can ship copy".
+4. Re-run the production smoke checklist in `docs/NETLIFY_DEPLOYMENT.md` §C,
+   which is now unblocked for the first time.
