@@ -7,6 +7,11 @@ export type Json =
   | Json[]
 
 export type Database = {
+  // Allows to automatically instantiate createClient with right options
+  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
+  __InternalSupabase: {
+    PostgrestVersion: "14.17"
+  }
   graphql_public: {
     Tables: {
       [_ in never]: never
@@ -491,6 +496,50 @@ export type Database = {
             columns: ["generation_request_id"]
             isOneToOne: false
             referencedRelation: "cluster_generation_requests"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      cluster_generation_reviews: {
+        Row: {
+          approval_notes: string | null
+          approval_timestamp: string | null
+          approved_by: string | null
+          created_at: string
+          edited_output: Json | null
+          output_type: string
+          result_id: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          approval_notes?: string | null
+          approval_timestamp?: string | null
+          approved_by?: string | null
+          created_at?: string
+          edited_output?: Json | null
+          output_type: string
+          result_id: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          approval_notes?: string | null
+          approval_timestamp?: string | null
+          approved_by?: string | null
+          created_at?: string
+          edited_output?: Json | null
+          output_type?: string
+          result_id?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cluster_generation_reviews_result_id_fkey"
+            columns: ["result_id"]
+            isOneToOne: false
+            referencedRelation: "cluster_generation_results"
             referencedColumns: ["id"]
           },
         ]
@@ -2015,4 +2064,3 @@ export const Constants = {
     Enums: {},
   },
 } as const
-

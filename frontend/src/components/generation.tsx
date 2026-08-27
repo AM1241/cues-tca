@@ -1,3 +1,5 @@
+import { useState } from 'react'
+
 // Shared rendering for `generate` outputs — used by the Clusters view (the
 // synchronous response, shown immediately) and the Generate view (the same
 // shapes read back from cluster_generation_results). PHASE5_FRONTEND_HANDOFF.md
@@ -80,6 +82,110 @@ export function GenerationResultCard({ result }: { result: GenerationResultView 
         {result.post && <PostOutputCard post={result.post} />}
         {result.carousel && <CarouselOutputCard carousel={result.carousel} />}
       </div>
+    </div>
+  )
+}
+
+// --- Editable counterparts, used by Review ------------------------------------
+// The same shapes as above, as forms. Review writes the result into
+// cluster_generation_reviews.edited_output; the generated original is never
+// modified, so these always start from `edited_output ?? <original>`.
+
+const fieldClass =
+  'w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-500 focus:ring-1 focus:ring-slate-500'
+
+function Field({
+  label,
+  value,
+  onChange,
+  rows,
+}: {
+  label: string
+  value: string
+  onChange: (v: string) => void
+  rows?: number
+}) {
+  return (
+    <label className="block text-sm">
+      <span className="mb-1 block font-medium text-slate-700">{label}</span>
+      {rows ? (
+        <textarea
+          value={value}
+          rows={rows}
+          onChange={(e) => onChange(e.target.value)}
+          className={fieldClass}
+        />
+      ) : (
+        <input value={value} onChange={(e) => onChange(e.target.value)} className={fieldClass} />
+      )}
+    </label>
+  )
+}
+
+export function PostOutputEditor({
+  post,
+  onChange,
+}: {
+  post: PostOutput
+  onChange: (next: PostOutput) => void
+}) {
+  // Hashtags are edited as one comma/space-separated line and normalised back
+  // to the array the JSON shape requires.
+  const [hashtagText, setHashtagText] = useState(post.hashtags.join(' '))
+
+  function commitHashtags(raw: string) {
+    setHashtagText(raw)
+    const tags = raw
+      .split(/[\s,]+/)
+      .map((t) => t.trim())
+      .filter(Boolean)
+      .map((t) => (t.startsWith('#') ? t : `#${t}`))
+    onChange({ ...post, hashtags: tags })
+  }
+
+  return (
+    <div className="space-y-3">
+      <Field label="Headline" value={post.headline} onChange={(v) => onChange({ ...post, headline: v })} />
+      <Field label="Text" value={post.text} rows={10} onChange={(v) => onChange({ ...post, text: v })} />
+      <Field label="CTA" value={post.cta} onChange={(v) => onChange({ ...post, cta: v })} />
+      <Field label="Hashtags" value={hashtagText} onChange={commitHashtags} />
+    </div>
+  )
+}
+
+export function CarouselOutputEditor({
+  carousel,
+  onChange,
+}: {
+  carousel: CarouselOutput
+  onChange: (next: CarouselOutput) => void
+}) {
+  function setSlide(position: number, patch: Partial<CarouselSlide>) {
+    onChange({
+      ...carousel,
+      slides: carousel.slides.map((s) => (s.position === position ? { ...s, ...patch } : s)),
+    })
+  }
+
+  return (
+    <div className="space-y-3">
+      <Field label="Title" value={carousel.title} onChange={(v) => onChange({ ...carousel, title: v })} />
+      <div>
+        <p className="mb-1 text-sm font-medium text-slate-700">Slides</p>
+        <ol className="space-y-3">
+          {carousel.slides.map((s) => (
+            <li key={s.position} className="rounded-md border border-slate-200 p-3">
+              <p className="mb-2 text-xs text-slate-400">Slide {s.position}</p>
+              <div className="space-y-2">
+                <Field label="Heading" value={s.heading} onChange={(v) => setSlide(s.position, { heading: v })} />
+                <Field label="Body" value={s.body} rows={4} onChange={(v) => setSlide(s.position, { body: v })} />
+              </div>
+            </li>
+          ))}
+        </ol>
+      </div>
+      <Field label="Caption" value={carousel.caption} rows={4} onChange={(v) => onChange({ ...carousel, caption: v })} />
+      <Field label="CTA" value={carousel.cta} onChange={(v) => onChange({ ...carousel, cta: v })} />
     </div>
   )
 }

@@ -1,4 +1,5 @@
 import type { Database } from './database.types'
+import type { PostOutput, CarouselOutput } from '../components/generation'
 
 type Asset = Database['public']['Tables']['editorial_assets']['Row']
 
@@ -77,6 +78,81 @@ export function assetToJson({ asset, trace }: AssetExport): string {
     null,
     2,
   )
+}
+
+// --- Generated copy (cluster_generation_reviews over cluster_generation_results)
+
+export type GenerationExport = {
+  clusterLabel: string
+  outputType: 'post' | 'carousel'
+  status: string
+  model: string
+  generatedAt: string
+  /** The output in force: the reviewer's edit if there is one, else the model's. */
+  output: PostOutput | CarouselOutput
+  /** True when a reviewer replaced the model's output. */
+  edited: boolean
+  sourcePosts: { title: string | null; url: string }[]
+}
+
+export function generationToMarkdown(e: GenerationExport): string {
+  const lines: string[] = []
+
+  if (e.outputType === 'post') {
+    const p = e.output as PostOutput
+    lines.push(`# ${p.headline}`, '', p.text.trim(), '', `**${p.cta.trim()}**`, '')
+    if (p.hashtags.length) {
+      lines.push(p.hashtags.map((h) => (h.startsWith('#') ? h : `#${h}`)).join(' '), '')
+    }
+  } else {
+    const c = e.output as CarouselOutput
+    lines.push(`# ${c.title}`, '')
+    for (const s of [...c.slides].sort((a, b) => a.position - b.position)) {
+      lines.push(`## Slide ${s.position} — ${s.heading}`, '', s.body.trim(), '')
+    }
+    lines.push(c.caption.trim(), '', `**${c.cta.trim()}**`, '')
+  }
+
+  lines.push(
+    '---',
+    '',
+    `- Cluster: ${e.clusterLabel}`,
+    `- Output: ${e.outputType}`,
+    `- Status: ${e.status}`,
+    `- Model: ${e.model}`,
+    `- Generated: ${e.generatedAt}`,
+  )
+  if (e.edited) lines.push('- ✎ Edited by a reviewer (the model output differs)')
+
+  if (e.sourcePosts.length) {
+    lines.push('', '## Source posts', '')
+    for (const p of e.sourcePosts) {
+      lines.push(`- [${p.title ?? 'source post'}](${p.url})`)
+    }
+  }
+
+  return lines.join('\n') + '\n'
+}
+
+export function generationToJson(e: GenerationExport): string {
+  return JSON.stringify(
+    {
+      cluster_label: e.clusterLabel,
+      output_type: e.outputType,
+      status: e.status,
+      model: e.model,
+      generated_at: e.generatedAt,
+      edited_by_reviewer: e.edited,
+      output: e.output,
+      source_posts: e.sourcePosts,
+    },
+    null,
+    2,
+  )
+}
+
+export function generationFilename(e: GenerationExport, ext: string) {
+  return `${slug(`${e.clusterLabel}-${e.outputType}`)}.${ext}`
 }
 
 export function download(filename: string, content: string, mime: string) {
