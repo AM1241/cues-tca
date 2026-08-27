@@ -241,6 +241,14 @@ done):**
   7 historically inconsistent rows), then `open_production_scoring_request` + backfill.
   This is the gate before real scores are promoted via `set_current_scoring_result` and
   become what editors see — a product/quality decision, not a Phase 3 implementation gap.
+- [x] **3F — promotion gap closed (2026-08-27, session 13).** score-worker
+  appended to `scoring_results` but never called `set_current_scoring_result`,
+  so scored posts never reached `analyzed_posts` — the projection the UI and
+  every downstream stage read. 6 real cloud results existed with no
+  `analyzed_posts` row at all. Migration `0018` makes completion and promotion
+  one transaction. Cloud v7's internal-only guard, which could never be
+  satisfied from a browser, is replaced by `MANUAL_BATCH_CAP`; "Score now"
+  returns 200. score-worker is cloud v9, built from this repo.
 - [ ] **Repeat-drain loop at scale** — confirm the worker can be re-invoked until the queue
   is empty across many posts without exceeding wall-clock, and that cost/reliability hold
   up. Triggering stays on-demand (button / internal-secret path).

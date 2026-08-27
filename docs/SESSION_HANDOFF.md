@@ -1,8 +1,65 @@
 # Session handoff — CUES Editorial Cloud
 
-Last updated: 2026-08-27 (session 12 — Phase 7 review/export bridge shipped).
-Read this first, then `MIGRATION_PLAN.md`. This file is the single "where are
-we" pointer between working sessions.
+Last updated: 2026-08-27 (session 13 — scoring promotion fixed, "Score now"
+works). Read this first, then `MIGRATION_PLAN.md`. This file is the single
+"where are we" pointer between working sessions.
+
+## Session 13 — scoring finally reaches the product (2026-08-27)
+
+**Every score an editor can see is still fabricated.** All 133 rows in
+`analyzed_posts` point at `source='simulated'`, `llm_used=false` results
+inherited from the legacy system. Since `included_in_generation` derives from
+them, the 51 anonymised posts, the 4 clusters and the generated copy were all
+selected by numbers no model produced. Fixing that is the next real milestone,
+and it was blocked by two defects that compounded:
+
+1. **Scoring appended history but never published it.** `scoring_results` is the
+   immutable log; `analyzed_posts` is the projection the UI and every downstream
+   stage read, written by the separate `set_current_scoring_result` RPC — a
+   deliberate two-step design from 0005. **Nothing ever called step two.**
+   `score-worker` invoked only read/complete/record. Proof in cloud: 6 real
+   `llm_verified` results existed with **no `analyzed_posts` row at all**.
+   Draining the queue in that state would have produced 47 more invisible
+   results and looked like a broken deploy.
+
+   Fixed by migration `0018`: `complete_and_promote_scoring_job` wraps both
+   writes in one transaction. It is done in the database rather than as a second
+   call from the worker because `complete_scoring_job` archives the job's pgmq
+   message — a second round trip that failed would strand the post unpromoted
+   with no message left to re-claim.
+
+2. **Cloud v7's blanket guard.** It rejected every non-internal caller, and could
+   never be satisfied from a browser: the internal path needs
+   `INGEST_INTERNAL_SECRET`, which `auth.ts` requires to be *"never present in a
+   browser"*. It also contradicted `score-worker/index.ts`'s own documented
+   dual-auth contract. Replaced with `MANUAL_BATCH_CAP` — browser callers get 10,
+   internal keep 25, and **setting it to 0 restores internal-only in one line**.
+   The concern is kept as a bound rather than a wall. Note the function takes no
+   post identifier, only a count, so it cannot score on demand regardless.
+
+`score-worker` is now cloud **v9**, built from this repo. `Posts.tsx` no longer
+sends a hardcoded `batch_size` — it sent 25, which the new cap rejected with a
+400; that policy belongs on the server.
+
+Verified: all 18 migrations applied to a local stack from scratch, then
+score-worker 32 steps / ingest 81 / cluster 20 / anonymize-worker 12 /
+generate 10, all passing. The new assertion checks
+`analyzed_posts.current_result_id` — precisely what the old suite never looked
+at, which is how this shipped. Live: "Score now" returns **200** with
+`jobs_read: 0` (the queue is empty, so no provider spend).
+
+### The next action, and its cost
+
+The cloud scoring queue is **empty** and all three `scoring_requests` are
+`closed`. Nothing will score until someone creates a new request and enqueues —
+a deliberate step, not a side effect of clicking. Doing so for all 180 posts
+spends real OpenAI quota. **Start small** (one or two posts) and confirm the
+post appears in `/posts` with a real reason string instead of *"Simulated LLM
+semantic scoring"*, which is the observable proof that promotion works.
+
+---
+
+## Session 12 — the review/export bridge (2026-08-27)
 
 ## Session 12 — the review/export bridge (2026-08-27)
 
