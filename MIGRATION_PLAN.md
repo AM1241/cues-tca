@@ -376,17 +376,37 @@ Progress (2026-07-23, built against the cloud seed data, in parallel with Phase 
 - [ ] Realtime job-status subscription — deferred until the Phase 3 scoring worker emits
   status.
 
-### Phase 7 — Review, export, deploy
+### Phase 7 — Review, export, deploy — REVIEW/EXPORT BRIDGE COMPLETE
 
-- Review is the last unbuilt stage: write `status`, `approved_by`, `approval_timestamp`,
-  `approval_notes`, `feedback_provided`; regeneration re-runs `generate` with the feedback
-  appended to the prompt and links the new asset to the old one.
-- Export: markdown and JSON client-side; DOCX via Edge Function into Storage with a signed URL.
-  Traceability export ships the source-post mapping alongside.
-- Netlify: connect the GitHub repo, `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` in build
-  env, SPA redirect rule. Deploy previews on PRs.
-- **Check:** an editor completes collect → score → generate → approve → export on the
-  production URL.
+- [x] **Netlify deployed** and serving the current commit. Note the two blockers
+  found in session 11, both fixed: `ALLOWED_ORIGINS` did not contain the
+  production origin, so every Edge Function rejected the site at CORS preflight
+  and *every action button was dead*; and the deploy had been a commit behind
+  since 2026-07-24. See `docs/SESSION_HANDOFF.md`.
+- [x] **Review/export bridge** (2026-08-27), migration `0017_generation_review.sql`.
+  `generate` writes `cluster_generation_results`, but Review and Export still read
+  0001's `editorial_assets` — the table 0016 deliberately abandoned — so nothing
+  the pipeline produced was reachable, and Export opened empty because nothing
+  could reach `approved`. New `cluster_generation_reviews` is a **mutable
+  projection over the append-only results** (they are trigger-enforced immutable,
+  so review state cannot live on them), keyed `(result_id, output_type)` so a post
+  can ship while its carousel is still being worked on. Editor edits land in
+  `edited_output`; the model's own output is never modified and stays comparable.
+  Rows are created by an after-insert trigger, never by an editor: no INSERT or
+  DELETE grant, and a column-level UPDATE grant only on
+  `status`/`edited_output`/`approved_by`/`approval_timestamp`/`approval_notes`.
+  Review and Export each gained **Generated** (default) and **Legacy** tabs;
+  traceability for generated copy comes from the result's own `raw_post_ids`
+  snapshot rather than the legacy `traceability_links` join.
+- [ ] **Regeneration with feedback** — needs a `generate` Edge Function change to
+  accept editor feedback and append it to the prompt. Note that re-generation is
+  already possible today (a new request from the Clusters view produces new
+  immutable rows); only the feedback channel is missing.
+- [ ] **DOCX export** — Edge Function into Storage with a signed URL. Markdown and
+  JSON ship client-side today for both tabs.
+- [ ] **Check:** an editor completes collect → score → generate → approve → export
+  on the production URL. Blocked only on `score-worker`'s internal-only guard (see
+  `docs/SESSION_HANDOFF.md`); every other stage is drivable from the UI.
 
 ## Optional automation
 

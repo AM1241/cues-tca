@@ -1,9 +1,42 @@
 # Session handoff — CUES Editorial Cloud
 
-Last updated: 2026-08-25 (session 11 — production audit: CORS blocker found and
-fixed, `score-worker` v7 provenance resolved, stale Netlify deploy identified).
+Last updated: 2026-08-27 (session 12 — Phase 7 review/export bridge shipped).
 Read this first, then `MIGRATION_PLAN.md`. This file is the single "where are
 we" pointer between working sessions.
+
+## Session 12 — the review/export bridge (2026-08-27)
+
+Migration `0017_generation_review.sql` and a Review/Export rewire. Generated
+copy is now reviewable, editable, approvable and exportable; item 4 of session
+11 below is **closed**.
+
+- `cluster_generation_reviews` is a **mutable projection over the append-only
+  results** — the 0016 immutability triggers mean review state cannot live on
+  `cluster_generation_results` itself. Keyed `(result_id, output_type)`, so a
+  post can ship while its carousel is still being worked on.
+- Editor edits go to `edited_output`; the model's own output is never modified,
+  and the Review detail shows both side by side once an edit exists.
+- Rows are created by an after-insert trigger on the results table, never by an
+  editor: no INSERT or DELETE grant, and a **column-level** UPDATE grant only on
+  `status`/`edited_output`/`approved_by`/`approval_timestamp`/`approval_notes`.
+- Verified against the deployed policy with a real editor JWT (not the service
+  role): SELECT 200, granted-column UPDATE 204, `result_id` and `created_at`
+  both `42501`, approving in another user's name rejected by the with-check,
+  INSERT and DELETE `42501`.
+- Verified end to end on the live site: edit → persists across reload → approve
+  → appears in Export under `approved` → Markdown and JSON previews carry the
+  copy, the cluster, the model, the status and the source posts, and flag
+  reviewer edits. The Legacy tab still lists the 7 pre-cloud assets.
+- **Test state was reset afterwards**: both review rows are back to `draft`,
+  unedited, unapproved. Approving real copy is an editorial decision, so none
+  was left standing.
+
+Still open from Phase 7: regeneration-with-feedback (needs a `generate` Edge
+Function change) and DOCX export (needs an Edge Function plus Storage).
+
+---
+
+## Session 11 — production audit (2026-08-25)
 
 > Keep writing state here. Claude Code deletes local session transcripts after
 > `cleanupPeriodDays` (default 30), and the session 1–10 transcripts were lost
@@ -105,7 +138,8 @@ previously known, and one production blocker was fixed.
    produced no deploy.
 
 4. **Generated content cannot be reviewed or exported — the two halves are not
-   connected.** `Review.tsx` and `Export.tsx` read `editorial_assets`;
+   connected.** *(Closed in session 12 — see above.)*
+   `Review.tsx` and `Export.tsx` read `editorial_assets`;
    `generate` writes `cluster_generation_results`. All 15 `editorial_assets`
    rows are legacy (created 2026-06-26 → 2026-07-01, all `draft`, none
    approved), and `cluster_generation_results` has no `status`, `approved_by`,
@@ -143,9 +177,9 @@ previously known, and one production blocker was fixed.
 - **`score-worker` guard** — design decision, see item 2. Blocks the 47
   unscored posts.
 - **Netlify rebuild** — see item 3. Until it runs, production has no Generate.
-- **Phase 7 bridge** — migration `0017` adding review columns to
-  `cluster_generation_results`, plus rewiring `Review.tsx` / `Export.tsx`.
-  Regeneration-with-feedback and DOCX export are still unbuilt.
+- ~~**Phase 7 bridge**~~ — shipped in session 12 as `cluster_generation_reviews`
+  (a separate table, not columns on the immutable results). Regeneration-with-
+  feedback and DOCX export are still unbuilt.
 - **Title anonymisation** — either anonymise titles in the worker, or stop
   preferring the raw title in `Clusters.tsx`. The second is a one-line fix.
 - **Encoding corruption** — still unaddressed at ingest, still cosmetic-only for
