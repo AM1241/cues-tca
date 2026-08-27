@@ -358,7 +358,13 @@ Deno.test({
       if (sawFailure) return; // setup itself failed; nothing else can run meaningfully
 
       // =====================================================================
-      // AUTHORISATION — no editor path; internal secret only
+      // AUTHORISATION
+      //
+      // Only the internal path is exercised here — the editor path needs a real
+      // Auth user plus an editors row, which this suite does not provision. The
+      // rejections below are the ones auth.ts owns regardless of caller kind.
+      // Note the editor path IS supported (see MANUAL_BATCH_CAP in index.ts);
+      // its absence from this file is a coverage gap, not a policy.
       // =====================================================================
       await runStep("no credentials -> 401", async () => {
         const res = await handleScoreWorker(request({}), { db });
@@ -420,6 +426,19 @@ Deno.test({
         assertEquals(result!.llm_used, true);
         assertEquals(result!.overall_relevance, 85);
         assertEquals(result!.theme_scores.sustainability, 85);
+
+        // Completion must PROMOTE, not just append. scoring_results is history;
+        // analyzed_posts is what the UI and every downstream stage read, and a
+        // score that never lands there is invisible to the product — which is
+        // exactly what happened in cloud until 0018. Asserting the history row
+        // alone is what let that ship.
+        const { data: analyzed } = await db
+          .from("analyzed_posts")
+          .select("current_result_id, overall_relevance, included_in_generation, reason_for_score")
+          .eq("raw_post_id", rawPostId).single();
+        assertEquals(analyzed!.current_result_id, result!.id, "analyzed_posts must point at the new result");
+        assertEquals(analyzed!.overall_relevance, 85);
+        assertEquals(analyzed!.reason_for_score, "Strong sustainability angle.");
       });
 
       await runStep("a second read of the same message range does not double-score", async () => {
@@ -626,12 +645,15 @@ Deno.test({
           { result: { theme_scores: themeScores({ innovation: 60 }), reason: "ok" } },
         ]);
 
-        // A db whose complete_scoring_job always errors — the OpenAI call still
+        // A db whose completion RPC always errors — the OpenAI call still
         // succeeds, so this simulates a fault AFTER the paid work is done.
+        // Completion and promotion are one transaction (0018), so a fault here
+        // leaves neither a result nor an analyzed_posts row, and the job stays
+        // leased for a later drain.
         const failingDb = {
           from: db.from.bind(db),
           rpc: (name: string, params?: unknown) =>
-            name === "complete_scoring_job"
+            name === "complete_and_promote_scoring_job"
               ? Promise.resolve({ data: null, error: { message: "simulated DB outage" } })
               : (db.rpc as (n: string, p?: unknown) => unknown)(name, params),
         } as unknown as SupabaseClient;

@@ -62,6 +62,17 @@ export async function getRawPost(db: SupabaseClient, rawPostId: string): Promise
   return { id: row.id, post_text: row.post_text, source_id: row.source_id, source_name: row.sources?.name ?? "unknown" };
 }
 
+/**
+ * Complete a job AND project its result onto analyzed_posts, in one transaction.
+ *
+ * Scoring writes twice: scoring_results is the immutable history, analyzed_posts
+ * is the projection the UI and every downstream stage read. This worker only ever
+ * did the first, so scored posts produced history rows nothing could see. The two
+ * writes are wrapped in one RPC rather than done here in sequence because
+ * complete_scoring_job archives the job's queue message — a second round trip
+ * that failed would strand the post unpromoted with no message left to re-claim.
+ * See 0018_scoring_promote_on_complete.sql.
+ */
 export async function completeJob(
   db: SupabaseClient,
   args: {
@@ -69,7 +80,7 @@ export async function completeJob(
     themeScores: Record<string, number>; reason: string; providerResponse?: unknown;
   },
 ): Promise<"inserted" | "duplicate" | "superseded"> {
-  const { data, error } = await db.rpc("complete_scoring_job", {
+  const { data, error } = await db.rpc("complete_and_promote_scoring_job", {
     p_job_id: args.jobId,
     p_msg_id: args.msgId,
     p_raw_post_id: args.rawPostId,
@@ -79,7 +90,7 @@ export async function completeJob(
     p_provider_response: args.providerResponse ?? null,
     p_processing_token: args.processingToken,
   });
-  if (error) throw new Error(`complete_scoring_job failed: ${error.message}`);
+  if (error) throw new Error(`complete_and_promote_scoring_job failed: ${error.message}`);
   return data as "inserted" | "duplicate" | "superseded";
 }
 

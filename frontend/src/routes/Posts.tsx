@@ -67,14 +67,19 @@ export function Posts() {
 
   // Drain the scoring queue. Jobs are enqueued by a trigger on raw_posts
   // insert, so this never creates work — it only processes what ingest left
-  // behind. batch_size is capped at 25 server-side.
+  // behind.
+  //
+  // batch_size is deliberately NOT sent: how much provider spend one click may
+  // commit is server policy (MANUAL_BATCH_CAP in score-worker), and a number
+  // hardcoded here would silently duplicate it — as it did, sending 25 after
+  // the browser cap dropped to 10, turning every click into a 400.
   async function scoreNow() {
     if (scoring) return
     setScoring(true)
     const { data: sessionData } = await supabase.auth.getSession()
     const token = sessionData.session?.access_token
     const { data, error } = await supabase.functions.invoke('score-worker', {
-      body: { batch_size: 25 },
+      body: {},
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     })
     setScoring(false)

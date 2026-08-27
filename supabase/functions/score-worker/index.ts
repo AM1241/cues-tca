@@ -8,11 +8,17 @@
  * own the state machine (`complete_scoring_job` / `record_scoring_failure` /
  * dead-letter is reached automatically after 3 failures).
  *
- *   { "batch_size": 1..25? }   // default 10
+ *   { "batch_size": 1..25? }   // default 10; browser callers are capped lower,
+ *                              // see MANUAL_BATCH_CAP
  *
  * Dual auth (cron / backfill secret, or an admin editor's token) — scoring is
  * still driven entirely by the queue, never per post; the browser path only
  * drains whatever the queue already holds.
+ *
+ * Completion promotes: each scored post is written to scoring_results AND
+ * projected onto analyzed_posts in one transaction, via
+ * complete_and_promote_scoring_job. Scoring that only appends history is
+ * invisible to the product — see 0018_scoring_promote_on_complete.sql.
  *
  * One job's failure never aborts the batch: each job is wrapped so a thrown
  * error is recorded via record_scoring_failure and the loop continues.
@@ -23,7 +29,7 @@
  */
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2.110.8";
 import { handlePreflight, jsonResponse } from "../_shared/cors.ts";
-import { authenticate } from "../_shared/auth.ts";
+import { authenticate, type Actor } from "../_shared/auth.ts";
 import { serviceClient } from "../_shared/db.ts";
 import { RequestError } from "../_shared/errors.ts";
 import { callOpenAi, OpenAiError, type CallOpenAiOptions } from "../_shared/openai.ts";
@@ -41,18 +47,45 @@ import {
 const DEFAULT_BATCH_SIZE = 10;
 const MAX_BATCH_SIZE = 25;
 
+/**
+ * How much provider spend one browser click may commit.
+ *
+ * Cloud v7 answered this with a blanket `actor.kind !== "internal"` reject,
+ * which left "Score now" permanently 403 in production and contradicted this
+ * file's own documented dual-auth contract. It also could not work: the internal
+ * path authenticates with INGEST_INTERNAL_SECRET, which _shared/auth.ts requires
+ * to be "never present in a browser" — so no UI could ever satisfy it.
+ *
+ * The concern behind it is still real, so it is kept as a bound rather than a
+ * wall. Note what is already guaranteed without any check here: this function
+ * takes no post identifier, only a count, so it cannot score on demand — it can
+ * only work through what ingest already queued, and once the queue is empty a
+ * click does nothing. Editor callers are admin-only (enforced in auth.ts) and
+ * recorded with trigger_source 'manual', so manual spend stays attributable.
+ * What remains is how much one click costs, and that is this cap.
+ *
+ * To re-tighten to internal-only, set this to 0 — one line, no logic change.
+ * Annotated `number` rather than left to inference so that 0 stays a reachable
+ * value: with the literal type, the zero check below is a type error.
+ */
+const MANUAL_BATCH_CAP: number = DEFAULT_BATCH_SIZE;
+
 export interface ScoreWorkerDeps {
   db?: SupabaseClient;
   fetchImpl?: typeof fetch;
   callOpenAiImpl?: typeof callOpenAi;
 }
 
-function parseBatchSize(body: Record<string, unknown>): number {
+function parseBatchSize(body: Record<string, unknown>, actorKind: Actor["kind"]): number {
+  const cap = actorKind === "internal" ? MAX_BATCH_SIZE : MANUAL_BATCH_CAP;
+  if (cap === 0) {
+    throw new RequestError(403, "score-worker is driven by the queue, not by a user request.");
+  }
   const raw = body.batch_size;
-  if (raw === undefined || raw === null) return DEFAULT_BATCH_SIZE;
+  if (raw === undefined || raw === null) return Math.min(DEFAULT_BATCH_SIZE, cap);
   const n = Number(raw);
-  if (!Number.isInteger(n) || n < 1 || n > MAX_BATCH_SIZE) {
-    throw new RequestError(400, `batch_size must be an integer between 1 and ${MAX_BATCH_SIZE}.`);
+  if (!Number.isInteger(n) || n < 1 || n > cap) {
+    throw new RequestError(400, `batch_size must be an integer between 1 and ${cap}.`);
   }
   return n;
 }
@@ -182,9 +215,10 @@ export async function handleScoreWorker(req: Request, deps: ScoreWorkerDeps = {}
     // (cron / backfill), or an admin editor's Bearer token, because the product
     // drives every stage from a button in the UI. _shared/auth.ts is the gate
     // either way, and it is what enforces the admin-only rule on the editor path.
-    await authenticate(req, body as Record<string, unknown>);
+    const actor = await authenticate(req, body as Record<string, unknown>);
 
-    const batchSize = parseBatchSize(body as Record<string, unknown>);
+    // The batch ceiling depends on who is calling: see MANUAL_BATCH_CAP.
+    const batchSize = parseBatchSize(body as Record<string, unknown>, actor.kind);
 
     const apiKey = Deno.env.get("OPENAI_API_KEY");
     if (!apiKey) throw new RequestError(500, "OPENAI_API_KEY is not configured.");
