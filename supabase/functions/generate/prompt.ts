@@ -13,13 +13,22 @@
 import type { JsonSchemaFormat } from "../_shared/openai.ts";
 import type { GenerationConfigRow } from "./data.ts";
 
-export const PROMPT_VERSION = "generate_v1";
+export const PROMPT_VERSION = "generate_v2";
 
-const DEFAULT_BRIEF =
-  "CUES wants to highlight how food-industry organisations communicate change, value, and " +
-  "responsibility. Focus on: innovation and packaging, heritage and contemporary storytelling, " +
-  "sustainability and circular economy, traceability and food safety, and European institutional " +
-  "and policy context.";
+/**
+ * Fallback brief, derived from the operator's editorial_domain rather than
+ * naming a sector. The old constant hardcoded "food-industry organisations",
+ * which was one of the four things that made this tool silently food-only —
+ * pointed at another sector it kept writing for food. See
+ * 0019_editorial_domain.sql. `voice_style` still overrides this entirely.
+ */
+function defaultBrief(domain: string): string {
+  return (
+    `This publication covers ${domain}. Highlight how organisations in that sector ` +
+    "communicate change, value, and responsibility, and give the institutional and " +
+    "policy context that surrounds them."
+  );
+}
 
 const MAX_POSTS = 12;
 const MAX_CHARS_PER_POST = 500;
@@ -48,13 +57,17 @@ export function buildGenerationPrompt(
   posts: GenerationInputPost[],
   config: GenerationConfigRow,
 ): string {
-  const brief = config.voice_style?.trim() || DEFAULT_BRIEF;
+  const domain = config.editorial_domain?.trim() || "its editorial domain";
+  // The example given to the model must be the wording the anonymiser actually
+  // produced, or the instruction points at a string that is not in the evidence.
+  const genericEntity = config.domain_generic_entity?.trim() || "a generic organization";
+  const brief = config.voice_style?.trim() || defaultBrief(domain);
   const tone = config.voice_tone?.trim() || "objective, insight-driven, professional but accessible";
-  const audience = config.voice_audience?.trim() || "C-level food industry decision-makers";
+  const audience = config.voice_audience?.trim() || `senior decision-makers in ${domain}`;
   const themesLine = themesToText(config.themes);
   const evidence = buildEvidenceBlock(posts);
 
-  return `You are an editorial strategist producing LinkedIn content for CUES.
+  return `You are an editorial strategist producing LinkedIn content about ${domain}.
 
 Editorial brief:
 ${brief}
@@ -81,8 +94,7 @@ Carousel slide structure, in order:
 Rules:
 - Do not mention any specific company, brand, or person name. The source posts have already been
   anonymised — do not attempt to infer, guess, or reintroduce any real identity that was removed;
-  refer only to the generic descriptions already present in the evidence (e.g. "a food-sector
-  organization").
+  refer only to the generic descriptions already present in the evidence (e.g. "${genericEntity}").
 - Write in English.
 - Ground every claim in the evidence provided; do not invent facts not supported by it.
 - Use short paragraphs, a clear structure, and a publication-ready tone.

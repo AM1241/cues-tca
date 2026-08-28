@@ -31,7 +31,12 @@ export interface ScoringRequestRow {
   model_snapshot: string;
   prompt_version: string;
   prompt_template: string;
-  config_snapshot: { themes: { theme_id: string; label: string; position: number }[]; min_relevance_score: number };
+  config_snapshot: {
+    themes: { theme_id: string; label: string; position: number }[];
+    min_relevance_score: number;
+    /** Absent on requests created before 0019; see index.ts for the fallback. */
+    editorial_domain?: string;
+  };
   aggregation_strategy: string;
 }
 

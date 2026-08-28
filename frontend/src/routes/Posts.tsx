@@ -235,6 +235,7 @@ export function Posts() {
                     <span className="font-semibold tabular-nums">
                       {Math.round(r.overall_relevance)}
                     </span>
+                    <SingleThemeNotice scores={r.relevance_scores} />
                   </td>
                   <td className="px-4 py-3">
                     <div className="grid grid-cols-2 gap-x-6 gap-y-1">
@@ -262,5 +263,29 @@ export function Posts() {
         )}
       </div>
     </div>
+  )
+}
+
+/**
+ * The overall score is the highest single theme (aggregation `max_theme_v1`), so
+ * a post scoring 95 on one theme and 0 on the other five looks identical to one
+ * scoring 95 across the board. That is what let an off-domain post reach the top
+ * of this table with the model itself noting it was irrelevant. This does not
+ * change any decision — it just makes the configured aggregation visible.
+ */
+function SingleThemeNotice({ scores }: { scores: Record<string, number> }) {
+  const values = Object.values(scores)
+  if (values.length < 2) return null
+  const top = Math.max(...values)
+  if (top === 0) return null
+  const carrying = values.filter((v) => v >= top * 0.5).length
+  if (carrying > 1) return null
+  return (
+    <span
+      className="mt-1 block text-xs text-amber-600"
+      title="Only one theme carries this score; the rest are far lower."
+    >
+      1 of {values.length} themes
+    </span>
   )
 }

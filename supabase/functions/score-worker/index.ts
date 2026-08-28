@@ -152,6 +152,10 @@ async function processJob(
         request.prompt_template,
         { sourceName: post.source_name, postId: post.id, text: post.post_text },
         themes,
+        // Pre-0019 requests pinned no domain and their stored template has no
+        // {{DOMAIN}} placeholder, so the value is never rendered for them. The
+        // empty string keeps that path literal rather than inventing a scope.
+        request.config_snapshot.editorial_domain ?? "",
       ),
       jsonSchema: buildScoringSchema(themes),
       fetchImpl: deps.fetchImpl,

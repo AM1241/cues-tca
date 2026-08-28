@@ -7,11 +7,6 @@ export type Json =
   | Json[]
 
 export type Database = {
-  // Allows to automatically instantiate createClient with right options
-  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
-  __InternalSupabase: {
-    PostgrestVersion: "14.17"
-  }
   graphql_public: {
     Tables: {
       [_ in never]: never
@@ -682,6 +677,9 @@ export type Database = {
           anonymize_companies: boolean
           cluster_similarity_threshold: number
           company_aliases: Json
+          domain_generic_entity: string
+          domain_generic_entity_alt: string
+          editorial_domain: string
           id: string
           keep_public_bodies: boolean
           min_cluster_size: number
@@ -697,6 +695,9 @@ export type Database = {
           anonymize_companies?: boolean
           cluster_similarity_threshold?: number
           company_aliases?: Json
+          domain_generic_entity?: string
+          domain_generic_entity_alt?: string
+          editorial_domain?: string
           id?: string
           keep_public_bodies?: boolean
           min_cluster_size?: number
@@ -712,6 +713,9 @@ export type Database = {
           anonymize_companies?: boolean
           cluster_similarity_threshold?: number
           company_aliases?: Json
+          domain_generic_entity?: string
+          domain_generic_entity_alt?: string
+          editorial_domain?: string
           id?: string
           keep_public_bodies?: boolean
           min_cluster_size?: number
@@ -1686,6 +1690,19 @@ export type Database = {
         Args: { p_request_id: string }
         Returns: undefined
       }
+      complete_and_promote_scoring_job: {
+        Args: {
+          p_job_id: string
+          p_msg_id: number
+          p_processing_token?: string
+          p_provider_response?: Json
+          p_raw_post_id: string
+          p_reason: string
+          p_scoring_request_id: string
+          p_theme_scores: Json
+        }
+        Returns: string
+      }
       complete_anonymize_job: {
         Args: {
           p_anonymized_text: string
@@ -1916,6 +1933,7 @@ export type Database = {
         Args: { p_raw_post_id: string; p_result_id: string }
         Returns: undefined
       }
+      set_scoring_themes: { Args: { p_themes: Json }; Returns: undefined }
       upsert_post_embedding: {
         Args: {
           p_anonymize_result_id: string
@@ -2064,3 +2082,4 @@ export const Constants = {
     Enums: {},
   },
 } as const
+

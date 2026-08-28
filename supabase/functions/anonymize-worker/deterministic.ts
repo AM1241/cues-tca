@@ -51,6 +51,13 @@ export interface DeterministicConfig {
   anonymizeCompanies: boolean;
   keepPublicBodies: boolean;
   companyAliases: Record<string, string>;
+  /**
+   * What a company name is replaced with. Sector-specific, so it comes from
+   * configurations.domain_generic_entity rather than being hardcoded here —
+   * a food-sector string was one of the four things that made this tool
+   * silently food-only. See 0019_editorial_domain.sql.
+   */
+  genericEntity: string;
 }
 
 function escapeRegExp(s: string): string {
@@ -149,7 +156,7 @@ export function applyDeterministicReplacement(
 
   const variants = sourceNameVariants(sourceName);
   const preserveSource = config.keepPublicBodies && variants.some(isPublicBody);
-  const generic = "a food-sector organization";
+  const generic = config.genericEntity;
 
   if (config.anonymizeCompanies && !preserveSource) {
     const alias = config.companyAliases[sourceName];

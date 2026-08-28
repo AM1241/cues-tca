@@ -6,12 +6,16 @@ export interface GenerationConfigRow {
   voice_tone: string | null;
   voice_audience: string | null;
   voice_style: string | null;
+  /** The operator's editorial scope — see 0019_editorial_domain.sql. */
+  editorial_domain: string | null;
+  /** Mirrors what the anonymiser replaced company names with. */
+  domain_generic_entity: string | null;
 }
 
 export async function getConfig(db: SupabaseClient): Promise<GenerationConfigRow> {
   const { data, error } = await db
     .from("configurations")
-    .select("themes, voice_tone, voice_audience, voice_style")
+    .select("themes, voice_tone, voice_audience, voice_style, editorial_domain, domain_generic_entity")
     .eq("id", "default")
     .single();
   if (error) throw new Error(`configurations lookup failed: ${error.message}`);

@@ -75,7 +75,15 @@ Deno.test("isPublicBody matches the institutions the widened run replaced", () =
   assertEquals(isPublicBody("Ismea"), true);
 });
 
-const cfg = { anonymizeCompanies: true, keepPublicBodies: true, companyAliases: {} };
+// genericEntity is the operator's configured replacement wording (0019); the
+// CUES preset value is used here so the existing expectations still read as the
+// behaviour a food-sector deployment sees.
+const cfg = {
+  anonymizeCompanies: true,
+  keepPublicBodies: true,
+  companyAliases: {},
+  genericEntity: "a food-sector organization",
+};
 
 Deno.test("catalogue labels expand to the forms used in body text", () => {
   assertEquals(sourceNameVariants("STAR / GBfoods Italy LinkedIn"), [

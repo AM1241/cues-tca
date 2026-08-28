@@ -24,18 +24,25 @@ export interface ScoringPost {
 }
 
 /**
- * Render the request's stored template. Placeholders: {{THEMES}} (the theme
- * list), {{SOURCE}}, {{POST_ID}}, {{POST_TEXT}}. Substitution is literal — no
- * placeholder in the template body can be forged from post text, since post
- * text is only ever the replacement value, never the pattern.
+ * Render the request's stored template. Placeholders: {{DOMAIN}} (the editorial
+ * scope), {{THEMES}} (the theme list), {{SOURCE}}, {{POST_ID}}, {{POST_TEXT}}.
+ * Substitution is literal — no placeholder in the template body can be forged
+ * from post text, since post text is only ever the replacement value, never the
+ * pattern.
+ *
+ * `domain` comes from the request's own config_snapshot, like the themes: it is
+ * the scope the post was scored under, pinned at request time. Templates from
+ * before 0019 carry no {{DOMAIN}}, so passing it is harmless for them.
  */
 export function buildScoringPrompt(
   template: string,
   post: ScoringPost,
   themes: ThemeSnapshotEntry[],
+  domain: string,
 ): string {
   const themesBlock = themes.map((t) => `- ${t.theme_id} (${t.label})`).join("\n");
   return template
+    .replaceAll("{{DOMAIN}}", domain)
     .replaceAll("{{THEMES}}", themesBlock)
     .replaceAll("{{SOURCE}}", post.sourceName)
     .replaceAll("{{POST_ID}}", post.postId)

@@ -88,6 +88,7 @@ async function processJob(
     anonymizeCompanies: config.anonymize_companies,
     keepPublicBodies: config.keep_public_bodies,
     companyAliases: config.company_aliases ?? {},
+    genericEntity: config.domain_generic_entity,
   });
 
   // Stage 2 — LLM entity extraction, catching companies named in body text
@@ -122,7 +123,7 @@ async function processJob(
   // LLM-found entities on top of the already-deterministically-replaced text.
   let finalText = deterministic.text;
   const replacements: Replacement[] = [...deterministic.replacements];
-  const generic = "another food-sector organization";
+  const generic = config.domain_generic_entity_alt;
   for (const entity of entities) {
     if (!entity || !finalText.includes(entity)) continue;
     // The prompt already asks the model to skip public bodies, but a prompt
@@ -147,6 +148,10 @@ async function processJob(
         anonymization_enabled: config.anonymization_enabled,
         anonymize_companies: config.anonymize_companies,
         keep_public_bodies: config.keep_public_bodies,
+        // Pinned so a stored result answers "what was a company replaced with
+        // here" without depending on the live, now-editable setting.
+        domain_generic_entity: config.domain_generic_entity,
+        domain_generic_entity_alt: config.domain_generic_entity_alt,
       },
       providerResponse: rawResponse,
     });

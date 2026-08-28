@@ -56,12 +56,18 @@ export interface ConfigRow {
   keep_public_bodies: boolean;
   company_aliases: Record<string, string>;
   min_relevance_score: number;
+  /** Sector-neutral replacement wording — see 0019_editorial_domain.sql. */
+  domain_generic_entity: string;
+  domain_generic_entity_alt: string;
 }
 
 export async function getConfig(db: SupabaseClient): Promise<ConfigRow> {
   const { data, error } = await db
     .from("configurations")
-    .select("anonymization_enabled, anonymize_companies, keep_public_bodies, company_aliases, min_relevance_score")
+    .select(
+      "anonymization_enabled, anonymize_companies, keep_public_bodies, company_aliases, " +
+        "min_relevance_score, domain_generic_entity, domain_generic_entity_alt",
+    )
     .eq("id", "default")
     .single();
   if (error) throw new Error(`configurations lookup failed: ${error.message}`);
