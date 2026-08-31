@@ -249,6 +249,15 @@ done):**
   one transaction. Cloud v7's internal-only guard, which could never be
   satisfied from a browser, is replaced by `MANUAL_BATCH_CAP`; "Score now"
   returns 200. score-worker is cloud v9, built from this repo.
+- [x] **3G — scope became configuration (2026-08-31, session 14).** Themes are
+  angles, not scope: "sustainability" applies to food, textiles and energy
+  alike, so no theme configuration could exclude a textile-waste post scoring
+  92 or an energy-policy post scoring 75. `editorial_domain` (migration `0019`)
+  renders into the rubric via `{{DOMAIN}}`; `prompt_version` is `scoring_v2`.
+  Also closed a split where `scoring_themes` drove the scorer while the UI
+  edited `configurations.themes`, so theme edits never reached scoring. Domain,
+  generic-entity wording and the clustering settings are now operator-editable;
+  see `docs/presets.md` for the CUES preset and how to point the tool elsewhere.
 - [ ] **Repeat-drain loop at scale** — confirm the worker can be re-invoked until the queue
   is empty across many posts without exceeding wall-clock, and that cost/reliability hold
   up. Triggering stays on-demand (button / internal-secret path).

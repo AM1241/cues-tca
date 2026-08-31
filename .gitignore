@@ -39,3 +39,8 @@ load_legacy.sql
 # Local-only Edge Function test secrets
 supabase/functions/.env*
 !supabase/functions/.env.example
+
+# Stray root lock written when deno runs from the repo root. The Edge Functions'
+# real lock is supabase/functions/deno.lock and IS tracked; this one only pins
+# the root package.json's CLI dependencies and is regenerated on demand.
+/deno.lock

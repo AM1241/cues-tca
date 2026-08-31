@@ -1,8 +1,128 @@
 # Session handoff — CUES Editorial Cloud
 
-Last updated: 2026-08-27 (session 13 — scoring promotion fixed, "Score now"
-works). Read this first, then `MIGRATION_PLAN.md`. This file is the single
-"where are we" pointer between working sessions.
+Last updated: 2026-08-31 (session 14 — the pipeline is sector-neutral; CUES is
+now a preset, not a hardcoded assumption). Read this first, then
+`MIGRATION_PLAN.md`. This file is the single "where are we" pointer between
+working sessions.
+
+## Session 14 — scope becomes configuration (2026-08-31)
+
+Scoring the first real posts showed the tool admitting content with no
+connection to food: a European Commission traineeship ad scored **95 and
+`in_generation = true`** on `talent_development: 95` with five zeros beside it,
+while the model's own reason said *"no direct connection to agriculture, food
+systems…"*.
+
+The operator's position was that this is configuration — they pick the themes,
+they own the result. Measured across all 8 real scorings, that is **half right**,
+and the half that fails is the important half:
+
+| post | before | dropping the `talent development` theme |
+|---|---|---|
+| Traineeship ad | 95 | 0 — fixed by config |
+| EU social rights | 85 | 20 / 35 — fixed by config |
+| **Textile waste** | 92 | **92** — scores on `sustainability` |
+| **Energy decarbonisation** | 75 | **75** — `sustainability` + `innovation` |
+
+**Themes are angles, not scope.** "Sustainability" applies to food, textiles and
+energy alike, and a theme list cannot express *"sustainability, in food"*. No
+keyword configuration excludes those two, because the themes they score on are
+ones the operator obviously keeps.
+
+Two further findings turned this from a scoring tweak into a structural fix:
+
+1. **Four hardcoded food assumptions no operator could reach** — the scoring
+   rubric (*"strong relevance to food, agriculture…"*), both anonymiser generics
+   (`"a food-sector organization"` / `"another…"`), and the generator's default
+   brief. Pointed at another sector the tool would have scored against a food
+   rubric and renamed that sector's companies to "a food-sector organization".
+2. **Two theme lists, nothing syncing them.** `scoring_themes` drove the scorer;
+   `configurations.themes` was what the Objective screen edited and only ever
+   reached the generator. **Removing a theme in the UI changed nothing about
+   scoring** — so even the operator's own share of the responsibility was not
+   actionable.
+
+### What shipped
+
+Migration `0019_editorial_domain.sql` adds `editorial_domain` and the two
+generic-entity strings to `configurations`, **defaulted to today's values**, so
+day-one behaviour is unchanged and the existing production row was backfilled
+with the CUES preset automatically. The domain renders into the rubric through a
+`{{DOMAIN}}` placeholder using the template mechanism that was already there.
+Out-of-domain is expressed **in the rubric**, not as a separate score, so no
+append-only table and no completion RPC signature changed. `prompt_version` is
+now `scoring_v2`; historical results keep the template they were scored under.
+
+`scoring_themes` becomes the single source of truth, edited through
+`set_scoring_themes`, which **retires** dropped themes rather than deleting ids
+that stored results reference, and refreshes `configurations.themes` as a mirror.
+Objective gained the scope fields plus the clustering settings that already
+existed in `configurations` but appeared on no screen; Posts flags a score
+carried by a single theme.
+
+### Measured after deploying — the same 7 posts, re-scored
+
+```
+textile waste           92 -> 0     was unfixable by config
+energy decarbonisation  75 -> 40    was unfixable by config
+traineeship ad          95 -> 15
+olive oil               85 -> 88    genuine, sharpened
+wheat policy            78 -> 80    genuine, sharpened
+World Cup                0 -> 0
+EU social rights        85 -> 70    STILL ADMITTED
+```
+
+Six of seven land correctly, including both cases no keyword change could reach.
+**The rubric narrows the gap rather than closing it:** the EU social-policy post
+still scores 70 on `talent_development` while the model's own reason calls it out
+of scope. Retiring that theme is the operator's lever for the remainder — so the
+two mechanisms are complementary, which is precisely why both are now visible to
+them.
+
+### Neutrality proof
+
+Same post, same model, same code; only the config row changed:
+
+```
+domain = food        -> olive oil post scores 88
+domain = automotive  -> the same post scores 0, all themes zero
+```
+
+Restored from `docs/presets.md` afterwards and the post returned to 88. The
+theme-edit path was proved the same way: removing a theme through the Objective
+screen took the scorer's pinned snapshot from 6 themes to 5 — the thing that
+silently did nothing before.
+
+### State left behind
+
+CUES preset restored and verified; all six themes active (note
+`talent development` sits at position 6 rather than 3 after the remove/re-add
+test — display order only). One active production request pinned to the food
+domain and `scoring_v2`. Queue empty. 140 analyzed_posts, of which **7 carry real
+LLM scores**; the other 133 are still legacy `simulated`. 40 raw posts unscored.
+
+### Two decisions waiting, both free and both the operator's
+
+- **`talent development`** — keep or retire. The evidence is measured and
+  recorded in `docs/presets.md`.
+- **The domain wording** — whether *"food, agriculture and the agrifood supply
+  chain"* is the right phrasing.
+
+Settle these before scoring the remaining posts; otherwise the corpus gets
+scored twice.
+
+### The next structural gap
+
+**Nothing in the UI can put posts into the scoring queue.** "Score now" drains a
+queue that only `enqueue_scoring_job` / `enqueue_reevaluation` /
+`open_production_scoring_request` can fill, and none of them is reachable from a
+browser — this session filled it by hand with SQL. Until that screen exists,
+scoring cannot be driven without a terminal, which contradicts the plan's
+"no terminal" goal.
+
+---
+
+## Session 13 — scoring finally reaches the product (2026-08-27)
 
 ## Session 13 — scoring finally reaches the product (2026-08-27)
 
