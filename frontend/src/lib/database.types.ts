@@ -304,6 +304,47 @@ export type Database = {
           },
         ]
       }
+      brand_suggestions: {
+        Row: {
+          created_at: string
+          decided_at: string | null
+          decided_by: string | null
+          id: string
+          name: string
+          rationale: string | null
+          source_id: string
+          status: string
+        }
+        Insert: {
+          created_at?: string
+          decided_at?: string | null
+          decided_by?: string | null
+          id?: string
+          name: string
+          rationale?: string | null
+          source_id: string
+          status?: string
+        }
+        Update: {
+          created_at?: string
+          decided_at?: string | null
+          decided_by?: string | null
+          id?: string
+          name?: string
+          rationale?: string | null
+          source_id?: string
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "brand_suggestions_source_id_fkey"
+            columns: ["source_id"]
+            isOneToOne: false
+            referencedRelation: "sources"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       cluster_assignments: {
         Row: {
           cluster_id: string
@@ -1656,6 +1697,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      accept_brand_suggestion: { Args: { p_id: string }; Returns: undefined }
       activate_scoring_request: {
         Args: { p_request_id: string }
         Returns: undefined
@@ -1919,6 +1961,7 @@ export type Database = {
         }
         Returns: string
       }
+      reject_brand_suggestion: { Args: { p_id: string }; Returns: undefined }
       revive_scoring_job: { Args: { p_job_id: string }; Returns: undefined }
       scoring_apply_aggregation: {
         Args: { p_strategy: string; p_theme_scores: Json }
