@@ -346,9 +346,15 @@ export function Objective() {
       </Section>
 
       <Section
-        title="Company aliases"
-        hint="Alias → canonical name, used by the anonymiser's replacement map."
+        title="Company and brand names"
+        hint="Any name on the left is replaced by the text on the right, in post text and in hashtags."
       >
+        <p className="mb-3 text-sm text-slate-500">
+          The anonymiser derives a source's own name from its label. Product brands
+          it cannot — <em>Carpano</em> never appears in
+          “Fratelli Branca Distillerie”, and the entity extractor skips it as the
+          source's own. List those here.
+        </p>
         <div className="space-y-2">
           {draft.aliases.map((a, i) => (
             <div key={i} className="flex gap-2">
@@ -359,7 +365,7 @@ export function Objective() {
                   next[i] = { ...next[i], key: e.target.value }
                   patch({ aliases: next })
                 }}
-                placeholder="alias"
+                placeholder="name in the text"
                 className="flex-1 rounded-md border border-slate-300 px-3 py-1.5 text-sm"
               />
               <input
@@ -369,7 +375,7 @@ export function Objective() {
                   next[i] = { ...next[i], value: e.target.value }
                   patch({ aliases: next })
                 }}
-                placeholder="canonical name"
+                placeholder="replace with"
                 className="flex-1 rounded-md border border-slate-300 px-3 py-1.5 text-sm"
               />
               <button

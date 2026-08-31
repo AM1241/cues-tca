@@ -137,3 +137,119 @@ Deno.test("keep_public_bodies=false replaces the ministry like any source", () =
   );
   assertEquals(text, "Si riunisce oggi al a food-sector organization la cabina di regia.");
 });
+
+// --- hashtags -----------------------------------------------------------
+// The 2026-08-31 run leaked four company names, every one of them inside a
+// hashtag: #FratelliBrancaDistillerie, #MuseoBranca, #GBfoodsItaly. A tag
+// concatenates its words, so the word-boundary lookarounds used for prose can
+// never fire inside one, and stage 2 does not return hashtags as entities.
+
+Deno.test("a company name concatenated inside a hashtag is removed", () => {
+  const { text } = applyDeterministicReplacement(
+    "In bocca al lupo! #FratelliBrancaDistillerie #MuseoBranca #CompanyVisit",
+    "Fratelli Branca Distillerie LinkedIn",
+    cfg,
+  );
+  assertEquals(text.trim(), "In bocca al lupo! #CompanyVisit");
+});
+
+Deno.test("a single distinctive word of the name is matched inside a tag only", () => {
+  // "#FernetBranca" goes; the same word loose in prose is left to stage 2,
+  // because "Branca" is not a body-text variant and never should be.
+  const { text } = applyDeterministicReplacement(
+    "Un brindisi. #FernetBranca",
+    "Fratelli Branca Distillerie LinkedIn",
+    cfg,
+  );
+  assertEquals(text.trim(), "Un brindisi.");
+});
+
+Deno.test("a bare-name tag is removed, not rewritten into a broken tag", () => {
+  // Running the variant loop first turned "#STAR" into
+  // "#a food-sector organization" — a tag that still marks the spot.
+  const { text } = applyDeterministicReplacement(
+    "Novita. #STAR #Saikebon",
+    "STAR / GBfoods Italy LinkedIn",
+    cfg,
+  );
+  assertEquals(text.trim(), "Novita. #Saikebon");
+});
+
+Deno.test("sector and public-body acronyms in hashtags are preserved", () => {
+  // The whole point of deriving acronyms from the SOURCE NAME only: #DOP and
+  // #IGP are the subject matter, and #MASAF is a preserved public body.
+  const { text } = applyDeterministicReplacement(
+    "Vinitaly. #vinitaly26 #DOP #IGP #MASAF #sistemaagricoltura",
+    "MASAF LinkedIn",
+    cfg,
+  );
+  assertEquals(text.trim(), "Vinitaly. #vinitaly26 #DOP #IGP #MASAF #sistemaagricoltura");
+});
+
+Deno.test("an alias key removes a product-brand tag the source name cannot imply", () => {
+  const { text } = applyDeterministicReplacement(
+    "Un brindisi. #Carpano #Torino",
+    "Fratelli Branca Distillerie LinkedIn",
+    { ...cfg, companyAliases: { Carpano: "a food-sector organization" } },
+  );
+  assertEquals(text.trim(), "Un brindisi. #Torino");
+});
+
+Deno.test("the source-name acronym is a variant, junk initials are not", () => {
+  assertEquals(sourceNameVariants("Fratelli Branca Distillerie LinkedIn"), [
+    "Fratelli Branca Distillerie LinkedIn",
+    "Fratelli Branca Distillerie",
+    "FBD",
+  ]);
+});
+
+// --- aliases as the lever for names the source label cannot imply ---------
+// Product brands ("Carpano", "Fernet-Branca") appear in prose but are derivable
+// from nothing: stage 1 only knows the source label, and stage 2 is told to skip
+// "the source's own name". Both leaked on 2026-08-31 for exactly that reason.
+
+const G = "a food-sector organization";
+const brandCfg = {
+  ...cfg,
+  companyAliases: { Branca: G, Carpano: G, "Fernet-Branca": G },
+};
+
+Deno.test("an alias name is replaced in body text, not only in hashtags", () => {
+  const { text } = applyDeterministicReplacement(
+    "il ruolo di Carpano nel raccontarne le origini.",
+    "Fratelli Branca Distillerie LinkedIn",
+    brandCfg,
+  );
+  assertEquals(text, `il ruolo di ${G} nel raccontarne le origini.`);
+});
+
+Deno.test("longer alias names win over shorter ones they contain", () => {
+  // "Branca" matching inside "Fernet-Branca" left "Fernet-a food-sector
+  // organization" — a hyphen is not a letter, so the word boundaries allow it.
+  const { text } = applyDeterministicReplacement(
+    "Project Work dedicati a Fernet-Branca.",
+    "Fratelli Branca Distillerie LinkedIn",
+    brandCfg,
+  );
+  assertEquals(text, `Project Work dedicati a ${G}.`);
+});
+
+Deno.test("an alias applies inside a preserved public body's own post", () => {
+  // The source being a ministry protects the MINISTRY's name, not a private
+  // brand it happens to mention.
+  const { text } = applyDeterministicReplacement(
+    "Al MASAF si e parlato di Carpano.",
+    "MASAF LinkedIn",
+    brandCfg,
+  );
+  assertEquals(text, `Al MASAF si e parlato di ${G}.`);
+});
+
+Deno.test("an alias never overrides the public-body preservation list", () => {
+  const { text } = applyDeterministicReplacement(
+    "Il parere EFSA e arrivato.",
+    "Fratelli Branca Distillerie LinkedIn",
+    { ...cfg, companyAliases: { EFSA: G } },
+  );
+  assertEquals(text, "Il parere EFSA e arrivato.");
+});

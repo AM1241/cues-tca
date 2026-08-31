@@ -135,9 +135,81 @@ export function sourceNameVariants(sourceName: string): string[] {
     const noCountry = p.replace(/\s+(italy|italia)\s*$/i, "").trim();
     if (noCountry) variants.add(noCountry);
   }
-  return [...variants]
-    .filter((v) => v.length >= 4 && !SOURCE_VARIANT_STOPWORDS.has(v.toLowerCase()))
+  // Initials of the multi-word forms: "Fratelli Branca Distillerie" -> "FBD".
+  // Only acronyms DERIVED FROM THE SOURCE NAME are added — never acronyms in
+  // general. The corpus is full of sector acronyms (#DOP, #IGP, #PNRR, #SRF01)
+  // and public-body ones (#MASAF) that identify the subject rather than the
+  // company; removing those would gut exactly the content this pipeline exists
+  // to write about.
+  //
+  // Kept separate from the name-derived variants so the >= 4 length guard below
+  // — which stops short fragments of a name matching common words — can stay as
+  // it is, while a three-letter acronym still gets through.
+  // Only from a clean multi-word name: a form still carrying "/" or the
+  // "LinkedIn" suffix yields initials nobody writes ("STAR / GBfoods Italy
+  // LinkedIn" -> "SGIL"), and a short nonsense string is exactly what would
+  // false-match inside an unrelated hashtag.
+  const acronyms = new Set<string>();
+  for (const v of variants) {
+    if (v.includes("/") || /\blinkedin\b/i.test(v)) continue;
+    const words = v.split(/\s+/).filter((w) => /^\p{L}/u.test(w));
+    if (words.length < 2) continue;
+    const acronym = words.map((w) => w[0]).join("").toUpperCase();
+    if (acronym.length >= 3) acronyms.add(acronym);
+  }
+
+  const named = [...variants].filter((v) => v.length >= 4);
+  return [...named, ...acronyms]
+    .filter((v) => !SOURCE_VARIANT_STOPWORDS.has(v.toLowerCase()))
     .sort((a, b) => b.length - a.length);
+}
+
+/**
+ * Company names hidden inside hashtags.
+ *
+ * A hashtag concatenates its words, so the word-boundary lookarounds used for
+ * body text can never fire inside one: in "#FratelliBrancaDistillerie" the
+ * variant "Branca" has letters on both sides, and the spaced full name does not
+ * appear at all. All four leaks in the 2026-08-31 run were exactly this —
+ * #FratelliBrancaDistillerie, #MuseoBranca, #GBfoodsItaly — and stage 2 does not
+ * cover them either, since the model does not return hashtags as entities.
+ *
+ * The whole tag is dropped rather than rewritten: "#a food-sector organization"
+ * is not a hashtag, and a tag naming the company has no place in anonymised
+ * text. Comparison ignores case and the spaces the concatenation removed.
+ */
+export function stripIdentifyingHashtags(
+  text: string,
+  variants: string[],
+): { text: string; removed: string[] } {
+  // Inside a hashtag, single distinctive words of the name are also matched —
+  // "#MuseoBranca" and "#FernetBranca" name the company as surely as the full
+  // label does, and the variant list never contains bare "Branca" because the
+  // name is only ever split on "/", not into words.
+  //
+  // These words are deliberately NOT added to the body-text variants: "Fratelli"
+  // or "Distillerie" loose in Italian prose would over-replace, whereas a
+  // hashtag is a closed context where the word can only be naming the company.
+  const words = variants
+    .flatMap((v) => v.split(/[^\p{L}\p{N}]+/u))
+    .filter((w) => w.length >= 4 && !SOURCE_VARIANT_STOPWORDS.has(w.toLowerCase()));
+
+  const needles = [...variants, ...words]
+    .map((v) => v.replace(/[^\p{L}\p{N}]/gu, "").toLowerCase())
+    .filter((v) => v.length >= 3);
+  if (needles.length === 0) return { text, removed: [] };
+
+  const removed: string[] = [];
+  const out = text.replace(/#[\p{L}\p{N}_]+/gu, (tag) => {
+    const flat = tag.slice(1).replace(/[^\p{L}\p{N}]/gu, "").toLowerCase();
+    if (!needles.some((n) => flat.includes(n))) return tag;
+    removed.push(tag);
+    return "";
+  });
+
+  // Collapse the run of spaces a removed tag leaves behind, without touching
+  // line structure — hashtag blocks are usually their own trailing lines.
+  return { text: out.replace(/[^\S\r\n]{2,}/g, " "), removed };
 }
 
 /**
@@ -158,25 +230,54 @@ export function applyDeterministicReplacement(
   const preserveSource = config.keepPublicBodies && variants.some(isPublicBody);
   const generic = config.genericEntity;
 
-  if (config.anonymizeCompanies && !preserveSource) {
+  // A name is replaced by a regex with Unicode lookarounds rather than \b: the
+  // corpus is Italian and \b misfires next to accented letters.
+  const replaceName = (name: string, to: string, kind: Replacement["source"]) => {
+    const re = new RegExp(
+      `(?<![\\p{L}\\p{N}])${escapeRegExp(name)}(?![\\p{L}\\p{N}])`,
+      "gu",
+    );
+    if (!re.test(result)) return;
+    re.lastIndex = 0;
+    result = result.replace(re, to);
+    replacements.push({ original: name, replacement: to, source: kind });
+  };
+
+  if (config.anonymizeCompanies) {
     const alias = config.companyAliases[sourceName];
     const target = alias ?? generic;
 
-    for (const variant of variants) {
-      // Unicode lookarounds rather than \b: the corpus is Italian and \b
-      // misfires next to accented letters.
-      const re = new RegExp(
-        `(?<![\\p{L}\\p{N}])${escapeRegExp(variant)}(?![\\p{L}\\p{N}])`,
-        "gu",
-      );
-      if (!re.test(result)) continue;
-      re.lastIndex = 0;
-      result = result.replace(re, target);
-      replacements.push({
-        original: variant,
-        replacement: target,
-        source: alias ? "company_alias" : "source_name",
-      });
+    // Hashtags FIRST. Running after the name loops leaves "#STAR" rewritten as
+    // "#a food-sector organization" — a broken tag that still marks the spot.
+    const needles = [...Object.keys(config.companyAliases)];
+    if (!preserveSource) needles.push(...variants);
+    const stripped = stripIdentifyingHashtags(result, needles);
+    result = stripped.text;
+    for (const tag of stripped.removed) {
+      replacements.push({ original: tag, replacement: "", source: "source_name" });
+    }
+
+    // Operator-configured names, applied whatever the source is: a private
+    // brand named inside a MINISTRY's post still has to go. These are the only
+    // lever for names the source label cannot imply — product brands like
+    // "Carpano" or "Fernet-Branca", which stage 1 cannot derive and stage 2 is
+    // told to skip as "the source's own name". That gap is what leaked them.
+    // Longest first, as the variant list already is: "Branca" would otherwise
+    // match inside "Fernet-Branca" (a hyphen is not a letter, so the word
+    // boundaries allow it) and leave "Fernet-a food-sector organization".
+    const aliasEntries = Object.entries(config.companyAliases)
+      .sort(([a], [b]) => b.length - a.length);
+    for (const [name, to] of aliasEntries) {
+      if (name === sourceName) continue; // its own label is a variant already
+      if (config.keepPublicBodies && isPublicBody(name)) continue;
+      replaceName(name, to, "company_alias");
+    }
+
+    // The source's own name, unless the source IS a preserved public body.
+    if (!preserveSource) {
+      for (const variant of variants) {
+        replaceName(variant, target, alias ? "company_alias" : "source_name");
+      }
     }
   }
 
