@@ -1,9 +1,108 @@
 # Session handoff — CUES Editorial Cloud
 
-Last updated: 2026-08-31 (session 14 — the pipeline is sector-neutral; CUES is
-now a preset, not a hardcoded assumption). Read this first, then
-`MIGRATION_PLAN.md`. This file is the single "where are we" pointer between
-working sessions.
+Last updated: 2026-09-01 (session 15 — the corpus is fully re-scored on real
+data, and the operator can now drive scoring and anonymisation without SQL).
+Read this first, then `MIGRATION_PLAN.md`. This file is the single "where are
+we" pointer between working sessions.
+
+## Session 15 — real scores, and the buttons to produce them (2026-09-01)
+
+### The corpus is real for the first time
+
+**180 posts, 180 real LLM scores, zero simulated.** The 133 legacy placeholders
+are gone. 81 pass the threshold, and the separation is decisive:
+
+| source | posts | passing | avg |
+|---|---|---|---|
+| MASAF | 62 | 54 | 71 |
+| STAR / GBfoods | 4 | 3 | 63 |
+| Fratelli Branca | 35 | 11 | 34 |
+| European Commission | 79 | 13 | 15 |
+
+Judging content alone, the agriculture ministry passes almost entirely while the
+Commission — which posts about everything from Ukraine to Pride — keeps 13 of 79.
+Before 0019 the Commission would have dominated the queue with 75-95s for
+employment posts.
+
+**The threshold stays at 50.** Raising it to 60 was considered and rejected on
+the data: the 50-59 band holds 17 posts and is a mixed bag — Italy's rice
+production, the €1bn COLTIVAITALIA package, the ISMEA market report, MASAF at
+Vinitaly and Carpano's 1786 heritage sit beside a satellite decommissioning and
+an EU-Mexico trade note. Almost everything lands on exactly 55, because that is
+the rubric's "partial relevance" band. The threshold measures magnitude, not
+subject; raising it cuts the band wholesale. Editors filter per-session with the
+Min relevance slider instead.
+
+### Anonymisation: two leak classes closed, one limitation accepted
+
+Re-scoring pulled Branca and GBfoods content into the corpus for the first time
+(the July batch was chosen by simulated scores and contained almost none), and
+four company names survived. Both causes were the same stage-1/stage-2 contract
+gap that leaked "GBfoods" in July, in new forms — see `c3d4f8c`:
+
+- **Hashtags.** A tag concatenates its words, so the word-boundary lookarounds
+  used for prose can never fire inside `#FratelliBrancaDistillerie`.
+- **Product brands.** "Carpano" and "Fernet-Branca" are derivable from nothing —
+  not in the source label, and skipped by stage 2 as "the source's own name".
+  `company_aliases` now replaces its keys wherever they occur, longest first.
+
+`0020` adds **brand discovery**: an AI reads a source's own posts and proposes
+the names that identify it, as proposals an editor accepts. On Fratelli Branca it
+found **15 names, nine of which a careful human read had missed** — Brancamenta,
+Borghetti, Stravecchio Branca, Torre Branca, Gruppo Branca International among
+them. It proposed no product categories, which is what the prompt spends most of
+its length preventing.
+
+**It is not exhaustive, and that is recorded deliberately.** It consistently
+misses `Saikebon` and `Tigullio`, which appear only as hashtags in one sentence,
+across three prompt variations. They were added by hand. The list stays editable
+for exactly this reason.
+
+**A measurable cost of the encoding corruption**, the first that is not
+cosmetic: the model normalises accents, so it proposed "Niccolò Branca" and
+"Caffè Borghetti" while the stored text holds "Niccol? Branca" and "Caff?
+Borghetti". Those aliases can never match. Covered by the bare surnames; the
+accented entries are kept so they start working if ingest is fixed.
+
+Current state: **18 names, 89 anonymised posts, zero survivals**, verified name
+by name and by direct regex sweep. MASAF preserved in 15.
+
+### The operator can finally drive it (0021)
+
+"Score now" and "Anonymise now" consume work; **nothing in the UI could create
+any**. Every run this week was started by hand in SQL. `0021` adds
+`queue_scoring` and `requeue_anonymisation` as editor-callable RPCs, with
+buttons: *Queue unscored* / *Re-score all* on Posts, *Redo all* on Clusters.
+Posts now shows queue depth, so an empty queue is visible rather than inferred.
+
+`queue_scoring` does one thing beyond wrapping: a scoring_request pins an
+immutable config snapshot, so **editing themes or the domain while one is active
+left scoring on the old settings, silently**. It compares hashes and rotates the
+request. The scoring model and `aggregation_strategy` moved into
+`configurations` at the same time — the first draft read them from "the most
+recent request", which breaks on a fresh database, and both were hidden
+constants besides.
+
+### Corrections to earlier claims
+
+- Session 14 said four hardcoded food assumptions were made configurable. There
+  is a **fifth**: `cluster/prompt.ts` still carries a hardcoded CUES brief used
+  to name every cluster. Recorded in `docs/presets.md`; not yet fixed.
+- Session 14's neutrality claim otherwise holds and was re-proved this session.
+
+### Where the pipeline stands
+
+```
+collect ✓   score ✓   anonymise ✓   cluster ← next   generate   review ✓
+```
+
+The 4 existing clusters and the one generated result are **stale** — built from
+51 posts chosen by simulated scores. Clustering needs re-running over the 81
+that now pass.
+
+---
+
+## Session 14 — scope becomes configuration (2026-08-31)
 
 ## Session 14 — scope becomes configuration (2026-08-31)
 

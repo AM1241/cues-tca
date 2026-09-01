@@ -48,13 +48,31 @@ where id = 'default';
 Then review the themes on the Objective screen — the seeded six are food-shaped
 (`food safety`, `tradition`) and will not fit another sector unchanged.
 
-Two things are **not** yet configurable and stay food-specific in code:
+Still food-specific in code, and a correction to session 14's claim that all
+four hardcoded assumptions were made configurable — there is a fifth:
 
+- **`cluster/prompt.ts` carries a hardcoded CUES brief** (*"CUES is building an
+  editorial narrative around how food companies communicate change, value, and
+  responsibility"*) with five food-specific directions, used to name every
+  cluster. It should read `editorial_domain` like the others. Pointed at another
+  sector, cluster names would still be written for a food publication.
 - the anonymiser's public-body preservation list
   (`anonymize-worker/deterministic.ts`), which names EU and Italian food
   institutions
-- the aggregation strategy `max_theme_v1`, which lives on the scoring request
-  rather than in `configurations`
 
-Both are candidates for the same treatment if the tool is genuinely pointed at
-another sector.
+`aggregation_strategy` and the scoring model moved into `configurations` in
+`0021`, so they are no longer on this list — though neither has a UI control yet.
+
+## Company and brand names
+
+`company_aliases` is the operator's lever for names the source label cannot
+imply: product brands, historical names, venues. `discover-brands` proposes them
+per source and an editor accepts, but it is an assistant rather than an
+authority — on Fratelli Branca it found nine names a careful human read had
+missed, and still missed two that appear only inside hashtags. Expect to add
+some by hand.
+
+Note for any deployment carrying the corpus encoding corruption: the model
+normalises accents, so it proposes "Niccolò Branca" where the stored text holds
+"Niccol? Branca". Such an alias never matches. Prefer the unaccented part of the
+name until ingest is fixed.
