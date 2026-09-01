@@ -58,8 +58,13 @@ Do NOT include:
 - places, cities, or regions
 - public institutions, ministries, agencies or regulators
 - other companies merely mentioned, partnered with, or reported on
-- job titles, people who merely appear, event names, or campaign hashtags that
-  do not contain the company's own name
+- job titles, people who merely appear, or event and campaign slogans
+
+A name written as a hashtag still counts, and some brands appear only ever as
+hashtags — go through the hashtags explicitly rather than skimming past them.
+Judge each by what the surrounding sentence calls it. If a post reads
+"i nostri marchi iconici, tra cui #Alfa e #Beta", then Alfa and Beta are owned
+brands and belong in your list; "#WeAreProud" is a slogan and does not.
 - the catalogue label itself or its obvious word-for-word parts
 ${known}
 Be conservative. A name you are unsure about is better left out: a human reviews

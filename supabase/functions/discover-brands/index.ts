@@ -26,7 +26,7 @@ import { authenticate } from "../_shared/auth.ts";
 import { serviceClient } from "../_shared/db.ts";
 import { RequestError } from "../_shared/errors.ts";
 import { callOpenAi, OpenAiError, type CallOpenAiOptions } from "../_shared/openai.ts";
-import { isPublicBody } from "../anonymize-worker/deterministic.ts";
+import { isPublicBody, sourceNameVariants } from "../anonymize-worker/deterministic.ts";
 import {
   buildDiscoveryPrompt,
   buildDiscoverySchema,
@@ -78,7 +78,12 @@ export function filterProposals(
   const lower = (s: string) => s.trim().toLowerCase();
   const known = new Set(opts.knownAliases.map(lower));
   const seen = new Set(opts.alreadySuggested.map(lower));
-  const label = lower(opts.sourceLabel);
+  // Every form the anonymiser already derives from the label, not just the label
+  // verbatim — the first live run proposed "Fratelli Branca Distillerie", which
+  // stage 1 has always handled. Harmless to accept, but it is noise in a list
+  // the operator has to read carefully.
+  const ownNames = new Set(sourceNameVariants(opts.sourceLabel).map(lower));
+  ownNames.add(lower(opts.sourceLabel));
 
   const kept: DiscoveredName[] = [];
   const skipped: { name: string; reason: string }[] = [];
@@ -88,7 +93,7 @@ export function filterProposals(
     const key = lower(p.name);
     if (!key) continue;
     if (inThisBatch.has(key)) continue;
-    if (key === label) { skipped.push({ name: p.name, reason: "source_label" }); continue; }
+    if (ownNames.has(key)) { skipped.push({ name: p.name, reason: "source_label" }); continue; }
     if (known.has(key)) { skipped.push({ name: p.name, reason: "already_alias" }); continue; }
     if (seen.has(key)) { skipped.push({ name: p.name, reason: "already_suggested" }); continue; }
     if (isPublicBody(p.name)) { skipped.push({ name: p.name, reason: "public_body" }); continue; }
