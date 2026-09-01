@@ -42,6 +42,11 @@ export function Posts() {
   const [error, setError] = useState<string | null>(null)
 
   const [scoring, setScoring] = useState(false)
+  const [queueing, setQueueing] = useState(false)
+  // Pending + processing jobs. "Score now" drains this; until 0021 nothing in
+  // the UI could add to it, so the button answered "the queue is empty" while
+  // 47 posts sat unscored and the operator had no way to see why.
+  const [queued, setQueued] = useState<number | null>(null)
   const toast = useToast()
 
   const [sourceFilter, setSourceFilter] = useState('all')
@@ -61,9 +66,42 @@ export function Posts() {
     else setRows((data ?? []) as unknown as PostRow[])
   }, [])
 
+  const loadQueue = useCallback(async () => {
+    const { count } = await supabase
+      .from('scoring_job_state')
+      .select('*', { count: 'exact', head: true })
+      .in('status', ['pending', 'processing'])
+    setQueued(count ?? 0)
+  }, [])
+
   useEffect(() => {
     load()
-  }, [load])
+    loadQueue()
+  }, [load, loadQueue])
+
+  // Put posts INTO the scoring queue. queue_scoring also rotates the production
+  // scoring request when the objective has changed since it was opened —
+  // a request pins an immutable config snapshot, so without that an edit on the
+  // Objective screen would never reach the scorer.
+  async function queue(mode: 'unscored' | 'all') {
+    if (queueing || scoring) return
+    setQueueing(true)
+    const { data, error } = await supabase.rpc('queue_scoring', { p_mode: mode })
+    setQueueing(false)
+    if (error) return toast.error(error.message)
+
+    const r = data as { enqueued: number; config_rotated: boolean } | null
+    await loadQueue()
+    if (r?.config_rotated) {
+      toast.success(
+        `Objective changed — scoring restarted under the new settings. ${r.enqueued} queued.`,
+      )
+    } else if (!r?.enqueued) {
+      toast.success('Nothing to queue — every post already has a score.')
+    } else {
+      toast.success(`${r.enqueued} post(s) queued. Press Score now to process them.`)
+    }
+  }
 
   // Drain the scoring queue. Jobs are enqueued by a trigger on raw_posts
   // insert, so this never creates work — it only processes what ingest left
@@ -103,6 +141,7 @@ export function Posts() {
     if (t.circuit_break) parts.push(`${t.circuit_break} circuit-broken`)
     toast.success(`${t.jobs_read} job(s) read — ${parts.join(', ')}`)
     await load()
+    await loadQueue()
   }
 
   const sourceNames = useMemo(() => {
@@ -136,14 +175,37 @@ export function Posts() {
           <h1 className="text-xl font-semibold">Posts</h1>
           <p className="mt-1 text-sm text-slate-500">
             {filtered.length} of {rows.length} analysed posts
+            {queued !== null && queued > 0 && (
+              <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-700">
+                {queued} waiting to be scored
+              </span>
+            )}
           </p>
         </div>
 
         <div className="flex items-end gap-4">
+          <div className="flex gap-2">
+            <button
+              onClick={() => queue('unscored')}
+              disabled={queueing || scoring}
+              title="Queue every post that has never been scored"
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              {queueing ? 'Queueing…' : 'Queue unscored'}
+            </button>
+            <button
+              onClick={() => queue('all')}
+              disabled={queueing || scoring}
+              title="Re-score every post — use after changing the objective"
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              Re-score all
+            </button>
+          </div>
           <button
             onClick={scoreNow}
-            disabled={scoring}
-            className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            disabled={scoring || queueing}
+            className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
           >
             {scoring ? 'Scoring…' : 'Score now'}
           </button>

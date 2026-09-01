@@ -282,6 +282,25 @@ export function Clusters() {
     await loadAnonymised()
   }
 
+  // Adding a brand name to the alias list changes nothing on its own: the
+  // anonymise backfill only picks up posts with no current result, so text
+  // processed before the name existed keeps the old wording. Accepting a
+  // discovered brand and seeing no effect is the case this exists for.
+  async function requeueAnonymisation() {
+    if (anonymising) return
+    setAnonymising(true)
+    const { data, error } = await supabase.rpc('requeue_anonymisation')
+    setAnonymising(false)
+    if (error) return toast.error(error.message)
+    const n = (data as { requeued: number } | null)?.requeued ?? 0
+    toast.success(
+      n === 0
+        ? 'Nothing anonymised yet — nothing to redo.'
+        : `${n} post(s) marked for a fresh pass. Press Anonymise now to process them.`,
+    )
+    await loadAnonymised()
+  }
+
   async function runClustering() {
     setRunning(true)
     const { data: sessionData } = await supabase.auth.getSession()
@@ -455,6 +474,14 @@ export function Clusters() {
             className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
           >
             {anonymising ? 'Anonymising…' : 'Anonymise now'}
+          </button>
+          <button
+            onClick={requeueAnonymisation}
+            disabled={anonymising || running}
+            title="Mark everything already anonymised for a fresh pass — use after accepting new brand names"
+            className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          >
+            Redo all
           </button>
           <button
             onClick={runClustering}

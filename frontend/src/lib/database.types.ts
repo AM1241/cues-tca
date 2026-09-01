@@ -714,6 +714,7 @@ export type Database = {
       }
       configurations: {
         Row: {
+          aggregation_strategy: string
           anonymization_enabled: boolean
           anonymize_companies: boolean
           cluster_similarity_threshold: number
@@ -725,6 +726,8 @@ export type Database = {
           keep_public_bodies: boolean
           min_cluster_size: number
           min_relevance_score: number
+          scoring_model: string
+          scoring_model_snapshot: string
           themes: Json
           updated_at: string
           voice_audience: string | null
@@ -732,6 +735,7 @@ export type Database = {
           voice_tone: string | null
         }
         Insert: {
+          aggregation_strategy?: string
           anonymization_enabled?: boolean
           anonymize_companies?: boolean
           cluster_similarity_threshold?: number
@@ -743,6 +747,8 @@ export type Database = {
           keep_public_bodies?: boolean
           min_cluster_size?: number
           min_relevance_score?: number
+          scoring_model?: string
+          scoring_model_snapshot?: string
           themes?: Json
           updated_at?: string
           voice_audience?: string | null
@@ -750,6 +756,7 @@ export type Database = {
           voice_tone?: string | null
         }
         Update: {
+          aggregation_strategy?: string
           anonymization_enabled?: boolean
           anonymize_companies?: boolean
           cluster_similarity_threshold?: number
@@ -761,6 +768,8 @@ export type Database = {
           keep_public_bodies?: boolean
           min_cluster_size?: number
           min_relevance_score?: number
+          scoring_model?: string
+          scoring_model_snapshot?: string
           themes?: Json
           updated_at?: string
           voice_audience?: string | null
@@ -1881,6 +1890,7 @@ export type Database = {
         }
         Returns: string
       }
+      queue_scoring: { Args: { p_mode?: string }; Returns: Json }
       read_anonymize_jobs: {
         Args: { p_qty: number; p_vt: number }
         Returns: {
@@ -1962,6 +1972,7 @@ export type Database = {
         Returns: string
       }
       reject_brand_suggestion: { Args: { p_id: string }; Returns: undefined }
+      requeue_anonymisation: { Args: never; Returns: Json }
       revive_scoring_job: { Args: { p_job_id: string }; Returns: undefined }
       scoring_apply_aggregation: {
         Args: { p_strategy: string; p_theme_scores: Json }
