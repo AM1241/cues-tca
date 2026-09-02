@@ -1,9 +1,102 @@
 # Session handoff — CUES Editorial Cloud
 
-Last updated: 2026-09-01 (session 15 — the corpus is fully re-scored on real
-data, and the operator can now drive scoring and anonymisation without SQL).
+Last updated: 2026-09-02 (session 16 — stage 2 stops replacing things that are
+not companies, and the scoring model is an editable setting rather than a
+constant that moved house).
 Read this first, then `MIGRATION_PLAN.md`. This file is the single "where are
 we" pointer between working sessions.
+
+## Session 16 — the anonymiser stops corrupting facts (2026-09-02)
+
+### What was wrong
+
+Session 15 produced the first corpus of real anonymised text, which made the
+first real audit of it possible. Every `entity_extraction` replacement ever
+stored was read back: **45 distinct entities, and a large share of them were
+not companies at all.**
+
+| What was replaced | Times | What it actually is |
+| --- | --- | --- |
+| `Made in Italy` | 5 | a phrase |
+| `Vinitaly` | 4 | a trade fair |
+| `Cabina di Regia` | 3 | an inter-ministerial body |
+| `AGEA - Agenzia per le Erogazioni in Agricoltura` | | a public agency |
+| `Bando MASAF INAIL ISMEA CREA` | | a funding notice naming four agencies |
+| `Anci`, `Capitanerie di Porto`, `Copernicus` | | public bodies |
+| `Australia` | | a country |
+| `Al Bano` | | a person |
+| `6,2 milioni di euro` | | an amount of money |
+| `associazioni di categoria` | | a category noun |
+
+Each one silently rewrites what a post says into "another food-sector
+organization". Nothing downstream can tell, which is what makes it worse than
+a leak: a leak is visible when you grep for the name.
+
+### Why the public bodies got through
+
+`isPublicBody` compared for **equality**. The extractor returns an institution
+as the text spells it — `"AGEA (Agecontrol)"`, `"Bando MASAF INAIL ISMEA
+CREA"` — and none of those equals a list entry, so `keep_public_bodies` never
+fired. It now matches by **whole-word containment**.
+
+One trap, hit on the first attempt: making every acronym case-sensitive (to
+stop `WHO` and `UN` firing on English "who" and Italian "un") broke `"Ismea"`,
+which is exactly the spelling the corpus uses. Only `EU`, `UN`, `WHO` and
+`CREA` are case-sensitive now — the four whose lowercase form is a real word.
+`ANCI` and `Copernicus` joined the list; `Capitanerie`, `Commissione
+Agricoltura` and `Cabina di Regia` joined the wording patterns.
+
+### The second guard
+
+`isNotOrganizationName` is new, applied in the same merge loop and **ungated by
+config**: an amount of money and a lowercase multi-word phrase are not
+companies under any setting, so replacing them is a factual corruption rather
+than a policy choice. Deliberately narrow — names that merely contain digits
+(`Industry 4.0`) and single lowercase words (`adidas`) pass, because refusing
+in that direction leaks a real company.
+
+`ENTITY_PROMPT_VERSION` is now `entity_extraction_v2`, with an exclusion list
+drawn from the measured failures and a closing instruction to leave out
+anything uncertain: a missed company can be typed into `company_aliases`, a
+wrongly reported one cannot be noticed.
+
+**Still probabilistic:** countries, people and trade fairs are left to the
+prompt, because only a gazetteer could settle them and guessing wrong in that
+direction leaks a name.
+
+### Text already stored still carries the old replacements
+
+The fix changes what the anonymiser *will* do. `"Redo all"` on the Clusters
+screen re-runs anonymisation against the deployed version — **~89 LLM calls**,
+so it is a deliberate operator action, not something to do casually.
+
+### The scoring model is now a setting
+
+The Objective screen gains a **Scoring engine** section: model, pinned build,
+and the aggregation strategy as a select with its one implemented option.
+
+`0022_model_in_scoring_snapshot.sql` is the half of 0021 that was missing.
+`queue_scoring` rotates the active production request when the config hash
+moves, and `scoring_config_snapshot()` did not include the model — so exposing
+the field without this would have let an operator change the model, press
+Queue, and be scored by the old one. The snapshot change moves the hash once,
+which rotates the request on the next queue with no edit; that costs nothing,
+because `backfill_scoring_for_request` enqueues posts with **no current result
+at all**, not posts unscored under the new request. The 180 scores stand.
+
+### Shipped
+
+- `c20f012` — anonymise: the containment fix, the shape guard, prompt v2
+- `fa6ef15` — objective: the Scoring engine section, migration 0022
+- `anonymize-worker` deployed; 0022 applied to `bxaovkzemfyxrxbcqask`
+- 34 offline tests in `anonymize-worker/__tests__/deterministic_test.ts`, green
+
+### Still open
+
+- **Α — regenerate with feedback**: `generate` change + migration + Review UI.
+- **Β — DOCX export**: Edge Function + Storage + signed URL.
+- **Ε — encoding corruption at ingest.**
+- Re-anonymise the corpus once the operator decides the ~89 calls are worth it.
 
 ## Session 15 — real scores, and the buttons to produce them (2026-09-01)
 
