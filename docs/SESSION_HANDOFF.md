@@ -1,8 +1,8 @@
 # Session handoff — CUES Editorial Cloud
 
 Last updated: 2026-09-02 (session 16 — stage 2 stops replacing things that are
-not companies, the scoring model is an editable setting, and an editor can hand
-the model a note and get a new draft).
+not companies, the scoring model is an editable setting, an editor can hand the
+model a note and get a new draft, and Export produces Word documents).
 Read this first, then `MIGRATION_PLAN.md`. This file is the single "where are
 we" pointer between working sessions.
 
@@ -136,9 +136,52 @@ the copy:
 
 `6287148`, `generate` deployed, 0023 applied. 7 offline prompt tests.
 
+### Β is done — Word export
+
+Export offered Markdown and JSON. The people this copy is written for work in
+Word, and pasting Markdown into a document is not a handoff. There is now a
+third format on both tabs.
+
+**Built in the browser, not as an Edge Function writing to Storage** — a
+deliberate departure from the earlier note. The outputs are a few kilobytes the
+client already holds and renders in the preview pane; a round trip would have
+bought a bucket, a storage policy, signed URLs that outlive RLS for their
+lifetime, and a cleanup job, to move bytes that were already there. If sharable
+links are ever wanted, that is the reason to revisit it — not file size.
+
+- The `docx` dependency is behind a **dynamic import**: a separate 403 kB chunk
+  nobody downloads until they pick the format. The main bundle grew 8 kB.
+- Hand-rolling OOXML was considered and rejected. A .docx is easy to produce
+  and easy to produce almost right; a file Word refuses to open is worse than
+  no file.
+- **"Download all" is one document** with page breaks between entries, not a
+  folder of twenty.
+- The preview pane shows the Markdown rendering with an explicit note that the
+  download is Word. Previewing one format while downloading another silently is
+  the sort of small lie that costs an afternoon.
+
+Verified against real generated files: ZIP integrity, every XML part parses,
+content types cover every extension, hyperlink `r:id`s all resolve through
+`document.xml.rels`, Heading1/Heading2 applied, carousel slides sorted 1-5 from
+shuffled input, exactly one page break between two entries and none trailing,
+and `&`, `<`, em dashes, curly quotes and Italian accents intact.
+
+`dd8a627`.
+
+### Two things to know about this repo
+
+**`tsc --noEmit -p tsconfig.json` checks nothing.** `frontend/tsconfig.json` is a
+solution file with project references, so that invocation reports clean on code
+that does not compile. Use `npm run build`, which runs `tsc -b`. This bit during
+session 16 — a `-p` run said clean and the build then reported seven errors.
+
+**`react-router` carries a high-severity advisory** (GHSA-qwww-vcr4-c8h2, RSC
+mode CSRF) at the pinned 7.18.1. Pre-existing, unrelated to any session-16 work,
+and not fixed here because a router upgrade deserves its own change. `npm audit
+fix` in `frontend/` is the stated remedy.
+
 ### Still open
 
-- **Β — DOCX export**: Edge Function + Storage + signed URL.
 - **Ε — encoding corruption at ingest.**
 - Re-anonymise the corpus once the operator decides the ~89 calls are worth it.
 
