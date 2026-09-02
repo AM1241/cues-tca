@@ -6,6 +6,34 @@ model a note and get a new draft, and Export produces Word documents).
 Read this first, then `MIGRATION_PLAN.md`. This file is the single "where are
 we" pointer between working sessions.
 
+## Verified state at the end of session 16 (checked 2026-09-03)
+
+Everything below was confirmed against the live systems, not inferred from the
+repo.
+
+| | |
+| --- | --- |
+| Branch | `phase6-frontend-binding`, clean, in sync with `origin` |
+| Head | `a3fbc21` |
+| Project | `bxaovkzemfyxrxbcqask` (`cues-tca`, eu-west-1) |
+| Migrations applied | through **0023**; `schema_migrations` rows match the files |
+| Edge Functions | `anonymize-worker` v11, `generate` v4, `cluster` v5, `discover-brands` v5, `score-worker` v10, `ingest` v9 — all ACTIVE |
+| Frontend | live bundle on cues-tca.netlify.app is `index-BYyF1U4-.js`, byte-identical to the local `npm run build` |
+| Tests | `deno test supabase/functions/` → **105 passed, 0 failed**, 28 ignored (the live-stack suites, skipped without `SUPABASE_URL` / `RAPIDAPI_KEY`) |
+
+**Data left behind by session 16's live tests.** The cluster *"Più controlli,
+più sicurezza"* now carries three generation results — the original (superseded),
+a no-note regeneration, and one produced from the note *"Too soft. Lead with the
+enforcement angle…"*. Real rows, visible in Review. Nothing was left approved;
+`cluster_generation_results` is append-only, so removing them needs deliberate
+SQL and is not obviously worth it.
+
+**The corpus still carries the OLD over-replacements.** Session 16 fixed what
+the anonymiser *will* do. Existing anonymised text was produced before the fix
+and still contains "Made in Italy" and ten public bodies replaced by the generic
+entity. "Redo all" on Clusters re-runs it — **~89 LLM calls**, an operator
+decision, not taken.
+
 ## Session 16 — the anonymiser stops corrupting facts (2026-09-02)
 
 ### What was wrong
