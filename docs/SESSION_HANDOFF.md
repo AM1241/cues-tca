@@ -487,8 +487,9 @@ copy is now reviewable, editable, approvable and exportable; item 4 of session
   unedited, unapproved. Approving real copy is an editorial decision, so none
   was left standing.
 
-Still open from Phase 7: regeneration-with-feedback (needs a `generate` Edge
-Function change) and DOCX export (needs an Edge Function plus Storage).
+~~Still open from Phase 7: regeneration-with-feedback and DOCX export.~~ Both
+shipped in session 16 — see above. DOCX did **not** need an Edge Function or
+Storage in the end; the reasoning is recorded there.
 
 ---
 
