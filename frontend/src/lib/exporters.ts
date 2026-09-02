@@ -155,14 +155,17 @@ export function generationFilename(e: GenerationExport, ext: string) {
   return `${slug(`${e.clusterLabel}-${e.outputType}`)}.${ext}`
 }
 
-export function download(filename: string, content: string, mime: string) {
-  const blob = new Blob([content], { type: mime })
+export function downloadBlob(filename: string, blob: Blob) {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
   a.download = filename
   a.click()
   URL.revokeObjectURL(url)
+}
+
+export function download(filename: string, content: string, mime: string) {
+  downloadBlob(filename, new Blob([content], { type: mime }))
 }
 
 export function assetFilename(asset: Asset, ext: string) {

@@ -12,15 +12,25 @@ import {
   generationToJson,
   generationFilename,
   download,
+  downloadBlob,
   type TraceForExport,
+  type AssetExport,
   type GenerationExport,
 } from '../lib/exporters'
+import { assetsToDocx, generationsToDocx } from '../lib/docx'
 
 type Asset = Database['public']['Tables']['editorial_assets']['Row']
 
 const STATUSES = ['all', 'approved', 'published', 'draft', 'rejected'] as const
 type Status = (typeof STATUSES)[number]
-type Format = 'md' | 'json'
+type Format = 'md' | 'json' | 'docx'
+
+// DOCX is binary, so the preview pane shows the markdown rendering of the same
+// content and says so. Silently previewing one format while downloading
+// another is the kind of small lie that costs an afternoon later.
+const PREVIEW_NOTE =
+  'Shown as text. The download is a Word document with the same content — headings, ' +
+  'the copy, provenance and clickable source links.'
 
 // -----------------------------------------------------------------------------
 
@@ -71,7 +81,7 @@ export function Export() {
             </select>
           </label>
           <div className="inline-flex overflow-hidden rounded-md border border-slate-300 text-sm">
-            {(['md', 'json'] as const).map((f) => (
+            {(['md', 'json', 'docx'] as const).map((f) => (
               <button
                 key={f}
                 onClick={() => setFormat(f)}
@@ -96,6 +106,13 @@ export function Export() {
     </div>
   )
 }
+
+// How multiple entries are joined in the text formats. Lifted to constants so
+// the escape sequences sit in one obvious place.
+const MD_SEPARATOR = '\n\n\n'
+const JSON_SEPARATOR = ',' + '\n'
+const JSON_OPEN = '[' + '\n'
+const JSON_CLOSE = '\n' + ']'
 
 // -----------------------------------------------------------------------------
 // Generated
@@ -131,6 +148,7 @@ function GeneratedExport({
     Record<string, { title: string | null; url: string }>
   >({})
   const [copied, setCopied] = useState(false)
+  const [building, setBuilding] = useState(false)
 
   useEffect(() => {
     supabase
@@ -212,18 +230,38 @@ function GeneratedExport({
     setCopied(false)
   }, [selected, format])
 
-  function downloadAll() {
-    const parts = filtered
+  async function downloadAll() {
+    const entries = filtered
       .map(toExport)
       .filter((e): e is GenerationExport => e !== null)
-      .map((e) => (format === 'md' ? generationToMarkdown(e) : generationToJson(e)))
-    const joined = format === 'md' ? parts.join('\n\n\n') : `[\n${parts.join(',\n')}\n]`
-    download(
-      `cues-generated-${statusFilter}.${format}`,
-      joined,
-      format === 'md' ? 'text/markdown' : 'application/json',
-    )
-    toast.success(`Exported ${parts.length} output${parts.length === 1 ? '' : 's'}`)
+
+    // One document, not one per output: a Word file is something an editor
+    // circulates, and a folder of twenty is not that. Entries inside it are
+    // separated by page breaks.
+    if (format === 'docx') {
+      setBuilding(true)
+      try {
+        const blob = await generationsToDocx(entries, `CUES generated — ${statusFilter}`)
+        downloadBlob(`cues-generated-${statusFilter}.docx`, blob)
+      } catch (e) {
+        toast.error((e as Error).message)
+        return
+      } finally {
+        setBuilding(false)
+      }
+    } else {
+      const parts = entries.map((e) =>
+        format === 'md' ? generationToMarkdown(e) : generationToJson(e),
+      )
+      const joined =
+        format === 'md' ? parts.join(MD_SEPARATOR) : JSON_OPEN + parts.join(JSON_SEPARATOR) + JSON_CLOSE
+      download(
+        `cues-generated-${statusFilter}.${format}`,
+        joined,
+        format === 'md' ? 'text/markdown' : 'application/json',
+      )
+    }
+    toast.success(`Exported ${entries.length} output${entries.length === 1 ? '' : 's'}`)
   }
 
   if (error) return <ErrorNotice message={error} />
@@ -239,10 +277,10 @@ function GeneratedExport({
         </p>
         <button
           onClick={downloadAll}
-          disabled={filtered.length === 0}
+          disabled={filtered.length === 0 || building}
           className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50"
         >
-          Download all
+          {building ? 'Building…' : 'Download all'}
         </button>
       </div>
 
@@ -288,17 +326,28 @@ function GeneratedExport({
           <PreviewPane
             filename={generationFilename(selectedExport, format)}
             preview={preview}
+            note={format === 'docx' ? PREVIEW_NOTE : undefined}
             copied={copied}
+            busy={building}
             onCopy={() => {
               navigator.clipboard.writeText(preview)
               setCopied(true)
             }}
-            onDownload={() => {
-              download(
-                generationFilename(selectedExport, format),
-                preview,
-                format === 'md' ? 'text/markdown' : 'application/json',
-              )
+            onDownload={async () => {
+              const name = generationFilename(selectedExport, format)
+              if (format === 'docx') {
+                setBuilding(true)
+                try {
+                  downloadBlob(name, await generationsToDocx([selectedExport], name))
+                } catch (e) {
+                  toast.error((e as Error).message)
+                  return
+                } finally {
+                  setBuilding(false)
+                }
+              } else {
+                download(name, preview, format === 'md' ? 'text/markdown' : 'application/json')
+              }
               toast.success('Downloaded')
             }}
           />
@@ -352,6 +401,10 @@ function LegacyExport({
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [preview, setPreview] = useState<string>('')
   const [copied, setCopied] = useState(false)
+  const [building, setBuilding] = useState(false)
+  // Kept alongside the rendered preview so a DOCX download does not re-fetch
+  // the traceability rows the preview already resolved.
+  const [selectedBundle, setSelectedBundle] = useState<AssetExport | null>(null)
 
   useEffect(() => {
     supabase
@@ -380,13 +433,15 @@ function LegacyExport({
     setCopied(false)
     if (!selected) {
       setPreview('')
+      setSelectedBundle(null)
       return
     }
     let cancelled = false
     fetchTrace(selected.id).then((trace) => {
       if (cancelled) return
       const bundle = { asset: selected, trace }
-      setPreview(format === 'md' ? assetToMarkdown(bundle) : assetToJson(bundle))
+      setSelectedBundle(bundle)
+      setPreview(format === 'json' ? assetToJson(bundle) : assetToMarkdown(bundle))
     })
     return () => {
       cancelled = true
@@ -394,18 +449,30 @@ function LegacyExport({
   }, [selected, format])
 
   async function downloadAll() {
-    const parts: string[] = []
-    for (const a of filtered) {
-      const trace = await fetchTrace(a.id)
-      const bundle = { asset: a, trace }
-      parts.push(format === 'md' ? assetToMarkdown(bundle) : assetToJson(bundle))
+    const bundles: AssetExport[] = []
+    for (const a of filtered) bundles.push({ asset: a, trace: await fetchTrace(a.id) })
+
+    if (format === 'docx') {
+      setBuilding(true)
+      try {
+        const blob = await assetsToDocx(bundles, `CUES legacy — ${statusFilter}`)
+        downloadBlob(`cues-legacy-${statusFilter}.docx`, blob)
+      } catch (e) {
+        toast.error((e as Error).message)
+        return
+      } finally {
+        setBuilding(false)
+      }
+    } else {
+      const parts = bundles.map((b) => (format === 'md' ? assetToMarkdown(b) : assetToJson(b)))
+      const joined =
+        format === 'md' ? parts.join(MD_SEPARATOR) : JSON_OPEN + parts.join(JSON_SEPARATOR) + JSON_CLOSE
+      download(
+        `cues-legacy-${statusFilter}.${format}`,
+        joined,
+        format === 'md' ? 'text/markdown' : 'application/json',
+      )
     }
-    const joined = format === 'md' ? parts.join('\n\n\n') : `[\n${parts.join(',\n')}\n]`
-    download(
-      `cues-legacy-${statusFilter}.${format}`,
-      joined,
-      format === 'md' ? 'text/markdown' : 'application/json',
-    )
     toast.success(`Exported ${filtered.length} asset${filtered.length === 1 ? '' : 's'}`)
   }
 
@@ -420,10 +487,10 @@ function LegacyExport({
         </p>
         <button
           onClick={downloadAll}
-          disabled={filtered.length === 0}
+          disabled={filtered.length === 0 || building}
           className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50"
         >
-          Download all
+          {building ? 'Building…' : 'Download all'}
         </button>
       </div>
 
@@ -458,17 +525,29 @@ function LegacyExport({
           <PreviewPane
             filename={assetFilename(selected, format)}
             preview={preview}
+            note={format === 'docx' ? PREVIEW_NOTE : undefined}
             copied={copied}
+            busy={building}
             onCopy={() => {
               navigator.clipboard.writeText(preview)
               setCopied(true)
             }}
-            onDownload={() => {
-              download(
-                assetFilename(selected, format),
-                preview,
-                format === 'md' ? 'text/markdown' : 'application/json',
-              )
+            onDownload={async () => {
+              const name = assetFilename(selected, format)
+              if (format === 'docx') {
+                if (!selectedBundle) return
+                setBuilding(true)
+                try {
+                  downloadBlob(name, await assetsToDocx([selectedBundle], name))
+                } catch (e) {
+                  toast.error((e as Error).message)
+                  return
+                } finally {
+                  setBuilding(false)
+                }
+              } else {
+                download(name, preview, format === 'md' ? 'text/markdown' : 'application/json')
+              }
               toast.success('Downloaded')
             }}
           />
@@ -487,15 +566,20 @@ function LegacyExport({
 function PreviewPane({
   filename,
   preview,
+  note,
   copied,
+  busy,
   onCopy,
   onDownload,
 }: {
   filename: string
   preview: string
+  /** Shown above the text when the download is not the text. */
+  note?: string
   copied: boolean
+  busy?: boolean
   onCopy: () => void
-  onDownload: () => void
+  onDownload: () => void | Promise<void>
 }) {
   return (
     <div className="rounded-lg border border-slate-200 bg-white">
@@ -510,12 +594,18 @@ function PreviewPane({
           </button>
           <button
             onClick={onDownload}
-            className="rounded-md bg-slate-900 px-2.5 py-1 text-xs font-medium text-white hover:bg-slate-800"
+            disabled={busy}
+            className="rounded-md bg-slate-900 px-2.5 py-1 text-xs font-medium text-white hover:bg-slate-800 disabled:opacity-60"
           >
-            Download
+            {busy ? 'Building…' : 'Download'}
           </button>
         </div>
       </div>
+      {note && (
+        <p className="border-b border-slate-200 bg-slate-50 px-4 py-2 text-xs text-slate-500">
+          {note}
+        </p>
+      )}
       <pre className="max-h-[70vh] overflow-auto px-4 py-3 text-xs leading-relaxed whitespace-pre-wrap text-slate-800">
         {preview || 'Building preview…'}
       </pre>
