@@ -30,7 +30,12 @@ import { authenticate } from "../_shared/auth.ts";
 import { serviceClient } from "../_shared/db.ts";
 import { RequestError } from "../_shared/errors.ts";
 import { callOpenAi, OpenAiError, type CallOpenAiOptions } from "../_shared/openai.ts";
-import { applyDeterministicReplacement, isPublicBody, type Replacement } from "./deterministic.ts";
+import {
+  applyDeterministicReplacement,
+  isNotOrganizationName,
+  isPublicBody,
+  type Replacement,
+} from "./deterministic.ts";
 import { buildEntityExtractionPrompt, buildEntityExtractionSchema, parseEntityExtractionResult } from "./entity.ts";
 import {
   backfillJobs,
@@ -132,6 +137,11 @@ async function processJob(
     // they were replaced. keep_public_bodies is re-checked here, against the
     // model's output, so the config flag decides rather than the model.
     if (config.keep_public_bodies && isPublicBody(entity)) continue;
+    // Unlike the check above, this one is NOT gated on config: an amount of
+    // money or a lowercase description is not a company under any setting, so
+    // rewriting it into the generic entity is a factual corruption rather than
+    // a policy choice. The 2026-09-01 audit found both shapes in stored text.
+    if (isNotOrganizationName(entity)) continue;
     finalText = finalText.split(entity).join(generic);
     replacements.push({ original: entity, replacement: generic, source: "entity_extraction" });
   }

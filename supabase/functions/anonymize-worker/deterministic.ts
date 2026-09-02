@@ -39,7 +39,20 @@ const PUBLIC_BODIES = [
   "Agenzia ICE",
   "Camera dei Deputati",
   "Senato della Repubblica",
+  // Added after the 2026-09-01 over-replacement audit: both were returned by
+  // the extractor and anonymised despite keep_public_bodies.
+  "ANCI",
+  "Copernicus",
 ];
+
+/**
+ * The only entries whose casing must match exactly. Their lowercase form is an
+ * ordinary word — Italian "un" and "crea", English "who" — so a case-blind word
+ * match would preserve any company whose name happens to contain one.
+ * Everything else is matched case-insensitively, because the extractor returns
+ * an institution in whatever casing the post used: "Ismea", "Agea", "Masaf".
+ */
+const CASE_SENSITIVE_BODIES = new Set(["EU", "UN", "WHO", "CREA"]);
 
 export interface Replacement {
   original: string;
@@ -92,16 +105,70 @@ const PUBLIC_BODY_PATTERNS: RegExp[] = [
   /\bregione\b/i,
   /\bcomune di\b/i,
   /\bprovincia di\b/i,
+  /\bcapitaneri/i,
+  /\bcommissione agricoltura\b/i,
+  /\bcabina di regia\b/i,
   /\bcommissione europea\b/i,
   /\bunione europea\b/i,
   /\beuropean commission\b/i,
   /\bparlamento europeo\b/i,
 ];
 
+/**
+ * Is this name a public institution the pipeline must preserve?
+ *
+ * The list is matched by WHOLE-WORD CONTAINMENT, not equality. Equality was the
+ * bug: "AGEA" is on the list, but the model returns the entity as it appears in
+ * the text — "AGEA - Agenzia per le Erogazioni in Agricoltura", "AGEA
+ * (Agecontrol)", "Bando MASAF INAIL ISMEA CREA" — none of which equals any list
+ * entry, so all of them were anonymised despite keep_public_bodies. The
+ * 2026-09-01 audit found ten such institutions replaced.
+ *
+ * Matching is case-insensitive except for the few entries listed in
+ * CASE_SENSITIVE_BODIES, whose lowercase form is an ordinary word.
+ */
 export function isPublicBody(name: string): boolean {
-  const lower = name.toLowerCase().trim();
-  if (PUBLIC_BODIES.some((b) => b.toLowerCase() === lower)) return true;
+  const trimmed = name.trim();
+  if (trimmed === "") return false;
+
+  for (const body of PUBLIC_BODIES) {
+    const re = new RegExp(
+      `(?<![\\p{L}\\p{N}])${escapeRegExp(body)}(?![\\p{L}\\p{N}])`,
+      CASE_SENSITIVE_BODIES.has(body) ? "u" : "iu",
+    );
+    if (re.test(trimmed)) return true;
+  }
   return PUBLIC_BODY_PATTERNS.some((re) => re.test(name));
+}
+
+/**
+ * Does this extractor output have the SHAPE of an organisation name at all?
+ *
+ * The same audit found the model returning things that are not entities of any
+ * kind and were rewritten into "another food-sector organization": the amount
+ * "6,2 milioni di euro", the phrase "associazioni di categoria". Replacing
+ * those protects nobody — it corrupts the fact. entity.ts's prompt now forbids
+ * them, but a prompt is guidance, not an enforcement point, so the two cases
+ * that can be judged from the string alone are refused here as well.
+ *
+ * Deliberately narrow. Anything only a gazetteer could settle — a country, a
+ * person, a trade fair — is left to the prompt, because guessing wrong in THIS
+ * direction leaks a real company name.
+ */
+export function isNotOrganizationName(name: string): boolean {
+  const trimmed = name.trim();
+  if (trimmed === "") return true;
+
+  // A quantity, a date, a sum of money. Organisation names that carry digits
+  // ("Industry 4.0", "Gruppo 24 Ore") also carry a capital; amounts do not.
+  if (/[0-9]/.test(trimmed) && !/\p{Lu}/u.test(trimmed)) return true;
+
+  // A lowercase multi-word phrase is a description, not a name. Single
+  // lowercase words are left alone: some brands really are written that way.
+  const words = trimmed.split(/\s+/u).filter((w) => /\p{L}/u.test(w));
+  if (words.length > 1 && trimmed === trimmed.toLowerCase()) return true;
+
+  return false;
 }
 
 // Variant fragments that are too generic to replace on their own — the

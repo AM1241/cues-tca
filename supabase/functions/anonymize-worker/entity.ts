@@ -12,15 +12,34 @@
  */
 import type { JsonSchemaFormat } from "../_shared/openai.ts";
 
-export const ENTITY_PROMPT_VERSION = "entity_extraction_v1";
+export const ENTITY_PROMPT_VERSION = "entity_extraction_v2";
 
-const TEMPLATE = `You are identifying organisation names mentioned in a LinkedIn post that
-should be anonymised for editorial use. The post's own source, "{{SOURCE}}", has
-already been replaced separately — do not report it again.
+const TEMPLATE = `You are identifying COMPANY names in a LinkedIn post that must be hidden before
+the text is reused as editorial commentary. The post's own source, "{{SOURCE}}", has
+already been handled separately — do not report it again.
 
-Find any OTHER company or organisation name mentioned in the text below that is not
-a public body (governments, EU institutions, UN agencies, regulators). For each one,
-report the exact substring as it appears in the text.
+Report a name ONLY if it identifies a specific private company or brand: a business,
+its products, its subsidiaries.
+
+Do NOT report — every one of these was wrongly reported in a real run and damaged
+the text:
+
+- Public institutions of any kind: ministries, agencies, regulators, chambers,
+  inspectorates, police and military corps, EU and UN bodies, research institutes,
+  public programmes and funding schemes. These are preserved on purpose.
+- Trade fairs, exhibitions, conferences, awards and events.
+- Generic phrases and category nouns, even capitalised: "Made in Italy",
+  "trade associations", "protection consortia", "cocktail pairing".
+- Places: countries, regions, cities.
+- People's names.
+- Amounts of money, dates, quantities.
+
+If you are unsure whether something is a private company, leave it out. A missed
+company can be added by an operator; a wrongly reported one silently rewrites the
+meaning of the text and nobody notices.
+
+Report the exact substring as it appears in the text. Return an empty list if there
+are no private companies other than the source.
 
 Text:
 {{POST_TEXT}}`;

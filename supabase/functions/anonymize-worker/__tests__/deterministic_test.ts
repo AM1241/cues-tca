@@ -12,6 +12,7 @@ import {
   applyDeterministicReplacement,
   bucketLargeNumbers,
   bucketPercentages,
+  isNotOrganizationName,
   isPublicBody,
   sourceNameVariants,
 } from "../deterministic.ts";
@@ -252,4 +253,79 @@ Deno.test("an alias never overrides the public-body preservation list", () => {
     { ...cfg, companyAliases: { EFSA: G } },
   );
   assertEquals(text, "Il parere EFSA e arrivato.");
+});
+
+// --- public bodies, matched by containment ------------------------------
+// isPublicBody compared for equality, so the extractor's real output never
+// matched: it returns names as they appear in the text. The 2026-09-01 audit
+// found ten institutions anonymised despite keep_public_bodies — AGEA under two
+// spellings, a four-agency funding notice, Anci, the port authority, the
+// agriculture committee, Copernicus.
+
+Deno.test("a list entry inside a longer official name still preserves it", () => {
+  assertEquals(isPublicBody("AGEA - Agenzia per le Erogazioni in Agricoltura"), true);
+  assertEquals(isPublicBody("AGEA (Agecontrol)"), true);
+  assertEquals(isPublicBody("Bando MASAF INAIL ISMEA CREA"), true);
+  assertEquals(isPublicBody("Commissione Agricoltura"), true);
+  assertEquals(isPublicBody("Capitanerie di Porto"), true);
+  assertEquals(isPublicBody("Anci"), true);
+});
+
+Deno.test("the ambiguous acronyms match case-sensitively so common words do not fire", () => {
+  // "WHO" and "UN" are on the list. A case-blind word match would preserve any
+  // company whose name contains English "who" or Italian "un".
+  assertEquals(isPublicBody("WHO"), true);
+  assertEquals(isPublicBody("The Farmers Who Care"), false);
+  assertEquals(isPublicBody("UN"), true);
+  assertEquals(isPublicBody("Un Poco Distillerie"), false);
+});
+
+Deno.test("every other entry matches whatever casing the post used", () => {
+  // The regression that broke this fix the first time: making ALL acronyms
+  // case-sensitive stopped "Ismea" matching the list entry "ISMEA", which is
+  // exactly the spelling the extractor returns.
+  assertEquals(isPublicBody("Ismea"), true);
+  assertEquals(isPublicBody("Agea"), true);
+  assertEquals(isPublicBody("european commission"), true);
+  assertEquals(isPublicBody("Camera dei Deputati"), true);
+});
+
+Deno.test("an ordinary company is still not a public body", () => {
+  assertEquals(isPublicBody("Barilla"), false);
+  assertEquals(isPublicBody("Citrus L'Orto Italiano"), false);
+  assertEquals(isPublicBody("Eataly Lingotto"), false);
+});
+
+// --- entity shapes that are never an organisation -----------------------
+// The audit found the extractor returning an amount of money and a lowercase
+// category phrase; both were rewritten into "another food-sector
+// organization", which changes what the post says rather than protecting
+// anyone. Neither is a judgement call, so neither is left to the prompt.
+
+Deno.test("an amount is not an organisation name", () => {
+  assertEquals(isNotOrganizationName("6,2 milioni di euro"), true);
+  assertEquals(isNotOrganizationName("300000-400000 euro"), true);
+  assertEquals(isNotOrganizationName("2026"), true);
+});
+
+Deno.test("a name that merely contains digits is still a name", () => {
+  assertEquals(isNotOrganizationName("Industry 4.0"), false);
+  assertEquals(isNotOrganizationName("Gruppo 24 Ore"), false);
+});
+
+Deno.test("a lowercase multi-word phrase is a description, not a name", () => {
+  assertEquals(isNotOrganizationName("associazioni di categoria"), true);
+  assertEquals(isNotOrganizationName("trade associations"), true);
+});
+
+Deno.test("a single lowercase word is left to the prompt", () => {
+  // Some brands really are written that way, and refusing here would leak one.
+  assertEquals(isNotOrganizationName("adidas"), false);
+  assertEquals(isNotOrganizationName("illycaffe"), false);
+});
+
+Deno.test("ordinary company names pass the shape guard", () => {
+  assertEquals(isNotOrganizationName("Fratelli Branca Distillerie"), false);
+  assertEquals(isNotOrganizationName("Carpano"), false);
+  assertEquals(isNotOrganizationName(""), true);
 });
