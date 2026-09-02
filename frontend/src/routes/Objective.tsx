@@ -26,6 +26,9 @@ type Draft = {
   voice_audience: string
   voice_style: string
   min_relevance_score: number
+  scoring_model: string
+  scoring_model_snapshot: string
+  aggregation_strategy: string
   cluster_similarity_threshold: number
   min_cluster_size: number
   anonymization_enabled: boolean
@@ -50,6 +53,9 @@ function toDraft(c: Config, themes: Theme[]): Draft {
     voice_audience: c.voice_audience ?? '',
     voice_style: c.voice_style ?? '',
     min_relevance_score: Number(c.min_relevance_score),
+    scoring_model: c.scoring_model ?? '',
+    scoring_model_snapshot: c.scoring_model_snapshot ?? '',
+    aggregation_strategy: c.aggregation_strategy ?? 'max_theme_v1',
     cluster_similarity_threshold: Number(c.cluster_similarity_threshold),
     min_cluster_size: Number(c.min_cluster_size),
     anonymization_enabled: c.anonymization_enabled,
@@ -128,6 +134,9 @@ export function Objective() {
         voice_audience: draft.voice_audience.trim() || null,
         voice_style: draft.voice_style.trim() || null,
         min_relevance_score: draft.min_relevance_score,
+        scoring_model: draft.scoring_model.trim(),
+        scoring_model_snapshot: draft.scoring_model_snapshot.trim(),
+        aggregation_strategy: draft.aggregation_strategy,
         cluster_similarity_threshold: draft.cluster_similarity_threshold,
         min_cluster_size: draft.min_cluster_size,
         anonymization_enabled: draft.anonymization_enabled,
@@ -280,6 +289,50 @@ export function Objective() {
           <span className="w-10 text-right font-semibold tabular-nums">
             {draft.min_relevance_score}
           </span>
+        </div>
+      </Section>
+
+      <Section
+        title="Scoring engine"
+        hint="Which model scores a post, and how its per-theme scores become one number."
+      >
+        <div className="space-y-3">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <TextField
+              label="Model"
+              value={draft.scoring_model}
+              onChange={(v) => patch({ scoring_model: v })}
+            />
+            <TextField
+              label="Pinned build"
+              value={draft.scoring_model_snapshot}
+              onChange={(v) => patch({ scoring_model_snapshot: v })}
+            />
+          </div>
+          <label className="block text-sm">
+            <span className="mb-1 block font-medium text-slate-700">
+              Combining theme scores
+            </span>
+            <select
+              value={draft.aggregation_strategy}
+              onChange={(e) => patch({ aggregation_strategy: e.target.value })}
+              className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+            >
+              <option value="max_theme_v1">Highest single theme wins</option>
+            </select>
+          </label>
+          <p className="text-xs text-slate-500">
+            &ldquo;Highest single theme&rdquo; means a post scoring 95 on one theme and 0 on
+            the rest ranks alongside one that is strong across the board. It is the
+            only strategy implemented; the list is here so a second one is a visible
+            choice rather than a hidden default.
+          </p>
+          <p className="text-xs text-slate-500">
+            The pinned build is the exact dated model recorded on every score, so a
+            result can still name what produced it after the alias moves. Changing
+            either field opens a new scoring request the next time you queue —
+            existing scores stay until you re-score.
+          </p>
         </div>
       </Section>
 
