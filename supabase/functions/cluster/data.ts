@@ -2,6 +2,10 @@
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2.110.8";
 
 export interface ClusterConfigRow {
+  /** Operator's scope and angles, so cluster names are not written for food
+   *  when the tool is pointed elsewhere. See 0019_editorial_domain.sql. */
+  editorial_domain: string | null;
+  themes: unknown;
   min_relevance_score: number;
   cluster_similarity_threshold: number;
   min_cluster_size: number;
@@ -10,7 +14,7 @@ export interface ClusterConfigRow {
 export async function getConfig(db: SupabaseClient): Promise<ClusterConfigRow> {
   const { data, error } = await db
     .from("configurations")
-    .select("min_relevance_score, cluster_similarity_threshold, min_cluster_size")
+    .select("min_relevance_score, cluster_similarity_threshold, min_cluster_size, editorial_domain, themes")
     .eq("id", "default")
     .single();
   if (error) throw new Error(`configurations lookup failed: ${error.message}`);

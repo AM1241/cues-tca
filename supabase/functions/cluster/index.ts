@@ -131,6 +131,12 @@ export async function handleCluster(req: Request, deps: ClusterDeps = {}): Promi
 
     const db = deps.db ?? serviceClient();
     const config = await getConfig(db);
+    // configurations.themes is the mirror set_scoring_themes keeps in step with
+    // scoring_themes (0019), so the names a cluster gets and the themes a post
+    // was scored against come from one list rather than two.
+    const themeLabels = Array.isArray(config.themes)
+      ? (config.themes as unknown[]).filter((t): t is string => typeof t === "string")
+      : [];
 
     const eligible = await getEligiblePosts(db, period_start, period_end, config.min_relevance_score);
 
@@ -228,7 +234,11 @@ export async function handleCluster(req: Request, deps: ClusterDeps = {}): Promi
         const result = await callLlm({
           apiKey,
           model: labelModel,
-          input: buildClusterLabelPrompt(representativeTexts),
+          input: buildClusterLabelPrompt(
+            representativeTexts,
+            config.editorial_domain?.trim() || "its editorial domain",
+            themeLabels,
+          ),
           jsonSchema: buildClusterLabelSchema(),
           fetchImpl: deps.fetchImpl,
         } satisfies CallOpenAiOptions);

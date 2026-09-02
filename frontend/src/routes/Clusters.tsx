@@ -94,6 +94,10 @@ export function Clusters() {
   const [clustersById, setClustersById] = useState<Map<string, ClusterInfo>>(new Map())
   const [assignmentByPost, setAssignmentByPost] = useState<Map<string, string>>(new Map())
   const [failedEmbeddings, setFailedEmbeddings] = useState<FailedEmbeddingRow[]>([])
+  // run_id -> how many generation results it already has. The screen always
+  // opens on the NEWEST run, so copy generated against an earlier one looks
+  // missing unless the selector says where it is.
+  const [genCountByRun, setGenCountByRun] = useState<Map<string, number>>(new Map())
 
   const [periodStart, setPeriodStart] = useState(daysAgo(30))
   const [periodEnd, setPeriodEnd] = useState(daysAgo(0))
@@ -175,6 +179,15 @@ export function Clusters() {
     }
     const list = (data ?? []) as ClusteringRun[]
     setRuns(list)
+
+    const { data: genRows } = await supabase
+      .from('cluster_generation_results')
+      .select('clustering_run_id')
+    const counts = new Map<string, number>()
+    for (const g of (genRows ?? []) as { clustering_run_id: string }[]) {
+      counts.set(g.clustering_run_id, (counts.get(g.clustering_run_id) ?? 0) + 1)
+    }
+    setGenCountByRun(counts)
     // Default to the latest run, per PHASE4_REQUIREMENTS.md's "show the
     // latest run by default while retaining prior runs for audit/debugging".
     if (list.length > 0 && !selectedRunId) setSelectedRunId(list[0].id)
@@ -504,6 +517,7 @@ export function Clusters() {
             {runs.map((r) => (
               <option key={r.id} value={r.id}>
                 {fmtDate(r.created_at)} — {fmtDate(r.period_start)} to {fmtDate(r.period_end)} ({r.status})
+                {genCountByRun.get(r.id) ? ` · ${genCountByRun.get(r.id)} generated` : ' · nothing generated yet'}
               </option>
             ))}
           </select>
@@ -542,7 +556,9 @@ export function Clusters() {
             <div>
               <h2 className="text-sm font-semibold text-slate-900">Generate editorial copy</h2>
               <p className="mt-0.5 text-xs text-slate-500">
-                Select clusters from this run — generation takes several seconds per cluster.
+                {selectedClusterIds.size === 0
+                  ? 'Click a cluster below to enable Generate — it stays greyed out until you pick one.'
+                  : `${selectedClusterIds.size} cluster(s) selected — generation takes several seconds each.`}
               </p>
             </div>
             <div className="flex items-center gap-4">

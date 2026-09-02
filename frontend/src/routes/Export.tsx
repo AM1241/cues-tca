@@ -270,6 +270,13 @@ function GeneratedExport({
           {filtered.length === 0 && (
             <p className="rounded-lg border border-dashed border-slate-300 p-4 text-center text-sm text-slate-400">
               No generated outputs with status “{statusFilter}”.
+              {statusFilter === 'approved' && (
+                <span className="mt-1 block">
+                  Nothing is approved until you approve it — open Review, read a
+                  draft, and press Approve. Or switch the filter to “all” to see
+                  everything that has been generated.
+                </span>
+              )}
             </p>
           )}
         </div>
