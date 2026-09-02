@@ -1,8 +1,8 @@
 # Session handoff — CUES Editorial Cloud
 
 Last updated: 2026-09-02 (session 16 — stage 2 stops replacing things that are
-not companies, and the scoring model is an editable setting rather than a
-constant that moved house).
+not companies, the scoring model is an editable setting, and an editor can hand
+the model a note and get a new draft).
 Read this first, then `MIGRATION_PLAN.md`. This file is the single "where are
 we" pointer between working sessions.
 
@@ -91,9 +91,53 @@ at all**, not posts unscored under the new request. The 180 scores stand.
 - `anonymize-worker` deployed; 0022 applied to `bxaovkzemfyxrxbcqask`
 - 34 offline tests in `anonymize-worker/__tests__/deterministic_test.ts`, green
 
+### Α is done — regenerate with an instruction
+
+An editor reading a draft in Review can now write what to change and get a new
+one. `0023_generation_feedback.sql` plus `generate_v3`.
+
+**Nothing is overwritten.** `cluster_generation_results` is append-only, and its
+own comment already fixed the rule: a re-generation is a new request producing
+new rows. So a revision is an ordinary request carrying two extra facts —
+`cluster_generation_requests.regenerates_result_id` and `.feedback` — both
+stored, because `prompt_hash` tells you two results differ while only the note
+tells you what was asked for.
+
+Four decisions worth knowing:
+
+- **Scoped to one output type.** Feedback about a post must not replace a
+  carousel that was already approved. A regeneration inherits the previous
+  result's outputs and refuses an output it never carried.
+- **An approval is never revoked.** `supersede_generation_review` moves a review
+  to `'superseded'` only from `draft` or `rejected`. An approved row keeps its
+  status and gains a pointer to the newer draft, so nothing disappears from
+  Export because somebody explored a variant.
+- **An empty feedback box is a real request.** It asks for a materially
+  different angle on the same evidence, not a paraphrase — a separate branch in
+  the prompt.
+- **The supersede call is non-fatal.** By the time it runs the LLM call has been
+  paid for and persisted; a 500 over a pointer would lose copy the editor just
+  bought. Worst case is an old row still reading `draft`.
+
+**A trap this sprung, and it would have broken the Review screen:** 0023 gives
+`cluster_generation_reviews` a *second* foreign key to
+`cluster_generation_results`, and results/requests now reference each other. Any
+unqualified PostgREST embed between those tables started returning PGRST201
+("more than one relationship was found"). Review and Export both had one. Both
+now name the FK explicitly. Confirmed against the live API: the old form fails,
+the hinted form works. **Anything new that embeds these tables must do the
+same.**
+
+Verified end to end on the live project — the note reaches the model and changes
+the copy:
+
+> "More traceability controls: a practical path to food safety"
+> → "More enforcement, more safety: traceability that blocks unsafe risk"
+
+`6287148`, `generate` deployed, 0023 applied. 7 offline prompt tests.
+
 ### Still open
 
-- **Α — regenerate with feedback**: `generate` change + migration + Review UI.
 - **Β — DOCX export**: Edge Function + Storage + signed URL.
 - **Ε — encoding corruption at ingest.**
 - Re-anonymise the corpus once the operator decides the ~89 calls are worth it.
