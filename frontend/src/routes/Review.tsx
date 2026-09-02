@@ -36,6 +36,10 @@ type ReviewRow = {
   edited_output: unknown
   approved_by: string | null
   approval_notes: string | null
+  // Set once a regeneration has answered this draft. Status only moves to
+  // 'superseded' from draft/rejected — an approval is never revoked by the
+  // pipeline, so an approved row can carry this pointer and stay approved.
+  superseded_by_result_id: string | null
   cluster_generation_results: {
     cluster_label: string
     model: string
@@ -43,6 +47,14 @@ type ReviewRow = {
     raw_post_ids: string[]
     post_output: unknown
     carousel_output: unknown
+    // Needed to ask for a regeneration: the function validates the pair.
+    cluster_id: string
+    clustering_run_id: string
+    // The note that produced THIS draft, if it was itself a regeneration.
+    cluster_generation_requests: {
+      feedback: string | null
+      regenerates_result_id: string | null
+    } | null
   } | null
 }
 
@@ -51,6 +63,7 @@ const STATUS_STYLES: Record<string, string> = {
   approved: 'bg-emerald-100 text-emerald-700',
   rejected: 'bg-red-100 text-red-700',
   published: 'bg-blue-100 text-blue-700',
+  superseded: 'bg-slate-200 text-slate-500',
 }
 
 /** The output actually in force: the editor's version if there is one. */
@@ -103,14 +116,28 @@ function GeneratedReview() {
   const [rows, setRows] = useState<ReviewRow[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
+  // Superseded drafts are hidden by default: a regeneration answers them, and
+  // leaving both in one list makes it ambiguous which copy is current. They
+  // are never deleted — the toggle brings the whole history back.
+  const [showSuperseded, setShowSuperseded] = useState(false)
 
   const load = useCallback(async () => {
     const { data, error } = await supabase
       .from('cluster_generation_reviews')
+      // The FK hints are not decoration: 0023 added
+      // cluster_generation_reviews.superseded_by_result_id, so there are now TWO
+      // foreign keys from this table to cluster_generation_results and PostgREST
+      // refuses to guess which one an embed means. Same for results <-> requests,
+      // which 0023 made mutually referencing.
       .select(
         `result_id, output_type, status, edited_output, approved_by, approval_notes,
-         cluster_generation_results!inner (
-           cluster_label, model, created_at, raw_post_ids, post_output, carousel_output
+         superseded_by_result_id,
+         cluster_generation_results!cluster_generation_reviews_result_id_fkey!inner (
+           cluster_label, model, created_at, raw_post_ids, post_output, carousel_output,
+           cluster_id, clustering_run_id,
+           cluster_generation_requests!cluster_generation_results_generation_request_id_fkey (
+             feedback, regenerates_result_id
+           )
          )`,
       )
       .order('updated_at', { ascending: false })
@@ -122,10 +149,18 @@ function GeneratedReview() {
     load()
   }, [load])
 
+  // The selection is resolved against ALL rows, not the visible ones: opening
+  // the older draft from a "superseded by" link must work with the filter on.
   const selected = useMemo(
     () => rows?.find((r) => `${r.result_id}:${r.output_type}` === selectedKey) ?? null,
     [rows, selectedKey],
   )
+
+  const visible = useMemo(
+    () => (rows ?? []).filter((r) => showSuperseded || r.status !== 'superseded'),
+    [rows, showSuperseded],
+  )
+  const supersededCount = (rows ?? []).filter((r) => r.status === 'superseded').length
 
   if (error) return <ErrorNotice message={error} />
   if (!rows) return <Spinner label="Loading generated copy…" />
@@ -139,7 +174,18 @@ function GeneratedReview() {
   return (
     <div className="grid grid-cols-[1fr_1.6fr] gap-6">
       <div className="space-y-2">
-        {rows.map((r) => {
+        {supersededCount > 0 && (
+          <label className="mb-1 flex cursor-pointer items-center gap-2 text-xs text-slate-500">
+            <input
+              type="checkbox"
+              checked={showSuperseded}
+              onChange={(e) => setShowSuperseded(e.target.checked)}
+              className="rounded border-slate-300"
+            />
+            Show {supersededCount} superseded draft{supersededCount === 1 ? '' : 's'}
+          </label>
+        )}
+        {visible.map((r) => {
           const key = `${r.result_id}:${r.output_type}`
           return (
             <button
@@ -180,6 +226,10 @@ function GeneratedReview() {
           key={`${selected.result_id}:${selected.output_type}`}
           row={selected}
           onChanged={load}
+          onOpenResult={(resultId) => {
+            setShowSuperseded(true)
+            setSelectedKey(`${resultId}:${selected.output_type}`)
+          }}
         />
       ) : (
         <div className="flex items-center">
@@ -193,9 +243,11 @@ function GeneratedReview() {
 function GeneratedDetail({
   row,
   onChanged,
+  onOpenResult,
 }: {
   row: ReviewRow
-  onChanged: () => void
+  onChanged: () => Promise<void> | void
+  onOpenResult: (resultId: string) => void
 }) {
   const { session } = useAuth()
   const toast = useToast()
@@ -214,6 +266,11 @@ function GeneratedDetail({
   )
   const [notes, setNotes] = useState(row.approval_notes ?? '')
   const [busy, setBusy] = useState(false)
+  const [feedback, setFeedback] = useState('')
+  const [regenerating, setRegenerating] = useState(false)
+
+  // The note that produced THIS draft, when it was itself a regeneration.
+  const cameFrom = row.cluster_generation_results?.cluster_generation_requests ?? null
 
   const dirty = JSON.stringify(draft) !== JSON.stringify(effectiveOutput(row))
 
@@ -253,6 +310,57 @@ function GeneratedDetail({
     }
   }
 
+  /**
+   * Asks for a new draft of THIS output, with the editor's note in the prompt.
+   * Nothing existing is modified: generate writes a new result and points this
+   * review row at it (0023). Scoped to this one output type so feedback about
+   * a post never silently replaces a carousel that was already approved.
+   */
+  async function regenerate() {
+    const r = row.cluster_generation_results
+    if (!r || regenerating) return
+    setRegenerating(true)
+    const { data: sessionData } = await supabase.auth.getSession()
+    const token = sessionData.session?.access_token
+    const { data, error } = await supabase.functions.invoke('generate', {
+      body: {
+        clustering_run_id: r.clustering_run_id,
+        cluster_ids: [r.cluster_id],
+        output_types: [row.output_type],
+        regenerates_result_id: row.result_id,
+        feedback: feedback.trim() || null,
+      },
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    })
+    setRegenerating(false)
+
+    if (error) {
+      // Upfront validation (400/404/422) is non-2xx: nothing was written and
+      // the real reason is in the body, not supabase-js's generic message.
+      let message = error.message
+      try {
+        const body = await (error as { context?: Response }).context?.json()
+        if (body?.error) message = body.error
+      } catch {
+        /* body already consumed or not JSON */
+      }
+      toast.error(message)
+      return
+    }
+
+    const newId = data?.results?.[0]?.generation_result_id as string | undefined
+    if (!data?.ok || !newId) {
+      // 200 + ok:false — a request row exists and carries the failure detail.
+      toast.error(data?.error ?? 'Regeneration did not produce a draft.')
+      await onChanged()
+      return
+    }
+    setFeedback('')
+    toast.success('New draft generated')
+    await onChanged()
+    onOpenResult(newId)
+  }
+
   const decide = (status: 'approved' | 'rejected') =>
     patch(
       {
@@ -288,6 +396,41 @@ function GeneratedDetail({
           </button>
         )}
       </div>
+
+      {row.superseded_by_result_id && (
+        <div className="mt-4 flex items-center justify-between gap-3 rounded-md bg-slate-100 px-3 py-2 text-sm text-slate-600">
+          <span>
+            {row.status === 'superseded'
+              ? 'A newer draft has answered this one.'
+              : 'A newer draft exists. This version keeps its ' + row.status + ' status.'}
+          </span>
+          <button
+            onClick={() => onOpenResult(row.superseded_by_result_id!)}
+            className="shrink-0 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+          >
+            Open newer draft
+          </button>
+        </div>
+      )}
+
+      {cameFrom?.regenerates_result_id && (
+        <div className="mt-4 rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-600">
+          {cameFrom.feedback ? (
+            <>
+              Regenerated from an earlier draft with this note:{' '}
+              <span className="italic">&ldquo;{cameFrom.feedback}&rdquo;</span>
+            </>
+          ) : (
+            'Regenerated from an earlier draft, with no note — a different take on the same evidence.'
+          )}{' '}
+          <button
+            onClick={() => onOpenResult(cameFrom.regenerates_result_id!)}
+            className="font-medium underline underline-offset-2 hover:text-slate-900"
+          >
+            Open the earlier draft
+          </button>
+        </div>
+      )}
 
       {row.edited_output != null && (
         <div className="mt-4 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">
@@ -356,6 +499,36 @@ function GeneratedDetail({
           Current: <span className="font-medium">{row.status}</span>
         </span>
       </div>
+
+      <hr className="my-5 border-slate-200" />
+
+      <h3 className="text-sm font-semibold text-slate-700">Ask for a new draft</h3>
+      <p className="mt-1 text-xs text-slate-500">
+        Say what to change and the model rewrites this {row.output_type} with the note and
+        the current draft in front of it. Leave the box empty for a different take on the
+        same evidence. The existing draft is kept — nothing here is overwritten.
+      </p>
+      <textarea
+        value={feedback}
+        onChange={(e) => setFeedback(e.target.value)}
+        rows={2}
+        maxLength={2000}
+        placeholder="e.g. too corporate — lead with the policy angle and cut the closing question"
+        className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+      />
+      <button
+        onClick={regenerate}
+        disabled={regenerating || busy}
+        className="mt-2 rounded-md bg-slate-900 px-4 py-1.5 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-60"
+      >
+        {regenerating ? 'Generating…' : 'Regenerate'}
+      </button>
+      {dirty && (
+        <p className="mt-2 text-xs text-amber-600">
+          You have unsaved edits. Regenerating produces a separate draft and leaves them here,
+          but they are still unsaved.
+        </p>
+      )}
 
       {row.edited_output != null && original && (
         <>

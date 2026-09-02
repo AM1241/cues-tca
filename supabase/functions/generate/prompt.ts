@@ -13,7 +13,7 @@
 import type { JsonSchemaFormat } from "../_shared/openai.ts";
 import type { GenerationConfigRow } from "./data.ts";
 
-export const PROMPT_VERSION = "generate_v2";
+export const PROMPT_VERSION = "generate_v3";
 
 /**
  * Fallback brief, derived from the operator's editorial_domain rather than
@@ -32,6 +32,51 @@ function defaultBrief(domain: string): string {
 
 const MAX_POSTS = 12;
 const MAX_CHARS_PER_POST = 500;
+
+/**
+ * What an editor asked for after reading a draft. `previous` is the draft they
+ * were looking at — without it "make it sharper" refers to nothing, and the
+ * model would simply produce another first attempt.
+ *
+ * `feedback` is optional on purpose: pressing Regenerate with no note is a
+ * legitimate request for a different take on the same evidence, and the two
+ * cases need different instructions. A note says what to change; no note says
+ * change the angle.
+ */
+export interface RevisionContext {
+  feedback: string | null;
+  previousOutputType: "post" | "carousel";
+  previousOutput: unknown;
+}
+
+function buildRevisionBlock(revision: RevisionContext): string {
+  const note = revision.feedback?.trim() ?? "";
+  const instruction = note
+    ? [
+      "The editor read that draft and asked for this:",
+      "",
+      note,
+      "",
+      "Produce a new version that answers the instruction. Keep what already worked; change",
+      "what was asked for. Do not restate the instruction in the copy.",
+    ].join("\n")
+    : [
+      "The editor asked for a different take, without saying what was wrong. Produce a",
+      "materially different version — a different angle or structure on the same evidence —",
+      "not a paraphrase of the draft above.",
+    ].join("\n");
+
+  return `
+
+You have already produced a draft for this cluster. This is a revision, not a first attempt.
+
+Previous ${revision.previousOutputType} draft:
+${JSON.stringify(revision.previousOutput, null, 2)}
+
+${instruction}
+
+Every rule below still applies to the new version.`;
+}
 
 export interface GenerationInputPost {
   anonymized_text: string;
@@ -56,6 +101,7 @@ export function buildGenerationPrompt(
   clusterLabel: string,
   posts: GenerationInputPost[],
   config: GenerationConfigRow,
+  revision?: RevisionContext,
 ): string {
   const domain = config.editorial_domain?.trim() || "its editorial domain";
   // The example given to the model must be the wording the anonymiser actually
@@ -80,6 +126,7 @@ Cluster theme: "${clusterLabel}"
 Anonymised source posts for this cluster (already anonymised — company and person names have
 already been replaced with generic descriptions):
 ${evidence}
+${revision ? buildRevisionBlock(revision) : ""}
 
 Produce BOTH a LinkedIn post draft and a 5-slide LinkedIn carousel draft from this cluster's
 evidence, following the required structured output schema exactly.

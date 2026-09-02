@@ -136,8 +136,11 @@ function GeneratedExport({
     supabase
       .from('cluster_generation_reviews')
       .select(
+        // The FK hint is required since 0023: cluster_generation_reviews now has
+        // two foreign keys to cluster_generation_results (result_id and
+        // superseded_by_result_id) and PostgREST will not guess between them.
         `result_id, output_type, status, edited_output,
-         cluster_generation_results!inner (
+         cluster_generation_results!cluster_generation_reviews_result_id_fkey!inner (
            cluster_label, model, created_at, raw_post_ids, post_output, carousel_output
          )`,
       )

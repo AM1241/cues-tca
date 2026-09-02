@@ -7,6 +7,11 @@ export type Json =
   | Json[]
 
 export type Database = {
+  // Allows to automatically instantiate createClient with right options
+  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
+  __InternalSupabase: {
+    PostgrestVersion: "14.5"
+  }
   graphql_public: {
     Tables: {
       [_ in never]: never
@@ -420,8 +425,10 @@ export type Database = {
           created_at: string
           created_by: string | null
           error_message: string | null
+          feedback: string | null
           id: string
           output_types: string[]
+          regenerates_result_id: string | null
           requested_cluster_ids: string[]
           status: string
         }
@@ -431,8 +438,10 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           error_message?: string | null
+          feedback?: string | null
           id?: string
           output_types: string[]
+          regenerates_result_id?: string | null
           requested_cluster_ids: string[]
           status?: string
         }
@@ -442,8 +451,10 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           error_message?: string | null
+          feedback?: string | null
           id?: string
           output_types?: string[]
+          regenerates_result_id?: string | null
           requested_cluster_ids?: string[]
           status?: string
         }
@@ -453,6 +464,13 @@ export type Database = {
             columns: ["clustering_run_id"]
             isOneToOne: false
             referencedRelation: "clustering_runs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cluster_generation_requests_regenerates_result_id_fkey"
+            columns: ["regenerates_result_id"]
+            isOneToOne: false
+            referencedRelation: "cluster_generation_results"
             referencedColumns: ["id"]
           },
         ]
@@ -546,6 +564,7 @@ export type Database = {
           output_type: string
           result_id: string
           status: string
+          superseded_by_result_id: string | null
           updated_at: string
         }
         Insert: {
@@ -557,6 +576,7 @@ export type Database = {
           output_type: string
           result_id: string
           status?: string
+          superseded_by_result_id?: string | null
           updated_at?: string
         }
         Update: {
@@ -568,12 +588,20 @@ export type Database = {
           output_type?: string
           result_id?: string
           status?: string
+          superseded_by_result_id?: string | null
           updated_at?: string
         }
         Relationships: [
           {
             foreignKeyName: "cluster_generation_reviews_result_id_fkey"
             columns: ["result_id"]
+            isOneToOne: false
+            referencedRelation: "cluster_generation_results"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cluster_generation_reviews_superseded_by_result_id_fkey"
+            columns: ["superseded_by_result_id"]
             isOneToOne: false
             referencedRelation: "cluster_generation_results"
             referencedColumns: ["id"]
@@ -1807,7 +1835,9 @@ export type Database = {
       create_cluster_generation_request: {
         Args: {
           p_clustering_run_id: string
+          p_feedback?: string
           p_output_types: string[]
+          p_regenerates_result_id?: string
           p_requested_cluster_ids: string[]
         }
         Returns: string
@@ -1988,6 +2018,14 @@ export type Database = {
         Returns: undefined
       }
       set_scoring_themes: { Args: { p_themes: Json }; Returns: undefined }
+      supersede_generation_review: {
+        Args: {
+          p_new_result_id: string
+          p_old_result_id: string
+          p_output_type: string
+        }
+        Returns: string
+      }
       upsert_post_embedding: {
         Args: {
           p_anonymize_result_id: string
@@ -2019,12 +2057,12 @@ export type Tables<
   DefaultSchemaTableNameOrOptions extends
     | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
         DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -2048,11 +2086,11 @@ export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -2073,11 +2111,11 @@ export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -2098,11 +2136,11 @@ export type Enums<
   DefaultSchemaEnumNameOrOptions extends
     | keyof DefaultSchema["Enums"]
     | { schema: keyof DatabaseWithoutInternals },
-  EnumName extends DefaultSchemaEnumNameOrOptions extends {
+  EnumName extends (DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaEnumNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -2115,11 +2153,11 @@ export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
     | keyof DefaultSchema["CompositeTypes"]
     | { schema: keyof DatabaseWithoutInternals },
-  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+  CompositeTypeName extends (PublicCompositeTypeNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
-    : never = never,
+    : never) = never,
 > = PublicCompositeTypeNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -2136,4 +2174,3 @@ export const Constants = {
     Enums: {},
   },
 } as const
-

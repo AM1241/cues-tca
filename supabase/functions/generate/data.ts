@@ -122,14 +122,63 @@ export async function getClusterPostInputs(db: SupabaseClient, runId: string, cl
   return out;
 }
 
+export interface PreviousResultRow {
+  id: string;
+  cluster_id: string;
+  clustering_run_id: string;
+  output_types: string[];
+  post_output: unknown;
+  carousel_output: unknown;
+}
+
+/** The draft a regeneration is trying to improve on. */
+export async function getGenerationResult(
+  db: SupabaseClient,
+  resultId: string,
+): Promise<PreviousResultRow | null> {
+  const { data, error } = await db
+    .from("cluster_generation_results")
+    .select("id, cluster_id, clustering_run_id, output_types, post_output, carousel_output")
+    .eq("id", resultId)
+    .maybeSingle();
+  if (error) throw new Error(`cluster_generation_results lookup failed: ${error.message}`);
+  return data as unknown as PreviousResultRow | null;
+}
+
+/**
+ * Records that a newer draft answers this review row. Never fatal to the
+ * caller: the regeneration itself has already succeeded and been persisted by
+ * the time this runs, so a failure here must not turn a good result into an
+ * error — it only leaves the old row unlinked. See 0023.
+ */
+export async function supersedeReview(
+  db: SupabaseClient,
+  args: { oldResultId: string; outputType: string; newResultId: string },
+): Promise<void> {
+  const { error } = await db.rpc("supersede_generation_review", {
+    p_old_result_id: args.oldResultId,
+    p_output_type: args.outputType,
+    p_new_result_id: args.newResultId,
+  });
+  if (error) throw new Error(`supersede_generation_review failed: ${error.message}`);
+}
+
 export async function createGenerationRequest(
   db: SupabaseClient,
-  args: { clusteringRunId: string; requestedClusterIds: string[]; outputTypes: string[] },
+  args: {
+    clusteringRunId: string;
+    requestedClusterIds: string[];
+    outputTypes: string[];
+    feedback?: string | null;
+    regeneratesResultId?: string | null;
+  },
 ): Promise<string> {
   const { data, error } = await db.rpc("create_cluster_generation_request", {
     p_clustering_run_id: args.clusteringRunId,
     p_requested_cluster_ids: args.requestedClusterIds,
     p_output_types: args.outputTypes,
+    p_feedback: args.feedback ?? null,
+    p_regenerates_result_id: args.regeneratesResultId ?? null,
   });
   if (error) throw new Error(`create_cluster_generation_request failed: ${error.message}`);
   return data as string;

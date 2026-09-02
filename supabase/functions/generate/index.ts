@@ -4,8 +4,16 @@
  *   {
  *     "clustering_run_id": "<uuid>",
  *     "cluster_ids": ["<uuid>", ...],
- *     "output_types": ["post", "carousel"]   // optional, defaults to both
+ *     "output_types": ["post", "carousel"],       // optional, defaults to both
+ *     "regenerates_result_id": "<uuid>",          // optional — makes this a revision
+ *     "feedback": "lead with the policy angle"    // optional, requires the above
  *   }
+ *
+ * Regeneration (0023): naming a previous result puts that draft and the
+ * editor's instruction into the prompt, restricts the request to that result's
+ * own cluster and outputs, and points the answered review rows at the new
+ * result. Nothing is overwritten — cluster_generation_results is append-only,
+ * so a revision is a new request producing new rows.
  *
  * On-demand, synchronous generation of editorial drafts (a LinkedIn post and
  * a 5-slide carousel) from one or more clusters within ONE completed
@@ -44,7 +52,13 @@ import { authenticate } from "../_shared/auth.ts";
 import { serviceClient } from "../_shared/db.ts";
 import { RequestError } from "../_shared/errors.ts";
 import { callOpenAi, OpenAiError, type CallOpenAiOptions } from "../_shared/openai.ts";
-import { buildGenerationPrompt, buildGenerationSchema, PROMPT_VERSION, validateGenerationOutput } from "./prompt.ts";
+import {
+  buildGenerationPrompt,
+  buildGenerationSchema,
+  PROMPT_VERSION,
+  type RevisionContext,
+  validateGenerationOutput,
+} from "./prompt.ts";
 import {
   completeGenerationResult,
   createGenerationRequest,
@@ -53,7 +67,9 @@ import {
   getClusterPostInputs,
   getClusters,
   getConfig,
+  getGenerationResult,
   recordGenerationError,
+  supersedeReview,
 } from "./data.ts";
 
 const DEFAULT_MODEL = "gpt-5.4-nano-2026-03-17";
@@ -68,8 +84,14 @@ export interface GenerateDeps {
 interface GenerateRequestBody {
   clustering_run_id: string;
   cluster_ids: string[];
-  output_types: string[];
+  /** Null when the caller did not say, so a regeneration can inherit the previous result's. */
+  output_types: string[] | null;
+  feedback: string | null;
+  regenerates_result_id: string | null;
 }
+
+/** Same bound as the CHECK on cluster_generation_requests.feedback (0023). */
+const MAX_FEEDBACK_CHARS = 2000;
 
 function parseBody(body: Record<string, unknown>): GenerateRequestBody {
   const runId = body.clustering_run_id;
@@ -80,7 +102,7 @@ function parseBody(body: Record<string, unknown>): GenerateRequestBody {
   if (!Array.isArray(clusterIds) || clusterIds.length === 0 || !clusterIds.every((c) => typeof c === "string" && c)) {
     throw new RequestError(400, "cluster_ids must be a non-empty array of strings.");
   }
-  let outputTypes = DEFAULT_OUTPUT_TYPES;
+  let outputTypes: string[] | null = null;
   if (body.output_types !== undefined) {
     if (
       !Array.isArray(body.output_types) || body.output_types.length === 0 ||
@@ -90,7 +112,43 @@ function parseBody(body: Record<string, unknown>): GenerateRequestBody {
     }
     outputTypes = [...new Set(body.output_types as string[])];
   }
-  return { clustering_run_id: runId, cluster_ids: [...new Set(clusterIds as string[])], output_types: outputTypes };
+
+  // A regeneration names the draft it is answering. The database re-checks
+  // that the result exists, belongs to the single requested cluster, and
+  // actually carries the requested outputs — this is only the shape check.
+  let regeneratesResultId: string | null = null;
+  if (body.regenerates_result_id !== undefined && body.regenerates_result_id !== null) {
+    if (typeof body.regenerates_result_id !== "string" || !body.regenerates_result_id) {
+      throw new RequestError(400, "regenerates_result_id must be a non-empty string.");
+    }
+    regeneratesResultId = body.regenerates_result_id;
+  }
+
+  let feedback: string | null = null;
+  if (body.feedback !== undefined && body.feedback !== null) {
+    if (typeof body.feedback !== "string") {
+      throw new RequestError(400, "feedback must be a string.");
+    }
+    const trimmed = body.feedback.trim();
+    if (trimmed.length > MAX_FEEDBACK_CHARS) {
+      throw new RequestError(400, `feedback must be at most ${MAX_FEEDBACK_CHARS} characters.`);
+    }
+    feedback = trimmed || null;
+  }
+  // Feedback with nothing to apply it to would silently do nothing: a
+  // first-pass generation has no previous draft for "make it sharper" to mean
+  // anything against.
+  if (feedback && !regeneratesResultId) {
+    throw new RequestError(400, "feedback requires regenerates_result_id — it revises a specific draft.");
+  }
+
+  return {
+    clustering_run_id: runId,
+    cluster_ids: [...new Set(clusterIds as string[])],
+    output_types: outputTypes,
+    feedback,
+    regenerates_result_id: regeneratesResultId,
+  };
 }
 
 /**
@@ -129,7 +187,8 @@ export async function handleGenerate(req: Request, deps: GenerateDeps = {}): Pro
     // internal secret for programmatic triggering.
     await authenticate(req, body as Record<string, unknown>);
 
-    const { clustering_run_id, cluster_ids, output_types } = parseBody(body as Record<string, unknown>);
+    const { clustering_run_id, cluster_ids, output_types, feedback, regenerates_result_id } =
+      parseBody(body as Record<string, unknown>);
 
     const apiKey = Deno.env.get("OPENAI_API_KEY");
     if (!apiKey) throw new RequestError(500, "OPENAI_API_KEY is not configured.");
@@ -155,6 +214,40 @@ export async function handleGenerate(req: Request, deps: GenerateDeps = {}): Pro
       }
     }
 
+    // ---- Regeneration: the draft being answered ----------------------------
+    // Resolved before the request row is created so a bad id fails as a 4xx
+    // with nothing written, matching every other precondition here.
+    let previous = null;
+    if (regenerates_result_id) {
+      previous = await getGenerationResult(db, regenerates_result_id);
+      if (!previous) throw new RequestError(404, `cluster_generation_result ${regenerates_result_id} not found.`);
+      if (cluster_ids.length !== 1) {
+        throw new RequestError(422, "A regeneration covers exactly one cluster.");
+      }
+      if (previous.cluster_id !== cluster_ids[0]) {
+        throw new RequestError(
+          422,
+          `result ${regenerates_result_id} belongs to cluster ${previous.cluster_id}, not ${cluster_ids[0]}.`,
+        );
+      }
+    }
+
+    // A regeneration defaults to the outputs the previous draft carried, not to
+    // both: an editor revising a post must not silently mint a carousel the
+    // original never had, and an output the original lacks has nothing to
+    // revise. A first-pass generation still defaults to both.
+    const prev = previous;
+    const effectiveOutputTypes = output_types ?? prev?.output_types ?? DEFAULT_OUTPUT_TYPES;
+    if (prev) {
+      const missing = effectiveOutputTypes.filter((t) => !prev.output_types.includes(t));
+      if (missing.length > 0) {
+        throw new RequestError(
+          422,
+          `result ${regenerates_result_id} has no ${missing.join("/")} output to regenerate.`,
+        );
+      }
+    }
+
     const config = await getConfig(db);
     const configSnapshot = {
       themes: config.themes,
@@ -167,7 +260,9 @@ export async function handleGenerate(req: Request, deps: GenerateDeps = {}): Pro
     const requestId = await createGenerationRequest(db, {
       clusteringRunId: clustering_run_id,
       requestedClusterIds: cluster_ids,
-      outputTypes: output_types,
+      outputTypes: effectiveOutputTypes,
+      feedback,
+      regeneratesResultId: regenerates_result_id,
     });
 
     const results: {
@@ -200,7 +295,18 @@ export async function handleGenerate(req: Request, deps: GenerateDeps = {}): Pro
         continue;
       }
 
-      const prompt = buildGenerationPrompt(cluster.label, inputs, config);
+      // The revision context names ONE previous draft. When both outputs are
+      // being regenerated the post is shown, because that is the copy an
+      // editor reads first and writes feedback about; the carousel is derived
+      // from the same evidence in the same call.
+      const revision: RevisionContext | undefined = prev
+        ? {
+          feedback,
+          previousOutputType: effectiveOutputTypes.includes("post") ? "post" : "carousel",
+          previousOutput: effectiveOutputTypes.includes("post") ? prev.post_output : prev.carousel_output,
+        }
+        : undefined;
+      const prompt = buildGenerationPrompt(cluster.label, inputs, config, revision);
       const promptHash = await promptHashHex(prompt);
 
       let parsed;
@@ -225,8 +331,8 @@ export async function handleGenerate(req: Request, deps: GenerateDeps = {}): Pro
         continue;
       }
 
-      const postOutput = output_types.includes("post") ? parsed.post : null;
-      const carouselOutput = output_types.includes("carousel") ? parsed.carousel : null;
+      const postOutput = effectiveOutputTypes.includes("post") ? parsed.post : null;
+      const carouselOutput = effectiveOutputTypes.includes("carousel") ? parsed.carousel : null;
 
       try {
         const resultId = await completeGenerationResult(db, {
@@ -235,7 +341,7 @@ export async function handleGenerate(req: Request, deps: GenerateDeps = {}): Pro
           clusterLabel: cluster.label,
           rawPostIds: inputs.map((i) => i.raw_post_id),
           anonymizeResultIds: inputs.map((i) => i.anonymize_result_id),
-          outputTypes: output_types,
+          outputTypes: effectiveOutputTypes,
           postOutput: postOutput as Record<string, unknown> | null,
           carouselOutput: carouselOutput as Record<string, unknown> | null,
           configSnapshot,
@@ -244,6 +350,28 @@ export async function handleGenerate(req: Request, deps: GenerateDeps = {}): Pro
           model,
           providerResponse: rawResponse,
         });
+        // Point the answered draft at its replacement. Deliberately after the
+        // result is persisted and deliberately non-fatal: the generation has
+        // already succeeded, and turning a good result into a 500 because a
+        // bookkeeping update failed would lose copy the editor just paid for.
+        // The cost of failing here is an old row that still reads 'draft'.
+        if (prev) {
+          for (const outputType of effectiveOutputTypes) {
+            try {
+              await supersedeReview(db, {
+                oldResultId: prev.id,
+                outputType,
+                newResultId: resultId,
+              });
+            } catch (e) {
+              console.error(
+                `generate: could not supersede review ${prev.id}/${outputType}:`,
+                (e as Error).message,
+              );
+            }
+          }
+        }
+
         results.push({
           generation_result_id: resultId,
           cluster_id: clusterId,
