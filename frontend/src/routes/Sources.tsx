@@ -91,6 +91,9 @@ export function Sources() {
   const [discovering, setDiscovering] = useState<string | null>(null)
   const [suggestions, setSuggestions] = useState<BrandSuggestion[] | null>(null)
   const [reviewingSource, setReviewingSource] = useState<Source | null>(null)
+  // Permanent deletion (0026), admin-only: which source the confirm dialog is
+  // open for. DeleteSourceDialog owns the RPC call and its own loading state.
+  const [deleting, setDeleting] = useState<Source | null>(null)
 
   async function load() {
     const { data, error } = await supabase
@@ -323,6 +326,18 @@ export function Sources() {
                     >
                       {isAdmin ? 'Edit' : 'Change lookback'}
                     </button>
+                    {/* Permanent deletion (0026) is admin-only, same as
+                        creating a source — the RPC enforces this regardless,
+                        but there is no reason to offer a button that always
+                        fails. */}
+                    {isAdmin && (
+                      <button
+                        onClick={() => setDeleting(s)}
+                        className="text-sm font-medium text-red-600 hover:text-red-800"
+                      >
+                        Delete
+                      </button>
+                    )}
                   </div>
                 </td>
               </tr>
@@ -410,6 +425,99 @@ export function Sources() {
           }}
         />
       )}
+
+      {deleting && (
+        <DeleteSourceDialog
+          source={deleting}
+          onClose={() => setDeleting(null)}
+          onDeleted={(counts) => {
+            setDeleting(null)
+            toast.success(
+              `Deleted "${deleting.name}" — ${counts.raw_posts ?? 0} post(s) and everything derived from them`,
+            )
+            load()
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+/**
+ * The confirmation step for purge_source() (0026). A blocked attempt — the
+ * source's posts are cited in generated copy — is not a quick mistake to
+ * retry, so its message stays in the dialog, in full, rather than as a toast
+ * that vanishes before an admin can read which results are affected.
+ */
+function DeleteSourceDialog({
+  source,
+  onClose,
+  onDeleted,
+}: {
+  source: Source
+  onClose: () => void
+  onDeleted: (counts: Record<string, unknown>) => void
+}) {
+  const [purging, setPurging] = useState(false)
+  const [blocked, setBlocked] = useState<string | null>(null)
+
+  async function confirmDelete() {
+    setPurging(true)
+    setBlocked(null)
+    const { data, error } = await supabase.rpc('purge_source', { p_source_id: source.id })
+    setPurging(false)
+    if (error) {
+      setBlocked(error.message)
+      return
+    }
+    onDeleted(data as Record<string, unknown>)
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-10 flex items-center justify-center bg-slate-900/40 px-6"
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-lg rounded-lg bg-white p-6 shadow-xl"
+      >
+        <h2 className="text-lg font-semibold text-red-700">Delete "{source.name}"?</h2>
+        <p className="mt-3 text-sm text-slate-600">
+          This permanently removes every post collected from this source, and
+          everything derived from them — scores, anonymised text, embeddings,
+          cluster assignments. <span className="font-medium">This cannot be undone.</span>
+        </p>
+        <p className="mt-3 text-sm text-slate-600">
+          To only stop collecting from it while keeping its history, use the
+          enabled switch instead — Cancel below and toggle it in the list.
+        </p>
+
+        {blocked && (
+          <div className="mt-4 max-h-64 overflow-y-auto rounded-md bg-red-50 p-3 text-xs text-red-800">
+            <p className="mb-1 font-medium">Can't delete — some of its posts are already in generated copy:</p>
+            <pre className="whitespace-pre-wrap break-words font-mono">{blocked}</pre>
+          </div>
+        )}
+
+        <div className="mt-6 flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={confirmDelete}
+            disabled={purging}
+            className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-60"
+          >
+            {purging ? 'Deleting…' : 'Delete permanently'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

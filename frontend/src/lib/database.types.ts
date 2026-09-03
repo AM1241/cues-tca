@@ -385,7 +385,7 @@ export type Database = {
       }
       cluster_generation_request_errors: {
         Row: {
-          cluster_id: string
+          cluster_id: string | null
           created_at: string
           error_message: string
           error_type: string
@@ -393,7 +393,7 @@ export type Database = {
           id: string
         }
         Insert: {
-          cluster_id: string
+          cluster_id?: string | null
           created_at?: string
           error_message: string
           error_type: string
@@ -401,7 +401,7 @@ export type Database = {
           id?: string
         }
         Update: {
-          cluster_id?: string
+          cluster_id?: string | null
           created_at?: string
           error_message?: string
           error_type?: string
@@ -427,7 +427,10 @@ export type Database = {
           error_message: string | null
           feedback: string | null
           id: string
+          kind: string
           output_types: string[]
+          period_end: string | null
+          period_start: string | null
           regenerates_result_id: string | null
           requested_cluster_ids: string[]
           status: string
@@ -440,7 +443,10 @@ export type Database = {
           error_message?: string | null
           feedback?: string | null
           id?: string
+          kind?: string
           output_types: string[]
+          period_end?: string | null
+          period_start?: string | null
           regenerates_result_id?: string | null
           requested_cluster_ids: string[]
           status?: string
@@ -453,7 +459,10 @@ export type Database = {
           error_message?: string | null
           feedback?: string | null
           id?: string
+          kind?: string
           output_types?: string[]
+          period_end?: string | null
+          period_start?: string | null
           regenerates_result_id?: string | null
           requested_cluster_ids?: string[]
           status?: string
@@ -479,56 +488,68 @@ export type Database = {
         Row: {
           anonymize_result_ids: string[]
           carousel_output: Json | null
-          cluster_id: string
+          cluster_id: string | null
           cluster_label: string
           clustering_run_id: string
           config_snapshot: Json
           created_at: string
           generation_request_id: string
           id: string
+          kind: string
           model: string
           output_types: string[]
+          period_end: string | null
+          period_start: string | null
           post_output: Json | null
           prompt_hash: string
           prompt_version: string
           provider_response: Json | null
           raw_post_ids: string[]
+          source_cluster_ids: string[] | null
         }
         Insert: {
           anonymize_result_ids: string[]
           carousel_output?: Json | null
-          cluster_id: string
+          cluster_id?: string | null
           cluster_label: string
           clustering_run_id: string
           config_snapshot: Json
           created_at?: string
           generation_request_id: string
           id?: string
+          kind?: string
           model: string
           output_types: string[]
+          period_end?: string | null
+          period_start?: string | null
           post_output?: Json | null
           prompt_hash: string
           prompt_version: string
           provider_response?: Json | null
           raw_post_ids: string[]
+          source_cluster_ids?: string[] | null
         }
         Update: {
           anonymize_result_ids?: string[]
           carousel_output?: Json | null
-          cluster_id?: string
+          cluster_id?: string | null
           cluster_label?: string
           clustering_run_id?: string
           config_snapshot?: Json
           created_at?: string
           generation_request_id?: string
           id?: string
+          kind?: string
           model?: string
           output_types?: string[]
+          period_end?: string | null
+          period_start?: string | null
           post_output?: Json | null
           prompt_hash?: string
           prompt_version?: string
           provider_response?: Json | null
           raw_post_ids?: string[]
+          source_cluster_ids?: string[] | null
         }
         Relationships: [
           {
@@ -1819,6 +1840,24 @@ export type Database = {
         Args: { p_clusters: Json; p_run_id: string }
         Returns: undefined
       }
+      complete_editorial_publication: {
+        Args: {
+          p_anonymize_result_ids: string[]
+          p_carousel_output: Json
+          p_config_snapshot: Json
+          p_model: string
+          p_output_types: string[]
+          p_post_output: Json
+          p_prompt_hash: string
+          p_prompt_version: string
+          p_provider_response?: Json
+          p_raw_post_ids: string[]
+          p_request_id: string
+          p_source_cluster_ids: string[]
+          p_title: string
+        }
+        Returns: string
+      }
       complete_scoring_job: {
         Args: {
           p_job_id: string
@@ -1836,7 +1875,10 @@ export type Database = {
         Args: {
           p_clustering_run_id: string
           p_feedback?: string
+          p_kind?: string
           p_output_types: string[]
+          p_period_end?: string
+          p_period_start?: string
           p_regenerates_result_id?: string
           p_requested_cluster_ids: string[]
         }
@@ -1908,6 +1950,7 @@ export type Database = {
         Returns: string
       }
       import_legacy_analyses: { Args: never; Returns: number }
+      is_admin: { Args: never; Returns: boolean }
       is_editor: { Args: never; Returns: boolean }
       open_production_scoring_request: {
         Args: {
@@ -1920,6 +1963,7 @@ export type Database = {
         }
         Returns: string
       }
+      purge_source: { Args: { p_source_id: string }; Returns: Json }
       queue_scoring: { Args: { p_mode?: string }; Returns: Json }
       read_anonymize_jobs: {
         Args: { p_qty: number; p_vt: number }
@@ -1984,6 +2028,14 @@ export type Database = {
           p_raw_post_id: string
           p_run_id: string
           p_status: string
+        }
+        Returns: undefined
+      }
+      record_publication_error: {
+        Args: {
+          p_error_message: string
+          p_error_type: string
+          p_request_id: string
         }
         Returns: undefined
       }
