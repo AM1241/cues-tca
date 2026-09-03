@@ -112,6 +112,11 @@ export function Clusters() {
   const [clustersById, setClustersById] = useState<Map<string, ClusterInfo>>(new Map())
   const [assignmentByPost, setAssignmentByPost] = useState<Map<string, string>>(new Map())
   const [failedEmbeddings, setFailedEmbeddings] = useState<FailedEmbeddingRow[]>([])
+  // How many of this run's posts embedded successfully — the pool clustering
+  // actually drew from. Needed only to explain a 0-cluster run: "N posts, none
+  // reached min_cluster_size" reads very differently from an unexplained
+  // missing button.
+  const [embeddedCount, setEmbeddedCount] = useState(0)
   // run_id -> how many generation results it already has. The screen always
   // opens on the NEWEST run, so copy generated against an earlier one looks
   // missing unless the selector says where it is.
@@ -228,6 +233,7 @@ export function Clusters() {
       setClustersById(new Map())
       setAssignmentByPost(new Map())
       setFailedEmbeddings([])
+      setEmbeddedCount(0)
       return
     }
     let cancelled = false
@@ -270,10 +276,24 @@ export function Clusters() {
         return
       }
 
+      // The pool clustering drew from, regardless of whether any of it ended
+      // up in a cluster — the count that turns "the button is missing" into
+      // "12 posts, none reached the minimum group size."
+      const { count: embedded, error: embeddedErr } = await supabase
+        .from('clustering_run_posts')
+        .select('*', { count: 'exact', head: true })
+        .eq('clustering_run_id', runId)
+        .eq('embedding_status', 'embedded')
+      if (embeddedErr) {
+        toast.error(embeddedErr.message)
+        return
+      }
+
       if (!cancelled) {
         setClustersById(cMap)
         setAssignmentByPost(aMap)
         setFailedEmbeddings((failedRows ?? []) as unknown as FailedEmbeddingRow[])
+        setEmbeddedCount(embedded ?? 0)
       }
     }
     loadRunDetail(selectedRunId)
@@ -628,6 +648,30 @@ export function Clusters() {
             ))}
           </ul>
         </details>
+      )}
+
+      {/* Without this, a run that genuinely found nothing groupable — 1 post
+          on its own, or 2 posts too dissimilar to pass the similarity
+          threshold — just makes the publication panel below disappear with no
+          explanation. groupBySimilarity (cluster/grouping.ts) drops any group
+          smaller than min_cluster_size rather than force-merging it, which is
+          correct, but silent about it is not. */}
+      {selectedRun?.status === 'completed' && clustersById.size === 0 && (
+        <div className="mb-6 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm">
+          <p className="font-medium text-slate-700">No clusters formed from this run.</p>
+          <p className="mt-1 text-slate-500">
+            {embeddedCount === 0
+              ? "No posts were successfully embedded, so there was nothing to group."
+              : embeddedCount === 1
+                ? 'Exactly 1 post was embedded — clustering needs at least two similar posts to form a group, so a single post can never form one on its own.'
+                : `${embeddedCount} posts were embedded, but none were similar enough to each other to reach the minimum group size.`}
+            {' '}No group means no publication — there is nothing here to approve or reject.
+          </p>
+          <p className="mt-1 text-slate-500">
+            Widen the period, collect from more sources, or lower the similarity
+            threshold on Objective, then run clustering again.
+          </p>
+        </div>
       )}
 
       {/* The publication — one text for the run's period, themes as sections.
