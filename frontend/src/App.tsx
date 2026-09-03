@@ -63,15 +63,17 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route element={<Layout email={session.user.email ?? ''} />}>
-          <Route index element={<Navigate to="/posts" replace />} />
-          <Route path="/posts" element={<Posts />} />
+          {/* Same pipeline order as the nav bar in Layout.tsx: collect,
+              configure, then the stages that read the configuration. */}
+          <Route index element={<Navigate to="/sources" replace />} />
           <Route path="/sources" element={<Sources />} />
           <Route path="/objective" element={<Objective />} />
+          <Route path="/posts" element={<Posts />} />
           <Route path="/clusters" element={<Clusters />} />
           <Route path="/generate" element={<Generate />} />
           <Route path="/review" element={<Review />} />
           <Route path="/export" element={<Export />} />
-          <Route path="*" element={<Navigate to="/posts" replace />} />
+          <Route path="*" element={<Navigate to="/sources" replace />} />
         </Route>
       </Routes>
     </BrowserRouter>

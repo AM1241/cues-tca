@@ -1,10 +1,14 @@
 import { NavLink, Outlet } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 
+// Ordered to match the pipeline itself (CLAUDE.md's "Pipeline order"), not
+// alphabetically or by build date: collect, configure, then everything that
+// reads the configuration. An editor working top-to-bottom through the nav
+// bar now works top-to-bottom through the actual process.
 const routes = [
-  { to: '/posts', label: 'Posts' },
   { to: '/sources', label: 'Sources' },
   { to: '/objective', label: 'Objective' },
+  { to: '/posts', label: 'Posts' },
   { to: '/clusters', label: 'Clusters' },
   { to: '/generate', label: 'Generate' },
   { to: '/review', label: 'Review' },
