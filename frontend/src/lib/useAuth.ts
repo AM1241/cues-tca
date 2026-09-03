@@ -8,12 +8,18 @@ export type AuthState = {
   // authenticated is not enough: RLS gates every table on is_editor(), so a
   // logged-in non-editor sees empty results, not errors. null while unknown.
   isEditor: boolean | null
+  // Whether editors.role = 'admin' for this user. Drives which parts of the
+  // Sources form the UI offers — the database (0025, is_admin() + a trigger)
+  // is the real boundary; this only decides what to show, so a stale or wrong
+  // client-side value can never grant an edit the backend would refuse.
+  isAdmin: boolean
   loading: boolean
 }
 
 export function useAuth() {
   const [session, setSession] = useState<Session | null>(null)
   const [isEditor, setIsEditor] = useState<boolean | null>(null)
+  const [isAdmin, setIsAdmin] = useState(false)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -35,17 +41,20 @@ export function useAuth() {
     const userId = session?.user.id
     if (!userId) {
       setIsEditor(null)
+      setIsAdmin(false)
       return
     }
     let cancelled = false
     setIsEditor(null)
     supabase
       .from('editors')
-      .select('user_id')
+      .select('user_id, role')
       .eq('user_id', userId)
       .maybeSingle()
       .then(({ data }) => {
-        if (!cancelled) setIsEditor(data !== null)
+        if (cancelled) return
+        setIsEditor(data !== null)
+        setIsAdmin(data?.role === 'admin')
       })
     return () => {
       cancelled = true
@@ -60,5 +69,5 @@ export function useAuth() {
     return supabase.auth.signOut()
   }
 
-  return { session, isEditor, loading, signIn, signOut }
+  return { session, isEditor, isAdmin, loading, signIn, signOut }
 }

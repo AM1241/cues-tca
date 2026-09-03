@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { useAuth } from '../lib/useAuth'
 import { useToast } from '../components/toast-context'
 import { Spinner, ErrorNotice } from '../components/ui'
 import type { Database } from '../lib/database.types'
@@ -18,12 +19,25 @@ type BrandSuggestion = {
 
 // Editors may insert and update sources, but not delete them: RLS in 0002 grants
 // no DELETE. Retiring a source is `enabled = false`, which is what the toggle does.
+//
+// Adding a source, and changing name/url/type/collectionAddress/company_name,
+// is admin-only as of 0025 — enforced in the database (is_admin() + a trigger),
+// not just here. lookback_days and the enabled toggle stay open to every
+// editor, which is why toggleEnabled() below is untouched by any of this.
+//
+// `collectionAddress` is the one field that used to be labelled "RapidAPI
+// identifier": the exact address the collector reads from. It is left blank
+// here whenever it already matches the URL above — which is true for 3 of the
+// 5 real sources — so the common case is one visible field, not two. The two
+// that genuinely need to diverge (MASAF's URL points at its posts feed for a
+// human to click; the collector needs the bare company page) keep working by
+// filling this in, still without ever naming the vendor behind it.
 type FormState = {
   name: string
   url: string
   source_type: string
   company_name: string
-  rapidapi_identifier: string
+  collectionAddress: string
   lookback_days: number
 }
 
@@ -32,7 +46,7 @@ const emptyForm: FormState = {
   url: '',
   source_type: 'linkedin',
   company_name: '',
-  rapidapi_identifier: '',
+  collectionAddress: '',
   lookback_days: 30,
 }
 
@@ -41,22 +55,32 @@ type CollectResult = {
   name: string
   status: string
   error_code?: string
+  posts_fetched?: number
   posts_inserted?: number
   posts_skipped_duplicate?: number
+  posts_skipped_out_of_window?: number
 }
 
 // Turn one source's ingest result into a short human line for the toast.
+//
+// posts_skipped_out_of_window is the number that used to be silently dropped
+// here — a source with 0 new posts looked identical whether nothing had been
+// published or everything found had simply fallen outside the lookback
+// window, and only the second case is answered by widening it.
 function summariseResult(r: CollectResult): string {
   if (r.status === 'skipped') return `${r.name}: skipped (${r.error_code ?? 'skipped'})`
   const inserted = r.posts_inserted ?? 0
   const dupes = r.posts_skipped_duplicate ?? 0
+  const outOfWindow = r.posts_skipped_out_of_window ?? 0
   const bits = [`${inserted} new`]
   if (dupes) bits.push(`${dupes} duplicate${dupes === 1 ? '' : 's'}`)
+  if (outOfWindow) bits.push(`${outOfWindow} outside your lookback window`)
   return `${r.name}: ${bits.join(', ')}`
 }
 
 export function Sources() {
   const toast = useToast()
+  const { isAdmin } = useAuth()
   const [sources, setSources] = useState<Source[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [editing, setEditing] = useState<Source | 'new' | null>(null)
@@ -201,12 +225,17 @@ export function Sources() {
           >
             {collecting === 'all' ? 'Collecting…' : 'Collect all enabled'}
           </button>
-          <button
-            onClick={() => setEditing('new')}
-            className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800"
-          >
-            Add source
-          </button>
+          {/* Adding a source is admin-only (0025) — the database refuses a
+              non-admin's insert regardless, but there is no reason to offer a
+              button that always fails. */}
+          {isAdmin && (
+            <button
+              onClick={() => setEditing('new')}
+              className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800"
+            >
+              Add source
+            </button>
+          )}
         </div>
       </div>
 
@@ -236,6 +265,20 @@ export function Sources() {
                     >
                       {s.url}
                     </a>
+                  )}
+                  {/* Admin-only, and only when it matters: 2 of the 5 real
+                      sources collect from an address other than the one
+                      above (a posts-feed URL vs. the bare page the collector
+                      needs), proven against the live provider. An admin
+                      auditing this list should be able to tell at a glance;
+                      nobody else can act on it, so nobody else sees it. */}
+                  {isAdmin && s.rapidapi_identifier && s.rapidapi_identifier !== s.url && (
+                    <div
+                      className="mt-0.5 text-xs text-amber-700"
+                      title={`Collects from: ${s.rapidapi_identifier}`}
+                    >
+                      collects from a different address
+                    </div>
                   )}
                 </td>
                 <td className="px-4 py-3 text-slate-600">{s.source_type}</td>
@@ -285,7 +328,7 @@ export function Sources() {
                       onClick={() => setEditing(s)}
                       className="text-sm font-medium text-slate-500 hover:text-slate-900"
                     >
-                      Edit
+                      {isAdmin ? 'Edit' : 'Change lookback'}
                     </button>
                   </div>
                 </td>
@@ -365,6 +408,7 @@ export function Sources() {
       {editing && (
         <SourceForm
           source={editing === 'new' ? null : editing}
+          isAdmin={isAdmin}
           onClose={() => setEditing(null)}
           onSaved={(created) => {
             setEditing(null)
@@ -379,10 +423,12 @@ export function Sources() {
 
 function SourceForm({
   source,
+  isAdmin,
   onClose,
   onSaved,
 }: {
   source: Source | null
+  isAdmin: boolean
   onClose: () => void
   onSaved: (created: boolean) => void
 }) {
@@ -393,11 +439,21 @@ function SourceForm({
           url: source.url,
           source_type: source.source_type,
           company_name: source.company_name ?? '',
-          rapidapi_identifier: source.rapidapi_identifier ?? '',
+          // Left blank whenever it already matches the URL — true for 3 of
+          // the 5 real sources — so the common case shows an empty advanced
+          // field, not a second copy of the same address.
+          collectionAddress:
+            source.rapidapi_identifier && source.rapidapi_identifier !== source.url
+              ? source.rapidapi_identifier
+              : '',
           lookback_days: source.lookback_days,
         }
       : emptyForm,
   )
+  // Expanded by default only when editing a source that already has an
+  // override (MASAF, Fratelli Branca today) — otherwise collapsed, since
+  // nearly every source never needs it.
+  const [showAdvanced, setShowAdvanced] = useState(() => form.collectionAddress !== '')
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
@@ -409,17 +465,27 @@ function SourceForm({
     e.preventDefault()
     setSaving(true)
     setErr(null)
-    const payload = {
+
+    const fullPayload = {
       name: form.name.trim(),
       url: form.url.trim(),
       source_type: form.source_type,
       company_name: form.company_name.trim() || null,
-      rapidapi_identifier: form.rapidapi_identifier.trim() || null,
+      rapidapi_identifier: form.collectionAddress.trim() || form.url.trim(),
       lookback_days: form.lookback_days,
     }
+
+    // A non-admin editing an existing source may change lookback_days only —
+    // matches exactly what the 0025 trigger allows, so this never even
+    // attempts a write the database would refuse. Creating a source always
+    // uses the full payload: that path is unreachable for a non-admin, since
+    // the "Add source" button itself is admin-only in Sources().
     const { error } = source
-      ? await supabase.from('sources').update(payload).eq('id', source.id)
-      : await supabase.from('sources').insert(payload)
+      ? await supabase
+          .from('sources')
+          .update(isAdmin ? fullPayload : { lookback_days: form.lookback_days })
+          .eq('id', source.id)
+      : await supabase.from('sources').insert(fullPayload)
     setSaving(false)
     if (error) setErr(error.message)
     else onSaved(!source)
@@ -436,37 +502,15 @@ function SourceForm({
         className="w-full max-w-lg rounded-lg bg-white p-6 shadow-xl"
       >
         <h2 className="text-lg font-semibold">
-          {source ? 'Edit source' : 'New source'}
+          {!isAdmin ? 'Change lookback' : source ? 'Edit source' : 'New source'}
         </h2>
 
-        <div className="mt-4 space-y-4">
-          <Field label="Name">
-            <input
-              required
-              value={form.name}
-              onChange={(e) => set('name', e.target.value)}
-              className="w-full rounded-md border border-slate-300 px-3 py-2"
-            />
-          </Field>
-          <Field label="URL">
-            <input
-              required
-              type="url"
-              value={form.url}
-              onChange={(e) => set('url', e.target.value)}
-              className="w-full rounded-md border border-slate-300 px-3 py-2"
-            />
-          </Field>
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Type">
-              <select
-                value={form.source_type}
-                onChange={(e) => set('source_type', e.target.value)}
-                className="w-full rounded-md border border-slate-300 px-3 py-2"
-              >
-                <option value="linkedin">linkedin</option>
-              </select>
-            </Field>
+        {!isAdmin ? (
+          <div className="mt-4 space-y-4">
+            <p className="text-sm text-slate-500">
+              Only an admin can change a source's name, address or type. You can
+              still adjust how far back it looks.
+            </p>
             <Field label="Lookback (days)">
               <input
                 type="number"
@@ -478,21 +522,84 @@ function SourceForm({
               />
             </Field>
           </div>
-          <Field label="Company name (optional)">
-            <input
-              value={form.company_name}
-              onChange={(e) => set('company_name', e.target.value)}
-              className="w-full rounded-md border border-slate-300 px-3 py-2"
-            />
-          </Field>
-          <Field label="RapidAPI identifier (optional)">
-            <input
-              value={form.rapidapi_identifier}
-              onChange={(e) => set('rapidapi_identifier', e.target.value)}
-              className="w-full rounded-md border border-slate-300 px-3 py-2"
-            />
-          </Field>
-        </div>
+        ) : (
+          <div className="mt-4 space-y-4">
+            <Field label="Name">
+              <input
+                required
+                value={form.name}
+                onChange={(e) => set('name', e.target.value)}
+                className="w-full rounded-md border border-slate-300 px-3 py-2"
+              />
+            </Field>
+            <Field label="URL">
+              <input
+                required
+                type="url"
+                value={form.url}
+                onChange={(e) => set('url', e.target.value)}
+                className="w-full rounded-md border border-slate-300 px-3 py-2"
+              />
+              <p className="mt-1 text-xs text-slate-500">
+                This is also the address posts are collected from, unless you set
+                a different one below.
+              </p>
+            </Field>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Type">
+                <select
+                  value={form.source_type}
+                  onChange={(e) => set('source_type', e.target.value)}
+                  className="w-full rounded-md border border-slate-300 px-3 py-2"
+                >
+                  <option value="linkedin">linkedin</option>
+                </select>
+              </Field>
+              <Field label="Lookback (days)">
+                <input
+                  type="number"
+                  min={1}
+                  max={365}
+                  value={form.lookback_days}
+                  onChange={(e) => set('lookback_days', Number(e.target.value))}
+                  className="w-full rounded-md border border-slate-300 px-3 py-2"
+                />
+              </Field>
+            </div>
+            <Field label="Company name (optional)">
+              <input
+                value={form.company_name}
+                onChange={(e) => set('company_name', e.target.value)}
+                className="w-full rounded-md border border-slate-300 px-3 py-2"
+              />
+            </Field>
+
+            {showAdvanced ? (
+              <Field label="Collect from a different address (rare)">
+                <input
+                  type="url"
+                  placeholder={form.url || 'Same as URL above'}
+                  value={form.collectionAddress}
+                  onChange={(e) => set('collectionAddress', e.target.value)}
+                  className="w-full rounded-md border border-slate-300 px-3 py-2"
+                />
+                <p className="mt-1 text-xs text-slate-500">
+                  Only needed when the page above isn't the exact address posts
+                  should be collected from — e.g. the URL points at a posts feed
+                  view. Leave blank to use the URL above.
+                </p>
+              </Field>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setShowAdvanced(true)}
+                className="text-sm font-medium text-slate-500 hover:text-slate-900"
+              >
+                Collect from a different address…
+              </button>
+            )}
+          </div>
+        )}
 
         {err && <p className="mt-4 text-sm text-red-600">{err}</p>}
 
