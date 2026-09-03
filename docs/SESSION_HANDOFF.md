@@ -174,21 +174,60 @@ Italiani`), a person (`Al Bano`), **a horse breed (`Lipizzano`)**, and
 fact the way the session-16 cases did. This is the limitation session 16
 documented as "left to the prompt"; it is no longer an estimate.
 
-### Everything downstream of anonymisation is now stale
+### Re-anonymisation invalidated everything downstream
 
 74 of the 75 posts that had a previous anonymisation came back with **different
-text**. So the derived layers describe copy that no longer exists:
+text**, so every derived layer described copy that no longer existed —
+90 embeddings, 21 clusters, 13 generation results. All rebuilt in the same
+sitting; see below. Recorded because the dependency is the point: **anything
+that re-runs anonymisation invalidates embeddings, clusters and generated copy,
+in that order.**
+
+### Re-clustered and re-generated (2026-09-03, same sitting)
+
+The operator approved the spend, so the derived layers were rebuilt on the
+repaired text. Both runs went through the editor path, not service_role.
+
+**Nothing had to be invalidated by hand.** `post_embeddings` is keyed on
+`(anonymize_result_id, model)`, not on the post — and re-anonymisation wrote new
+`anonymize_results` rows, so every post simply had no matching embedding and was
+re-embedded. That design decision paid for itself here.
+
+`cluster`, window 2025-06-01 → 2026-09-01 (the same window as the previous run,
+so the two are comparable), run `20009874`:
 
 | | |
 | --- | --- |
-| `post_embeddings` | 90, stale |
-| `clusters` | 21, stale |
-| `cluster_generation_results` | 13, stale |
+| eligible / embedded / failed | 81 / 81 / **0** |
+| clusters | **8** (19 posts assigned, 62 unclustered) |
+| labels carrying `?` damage | **0** |
 
-Re-clustering (embeddings + one naming call per cluster) and then re-generating
-is the next step, and it is spend, so it is the operator's call. Nothing is
-broken in the meantime — the screens work; the clusters just reflect the older
-wording.
+The labels are the first real evidence the whole chain is clean: *"Controlli e
+tutela dell'olio: regole, **qualità** e trasparenza"*, *"Formare i talenti per
+**l'agrifood**"*, and — the one that matters — *"Controlli che proteggono il
+**Made in Italy**"*. That phrase was being replaced by the generic entity until
+session 16; it is now a cluster name.
+
+`generate`, all 8 clusters, both output types: **8 results, 0 errors**, each
+carrying a post and a carousel, all with real accents, **0 damaged**, and a
+sweep for all 18 brand aliases finds **0 leaks in the generated copy**. The copy
+names *"Cabina di Regia"* and *"Made in Italy"* directly — both previously
+corrupted into "another food-sector organization", so the session-16 fixes are
+demonstrably reaching the final output an editor reads.
+
+Totals now: 21 generation results, 41 reviews, 38 of them `draft`.
+
+**Still zero approvals.** That remains the one open gate on the product, and it
+is unchanged by any of this work: it needs an editor, not a run.
+
+### The Netlify deploy did not happen
+
+The title-leak fix is committed but **not deployed**. `git push` was refused by
+the environment's permission layer, twice, and working around it would have
+meant reaching for a different deployment channel than the one the project uses
+— so it was left for the operator. The site is configured to build from
+`phase6-frontend-binding`, so a push is all it takes. Until then the live bundle
+is `index-BYyF1U4-.js` and still prefers the raw title.
 
 ### Why this should be done before the ~89 anonymisation calls
 
