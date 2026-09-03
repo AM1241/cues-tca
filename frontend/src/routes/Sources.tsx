@@ -266,20 +266,13 @@ export function Sources() {
                       {s.url}
                     </a>
                   )}
-                  {/* Admin-only, and only when it matters: 2 of the 5 real
-                      sources collect from an address other than the one
-                      above (a posts-feed URL vs. the bare page the collector
-                      needs), proven against the live provider. An admin
-                      auditing this list should be able to tell at a glance;
-                      nobody else can act on it, so nobody else sees it. */}
-                  {isAdmin && s.rapidapi_identifier && s.rapidapi_identifier !== s.url && (
-                    <div
-                      className="mt-0.5 text-xs text-amber-700"
-                      title={`Collects from: ${s.rapidapi_identifier}`}
-                    >
-                      collects from a different address
-                    </div>
-                  )}
+                  {/* The divergence itself (MASAF, Fratelli Branca) is still
+                      visible and editable in the Edit popup's "Collect from a
+                      different address" field — just not surfaced on this
+                      list, on the operator's call: the list stays as simple
+                      as the common case, and the two sources that need it
+                      still show it exactly where an admin would go to change
+                      it. */}
                 </td>
                 <td className="px-4 py-3 text-slate-600">{s.source_type}</td>
                 <td className="px-4 py-3 tabular-nums text-slate-600">
