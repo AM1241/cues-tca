@@ -187,13 +187,42 @@ $env:PGPASSWORD = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
 docker exec -i -e PGPASSWORD="$env:PGPASSWORD" supabase_db_cues-editorial-cloud `
   psql "$CLOUD" -c "select current_database(), current_user;"
 
-Get-Content ./load_legacy.sql -Raw -Encoding UTF8 |
-  docker exec -i -e PGPASSWORD="$env:PGPASSWORD" supabase_db_cues-editorial-cloud `
-    psql "$CLOUD" -v ON_ERROR_STOP=1
+# Hand psql the FILE. Never pipe SQL into it — see the warning below.
+docker cp ./load_legacy.sql supabase_db_cues-editorial-cloud:/tmp/load_legacy.sql
+docker exec -i -e PGPASSWORD="$env:PGPASSWORD" supabase_db_cues-editorial-cloud `
+  psql "$CLOUD" -v ON_ERROR_STOP=1 -f /tmp/load_legacy.sql
+docker exec supabase_db_cues-editorial-cloud rm /tmp/load_legacy.sql
 ```
 
 Expect it to end with `COMMIT`. On any error the whole transaction rolls back
 and the cloud database is left untouched — fix and re-run.
+
+> **Never pipe the loader into `psql`.** This step used to read
+> `Get-Content ./load_legacy.sql -Raw -Encoding UTF8 | docker exec -i … psql`,
+> and **that is how the 2026-07-22 load silently destroyed every non-ASCII
+> character in the corpus.** `Get-Content` decoded the file correctly; the pipe
+> did not. Windows PowerShell 5.1 re-encodes text on its way into a native
+> command using `$OutputEncoding`, which defaults to **ASCII**, and its
+> replacement fallback emits a literal `?` for anything it cannot represent —
+> one per UTF-16 code unit, so `è` became `?`, an emoji became `??` and a flag
+> emoji became `????`. ASCII passed through untouched, so the load reported
+> `COMMIT`, every row count reconciled, and nothing looked wrong until somebody
+> read the Italian. `docker cp` moves bytes and `psql -f` opens the file itself,
+> so neither can re-encode anything.
+
+Check the characters survived, before trusting any of §6's row counts:
+
+```sql
+select count(*) filter (where octet_length(post_text) > length(post_text)) as with_accents,
+       count(*) filter (where post_text like '%?%')                        as with_question_marks
+from raw_posts;
+```
+
+`with_accents` must be in the same order as the corpus size — a corpus of real
+Italian and multilingual LinkedIn posts that reports **zero** rows containing a
+multi-byte character has been flattened to ASCII, whatever the row counts say.
+Repairing it afterwards is possible only because the SQLite snapshot is kept;
+see `scripts/build_encoding_repair.mjs`.
 
 Clear the variable when done:
 

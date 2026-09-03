@@ -42,6 +42,10 @@ Apply it:
 psql "$DB_URL" -v ON_ERROR_STOP=1 -f load_legacy.sql
 ```
 
+`-f`, giving psql the file, is not incidental. Piping this script into psql from
+PowerShell is what flattened the cloud corpus to ASCII on 2026-07-22 — see the
+warning in §5 of `docs/cloud-migration-runbook.md`, and step 2b below.
+
 > **The loader TRUNCATES before loading. It is safe to re-run only while the
 > target database holds nothing but legacy data.** Against a local stack that is
 > always true — `db reset` wipes it anyway. Against the cloud it is true exactly
@@ -56,6 +60,38 @@ delta boundary for that eventual cutover, and it is not recoverable afterwards.
 Since 0003, the loader's `truncate ... cascade` on `sources` also clears
 `ingest_run_sources` and `raw_post_content_changes`. Locally that is harmless;
 in the cloud it is one more reason the loader is single-use.
+
+## 2b. Repair the 2026-07-22 encoding damage
+
+The cloud load was piped into psql from PowerShell, which re-encoded it as ASCII
+and replaced every character it could not represent with a literal `?`. The
+loader and the snapshot were both fine; only the applied result was damaged.
+`build_encoding_repair.mjs` restores it from the same snapshot:
+
+```bash
+node scripts/build_encoding_repair.mjs legacy_snapshot.db repair_encoding.sql
+psql "$DB_URL" -v ON_ERROR_STOP=1 -f repair_encoding.sql
+```
+
+Unlike the loader this is **not** single-use and truncates nothing. Every
+statement is guarded on the md5 of the damaged text, so it is idempotent, inert
+against a value that is not in the exact expected damaged state, and a complete
+no-op against a database that was loaded correctly.
+
+Expected against `bxaovkzemfyxrxbcqask` as of 2026-09-03 — 328 statements:
+
+| table.column | values |
+|---|---|
+| raw_posts.post_text | 132 |
+| raw_posts.author | 46 |
+| normalized_posts.clean_text | 132 |
+| editorial_assets.generated_text | 15 |
+| traceability_links.claim_text | 3 |
+
+It repairs stored text only. `anonymize_results`, `post_embeddings`,
+`scoring_results` and the clusters built on them were produced by models reading
+the damaged text; correcting those means re-running the pipeline, which costs
+LLM calls and is an operator decision. See `docs/SESSION_HANDOFF.md`.
 
 ## 3. Verify
 
