@@ -20,7 +20,7 @@ on top of them, and the frontend title-leak fix was deployed.
 | Project | `bxaovkzemfyxrxbcqask` (`cues-tca`, eu-west-1) |
 | Migrations applied | through **0024**; `schema_migrations` rows match the files |
 | Edge Functions | `generate` **v5** (publication support), `anonymize-worker` v11, `cluster` v5, `discover-brands` v5, `score-worker` v10, `ingest` v9 — all ACTIVE |
-| Frontend | live bundle on cues-tca.netlify.app is `index-CSLiETWZ.js`, **byte-identical** to the local `npm run build` (md5 `65378244…`, 536,412 bytes) — carries session 17's title-leak fix |
+| Frontend | live bundle on cues-tca.netlify.app is `index-qqNChnQe.js`, **byte-identical** to the local `npm run build` (md5 `e4ff5fb8…`, 535,863 bytes) — carries the publication UI and the title-leak fix |
 | Tests | `deno test generate/__tests__/` → **20 passed, 0 failed**, 1 ignored. The full suite was last run whole in session 16 (105 passed). |
 
 **Data left behind by session 16's live tests.** The cluster *"Più controlli,
@@ -141,6 +141,27 @@ flag**, so one constant restores the old UI whole.
 The embedded-column filter was verified against the live API rather than
 assumed: unfiltered returns 43 review rows (41 per-cluster, 2 publication),
 filtered returns 2.
+
+### Where this leaves the product
+
+Deployed and verified: live bundle `index-qqNChnQe.js`, byte-identical to the
+local build and carrying the publication UI. Review now shows **two rows** — the
+publication's post and its carousel, both `draft`, both covering 2026-08-20 to
+2026-09-03 with 19 posts behind them.
+
+**Still zero approvals.** Unchanged by any of this, and still the one open gate:
+it needs an editor, not a run. What is different is that there is now one text to
+approve rather than sixteen to choose between.
+
+Two gaps found in the specification reading and deliberately NOT closed, because
+both are editorial calls rather than code:
+
+1. **Tecnoalimenti / TCA is missing from `sources`.** Five sources specified,
+   four configured.
+2. **`talent_development` is configured and unspecified; `European institutional
+   context` is specified and unconfigured.** Fixing this changes which posts
+   pass the threshold, so it invalidates clusters and copy downstream — cheap to
+   do, not cheap to do casually.
 
 ## Session 17 — Ε is diagnosed: the encoding damage is not an ingest bug (2026-09-03)
 
