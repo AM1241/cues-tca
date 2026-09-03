@@ -662,8 +662,16 @@ export function Clusters() {
                 }`}
               >
                 <div className="flex items-start justify-between gap-2">
+                  {/*
+                    Anonymised text only. This list preferred raw_posts.post_title,
+                    which the anonymiser never touches — it only processes post_text
+                    — so the one titled post in the corpus displayed its source
+                    company verbatim, in the very list an editor uses to inspect
+                    anonymisation. The failure lists below still show raw text
+                    deliberately: those posts have no anonymised version to show.
+                  */}
                   <span className="text-sm font-medium text-slate-900">
-                    {r.raw_posts?.post_title?.trim() || r.anonymized_text.slice(0, 60).trim() + '…'}
+                    {r.anonymized_text.slice(0, 60).trim() + '…'}
                   </span>
                   <span className="shrink-0 text-xs tabular-nums text-slate-500">
                     {Math.round(r.overall_relevance)}
