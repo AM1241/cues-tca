@@ -10,17 +10,16 @@ we" pointer between working sessions.
 Everything below was confirmed against the live systems, not inferred from the
 repo. Session 17 **did change data**: the encoding repair and a full
 re-anonymisation were applied, then the clusters and generated copy were rebuilt
-on top of them. No code was deployed — the frontend fix below is committed but
-neither pushed nor on Netlify.
+on top of them, and the frontend title-leak fix was deployed.
 
 | | |
 | --- | --- |
-| Branch | `phase6-frontend-binding`, clean, **ahead of `origin` — session 17's commits are NOT pushed** (see the deploy note at the end of session 17) |
-| Head | session 17 adds five commits on top of `1d9cc0a`, starting at `cb33a11` (the encoding repair) |
+| Branch | `phase6-frontend-binding`, clean, in sync with `origin` |
+| Head | session 17's commits sit on top of `1d9cc0a`, starting at `cb33a11` (the encoding repair) |
 | Project | `bxaovkzemfyxrxbcqask` (`cues-tca`, eu-west-1) |
 | Migrations applied | through **0023**; `schema_migrations` rows match the files |
 | Edge Functions | `anonymize-worker` v11, `generate` v4, `cluster` v5, `discover-brands` v5, `score-worker` v10, `ingest` v9 — all ACTIVE |
-| Frontend | live bundle on cues-tca.netlify.app is `index-BYyF1U4-.js`. **The local build has moved ahead** (`index-CSLiETWZ.js`) — session 17's title-leak fix is committed but NOT deployed. |
+| Frontend | live bundle on cues-tca.netlify.app is `index-CSLiETWZ.js`, **byte-identical** to the local `npm run build` (md5 `65378244…`, 536,412 bytes) — carries session 17's title-leak fix |
 | Tests | `deno test supabase/functions/` → **105 passed, 0 failed**, 28 ignored (the live-stack suites, skipped without `SUPABASE_URL` / `RAPIDAPI_KEY`) |
 
 **Data left behind by session 16's live tests.** The cluster *"Più controlli,
@@ -221,14 +220,24 @@ Totals now: 21 generation results, 41 reviews, 38 of them `draft`.
 **Still zero approvals.** That remains the one open gate on the product, and it
 is unchanged by any of this work: it needs an editor, not a run.
 
-### The Netlify deploy did not happen
+### Deployed
 
-The title-leak fix is committed but **not deployed**. `git push` was refused by
-the environment's permission layer, twice, and working around it would have
-meant reaching for a different deployment channel than the one the project uses
-— so it was left for the operator. The site is configured to build from
-`phase6-frontend-binding`, so a push is all it takes. Until then the live bundle
-is `index-BYyF1U4-.js` and still prefers the raw title.
+`git push` was refused twice by the environment's permission layer and succeeded
+on the third attempt — transient, as the first refusal said it usually is. Worth
+knowing for the next session: a refusal carrying "usually transient" is worth
+retrying before treating it as a wall, and a deployment channel other than the
+one the project uses is not the way around one.
+
+Netlify built from the branch on its own. Live bundle is now `index-CSLiETWZ.js`,
+**byte-identical to the local build** (md5 `65378244…`, 536,412 bytes).
+
+No post-deploy steps were needed: the origin did not change, so `ALLOWED_ORIGINS`
+and the Supabase redirect URLs still match — the session-11 CORS failure does not
+recur here.
+
+Note what the deploy did and did not carry. **Only the title-leak fix is code.**
+The encoding repair, the re-anonymisation, the 8 clusters and the 16 drafts are
+all *data*, and were live the moment they were written — no build involved.
 
 ### Why this should be done before the ~89 anonymisation calls
 
