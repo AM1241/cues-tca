@@ -4,12 +4,13 @@ import type { SupabaseClient } from "jsr:@supabase/supabase-js@2.110.8";
 export interface SourceRow {
   id: string;
   name: string;
+  lookback_days: number;
 }
 
 export async function getSource(db: SupabaseClient, sourceId: string): Promise<SourceRow | null> {
   const { data, error } = await db
     .from("sources")
-    .select("id, name")
+    .select("id, name, lookback_days")
     .eq("id", sourceId)
     .maybeSingle();
   if (error) throw new Error(`sources lookup failed: ${error.message}`);
@@ -32,18 +33,28 @@ export async function getConfig(db: SupabaseClient): Promise<DiscoveryConfigRow>
 }
 
 /**
- * The source's own posts, newest first. RAW text, deliberately: the whole point
- * is to see the names before anonymisation removes the ones it already knows.
+ * The source's own posts, newest first, RAW text — deliberately: the whole
+ * point is to see the names before anonymisation removes the ones it already
+ * knows.
+ *
+ * Bounded to `sinceIso`, the same lookback window Collect actually uses for
+ * this source (see index.ts). Before this, a source with a long collection
+ * history could surface names from posts far older than anything the pipeline
+ * is currently working with — proposals about last year's copy while the
+ * editor is looking at this week's. `limit` still caps how many posts reach
+ * one LLM call; the date filter is what decides which ones are eligible.
  */
 export async function getSourcePosts(
   db: SupabaseClient,
   sourceId: string,
   limit: number,
+  sinceIso: string,
 ): Promise<{ text: string }[]> {
   const { data, error } = await db
     .from("raw_posts")
     .select("post_text, published_at")
     .eq("source_id", sourceId)
+    .gte("published_at", sinceIso)
     .order("published_at", { ascending: false })
     .limit(limit);
   if (error) throw new Error(`raw_posts lookup failed: ${error.message}`);

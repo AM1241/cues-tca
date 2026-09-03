@@ -142,9 +142,16 @@ export async function handleDiscoverBrands(
     const source = await getSource(db, sourceId);
     if (!source) throw new RequestError(404, "Source not found.");
 
-    const posts = await getSourcePosts(db, sourceId, sampleSize);
+    // Same window Collect uses for this source, not "the N most recent posts
+    // ever" — a source with a long history would otherwise surface brand
+    // names from copy far outside what the pipeline is currently working
+    // with. Kept as a plain cutoff rather than importing ingest's own
+    // isWithinLookback: that helper filters one post at a time in TypeScript,
+    // where this needs a single SQL boundary the query can push down.
+    const sinceIso = new Date(Date.now() - source.lookback_days * 86_400_000).toISOString();
+    const posts = await getSourcePosts(db, sourceId, sampleSize, sinceIso);
     if (posts.length === 0) {
-      // Nothing collected yet is an honest empty result, not a failure.
+      // Nothing collected in this window is an honest empty result, not a failure.
       return jsonResponse(
         { ok: true, source: source.name, totals: { read: 0, proposed: 0, stored: 0 }, suggestions: [] },
         200,
