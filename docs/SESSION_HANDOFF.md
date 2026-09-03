@@ -9,13 +9,14 @@ we" pointer between working sessions.
 
 Everything below was confirmed against the live systems, not inferred from the
 repo. Session 17 **did change data**: the encoding repair and a full
-re-anonymisation were applied. No code was deployed — the frontend fix below is
-built but not on Netlify.
+re-anonymisation were applied, then the clusters and generated copy were rebuilt
+on top of them. No code was deployed — the frontend fix below is committed but
+neither pushed nor on Netlify.
 
 | | |
 | --- | --- |
-| Branch | `phase6-frontend-binding`, clean, in sync with `origin` |
-| Head | `1d9cc0a` plus session 17's docs/script commit |
+| Branch | `phase6-frontend-binding`, clean, **ahead of `origin` — session 17's commits are NOT pushed** (see the deploy note at the end of session 17) |
+| Head | session 17 adds five commits on top of `1d9cc0a`, starting at `cb33a11` (the encoding repair) |
 | Project | `bxaovkzemfyxrxbcqask` (`cues-tca`, eu-west-1) |
 | Migrations applied | through **0023**; `schema_migrations` rows match the files |
 | Edge Functions | `anonymize-worker` v11, `generate` v4, `cluster` v5, `discover-brands` v5, `score-worker` v10, `ingest` v9 — all ACTIVE |
