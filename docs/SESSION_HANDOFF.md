@@ -142,6 +142,37 @@ The embedded-column filter was verified against the live API rather than
 assumed: unfiltered returns 43 review rows (41 per-cluster, 2 publication),
 filtered returns 2.
 
+### The Posts empty state lied, and it made a working button look broken
+
+The operator collected 42 real posts (verified: `ingest_runs` 13:21:39,
+`posts_inserted: 42`, `error: null`, all four sources OK) and then reported
+"Collect now didn't work." It had. Posts told them otherwise.
+
+The new default-window empty state (above) said *"Nothing was published in the
+last 15 days"* whenever `analyzed_posts` had no rows in the window — but Posts
+only ever shows `analyzed_posts`, never `raw_posts`. The 42 new posts were
+sitting in the scoring queue, correctly enqueued by the insert trigger, simply
+not scored yet. 23 of them fall inside the 15-day window. The message conflated
+"not yet scored" with "not published", and told the operator the opposite of
+what was true.
+
+Fixed by counting `raw_posts` in the window with no `analyzed_posts` row at all,
+and giving that case its own message ahead of the "nothing published" one:
+*"N posts collected in this window, not yet scored"*, with a **Score now**
+button right there — the same action already on this screen, now reachable from
+the exact place that made the button seem missing.
+
+**A trap in building the counter, worth recording because it fails silently.**
+The natural query — filter a to-one embed by its own id column,
+`analyzed_posts.id=is.null` — is accepted by PostgREST without error and
+silently ignored: it returns the same row count as no filter at all. Proved by
+testing both `is.null` and `not.is.null` on `.id` and getting the *same* count
+back from each — the filter was doing nothing. The form that actually works
+filters the **embedded object itself**: `analyzed_posts=is.null`. Confirmed
+against the live API in both directions (`is.null` → 23, `not.is.null` → 0,
+`!inner` with no filter → 0 — three independent checks agreeing) before it went
+into the code.
+
 ### Posts opens on a window, not the whole archive
 
 The screen fetched every analysed post ever, then filtered in the browser. It now

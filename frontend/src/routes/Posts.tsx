@@ -73,6 +73,11 @@ export function Posts() {
   // is how stale the corpus is, and that cannot come from a query that matched
   // no rows.
   const [newestPost, setNewestPost] = useState<string | null>(null)
+  // Posts already collected inside the current window but not yet scored — the
+  // gap that made "Collect now worked, Posts looks empty" read as a bug. Posts
+  // only ever shows analyzed_posts, so a fresh collect is invisible here until
+  // someone presses Score now; this is what tells the editor that's why.
+  const [unscoredInWindow, setUnscoredInWindow] = useState<number | null>(null)
 
   const load = useCallback(async () => {
     // Deliberately NOT setRows(null): the days box fires on every keystroke, and
@@ -109,6 +114,29 @@ export function Posts() {
     setNewestPost((data as { published_at: string } | null)?.published_at ?? null)
   }, [])
 
+  // Counts raw_posts in the window with NO analyzed_posts row at all — not
+  // "scored low", not "excluded", genuinely never scored. Skipped entirely
+  // when showAll, since the point is explaining why the WINDOWED view looks
+  // emptier than what was just collected.
+  const loadUnscoredInWindow = useCallback(async () => {
+    if (showAll) {
+      setUnscoredInWindow(null)
+      return
+    }
+    const cutoff = new Date(Date.now() - lookbackDays * 86_400_000).toISOString()
+    // The filter targets the embedded object itself, not a column inside it —
+    // `analyzed_posts.id=is.null` is silently ignored by PostgREST for a to-one
+    // embed (verified against the live API: it returns the same count with or
+    // without the filter). `analyzed_posts=is.null` is the form that actually
+    // excludes rows with a match.
+    const { count } = await supabase
+      .from('raw_posts')
+      .select('id, analyzed_posts!left(id)', { count: 'exact', head: true })
+      .gte('published_at', cutoff)
+      .is('analyzed_posts', null)
+    setUnscoredInWindow(count ?? 0)
+  }, [lookbackDays, showAll])
+
   const loadQueue = useCallback(async () => {
     const { count } = await supabase
       .from('scoring_job_state')
@@ -121,7 +149,8 @@ export function Posts() {
     load()
     loadQueue()
     loadNewest()
-  }, [load, loadQueue, loadNewest])
+    loadUnscoredInWindow()
+  }, [load, loadQueue, loadNewest, loadUnscoredInWindow])
 
   // Put posts INTO the scoring queue. queue_scoring also rotates the production
   // scoring request when the objective has changed since it was opened —
@@ -186,6 +215,7 @@ export function Posts() {
     toast.success(`${t.jobs_read} job(s) read — ${parts.join(', ')}`)
     await load()
     await loadQueue()
+    await loadUnscoredInWindow()
   }
 
   const sourceNames = useMemo(() => {
@@ -424,7 +454,29 @@ export function Posts() {
                 saying which it is. With nothing collected for six weeks a
                 fortnight's window is legitimately empty, and a bare "no posts
                 match" reads as a broken screen. */}
-            {!showAll && rows.length === 0 && newestPost ? (
+            {!showAll && rows.length === 0 && unscoredInWindow !== null && unscoredInWindow > 0 ? (
+              // The case that made "Collect now didn't work" look true when it
+              // had: posts landed in this window, the queue has them, nobody
+              // has pressed Score now yet. This screen only ever shows scored
+              // posts, so a fresh collect is otherwise invisible here.
+              <>
+                <p className="font-medium text-slate-700">
+                  {unscoredInWindow} post{unscoredInWindow === 1 ? '' : 's'} collected in this
+                  window, not yet scored.
+                </p>
+                <p className="mt-1">
+                  They will appear here once scoring runs.
+                  {queued !== null && queued > 0 && ` ${queued} job(s) are queued.`}
+                </p>
+                <button
+                  onClick={scoreNow}
+                  disabled={scoring}
+                  className="mt-3 rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+                >
+                  {scoring ? 'Scoring…' : 'Score now'}
+                </button>
+              </>
+            ) : !showAll && rows.length === 0 && newestPost ? (
               <>
                 <p className="font-medium text-slate-700">
                   Nothing was published in the last {lookbackDays} days.
