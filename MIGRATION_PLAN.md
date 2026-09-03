@@ -305,12 +305,13 @@ remains as the historical record of how Phase 4 was started.)
   (`anonymize-worker` empty-queue `jobs_read=0`; `cluster` zero-eligible
   window `eligible=0, run_id=null`) with zero OpenAI calls and zero new rows
   anywhere. Full detail: `docs/PHASE4_COMPLETION.md`.
-- [ ] **4C — real-content validation (intentionally deferred).** Running
-  `anonymize-worker` + `cluster` against a small representative set of real
-  scored posts, with real OpenAI calls, has **not** been done. This is a
-  deliberate product decision, not a blocker — see
-  `docs/PHASE4_COMPLETION.md` for the bounded stop conditions the first
-  execution should honor.
+- [x] **4C — real-content validation** (sessions 15–16, 2026-08-31…09-02). Done
+  well past the "small representative set" this item asked for: **89 posts
+  anonymised and 21 clusters built with real OpenAI calls**, on real content. It
+  is also what made the audit possible — reading back every stored replacement
+  found stage 2 replacing phrases, trade fairs, public bodies, a country, a
+  person and a sum of money, all fixed in session 16. Deferring this was correct;
+  nothing but real text would have exposed it.
 
 **Phase 4 core implementation is complete as of this session** (schema,
 Edge Functions, local + cloud no-op verification, all applied to cloud). See
@@ -415,15 +416,23 @@ Progress (2026-07-23, built against the cloud seed data, in parallel with Phase 
   Review and Export each gained **Generated** (default) and **Legacy** tabs;
   traceability for generated copy comes from the result's own `raw_post_ids`
   snapshot rather than the legacy `traceability_links` join.
-- [ ] **Regeneration with feedback** — needs a `generate` Edge Function change to
-  accept editor feedback and append it to the prompt. Note that re-generation is
-  already possible today (a new request from the Clusters view produces new
-  immutable rows); only the feedback channel is missing.
-- [ ] **DOCX export** — Edge Function into Storage with a signed URL. Markdown and
-  JSON ship client-side today for both tabs.
+- [x] **Regeneration with feedback** (2026-09-02, session 16), migration
+  `0023_generation_feedback.sql` + `generate_v3`. An editor writes what to change
+  and gets a new draft. Nothing is overwritten: a revision is an ordinary request
+  carrying `regenerates_result_id` and `feedback`, producing new immutable rows.
+  An approved review is never revoked, only pointed at the newer draft.
+- [x] **DOCX export** (2026-09-02, session 16). Built **client-side**, not as an
+  Edge Function into Storage as sketched here — the outputs are a few kilobytes
+  the browser already holds, so a round trip would have bought a bucket, a
+  storage policy, signed URLs outliving RLS, and a cleanup job to move bytes that
+  were already there. Revisit only if shareable links are wanted.
 - [ ] **Check:** an editor completes collect → score → generate → approve → export
-  on the production URL. Blocked only on `score-worker`'s internal-only guard (see
-  `docs/SESSION_HANDOFF.md`); every other stage is drivable from the UI.
+  on the production URL. **No longer blocked** — the `score-worker` guard was
+  settled in session 14 (`MANUAL_BATCH_CAP`), and every stage has since run on
+  real data. What is missing is the last step itself: as of 2026-09-03 there are
+  25 reviews and **zero approvals**, which is also why Export opens empty (its
+  default filter is `approved`). This is the one remaining gate on the product,
+  and it needs an editor session, not code.
 
 ## Optional automation
 

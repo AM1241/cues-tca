@@ -1,24 +1,25 @@
 # Session handoff — CUES Editorial Cloud
 
-Last updated: 2026-09-02 (session 16 — stage 2 stops replacing things that are
-not companies, the scoring model is an editable setting, an editor can hand the
-model a note and get a new draft, and Export produces Word documents).
+Last updated: 2026-09-03 (session 17 — the encoding corruption is diagnosed,
+proved, repaired, and the corpus re-anonymised on top of the repair).
 Read this first, then `MIGRATION_PLAN.md`. This file is the single "where are
 we" pointer between working sessions.
 
-## Verified state at the end of session 16 (checked 2026-09-03)
+## Verified state at the end of session 17 (checked 2026-09-03)
 
 Everything below was confirmed against the live systems, not inferred from the
-repo.
+repo. Session 17 **did change data**: the encoding repair and a full
+re-anonymisation were applied. No code was deployed — the frontend fix below is
+built but not on Netlify.
 
 | | |
 | --- | --- |
 | Branch | `phase6-frontend-binding`, clean, in sync with `origin` |
-| Head | `a3fbc21` |
+| Head | `1d9cc0a` plus session 17's docs/script commit |
 | Project | `bxaovkzemfyxrxbcqask` (`cues-tca`, eu-west-1) |
 | Migrations applied | through **0023**; `schema_migrations` rows match the files |
 | Edge Functions | `anonymize-worker` v11, `generate` v4, `cluster` v5, `discover-brands` v5, `score-worker` v10, `ingest` v9 — all ACTIVE |
-| Frontend | live bundle on cues-tca.netlify.app is `index-BYyF1U4-.js`, byte-identical to the local `npm run build` |
+| Frontend | live bundle on cues-tca.netlify.app is `index-BYyF1U4-.js`. **The local build has moved ahead** (`index-CSLiETWZ.js`) — session 17's title-leak fix is committed but NOT deployed. |
 | Tests | `deno test supabase/functions/` → **105 passed, 0 failed**, 28 ignored (the live-stack suites, skipped without `SUPABASE_URL` / `RAPIDAPI_KEY`) |
 
 **Data left behind by session 16's live tests.** The cluster *"Più controlli,
@@ -28,11 +29,202 @@ enforcement angle…"*. Real rows, visible in Review. Nothing was left approved;
 `cluster_generation_results` is append-only, so removing them needs deliberate
 SQL and is not obviously worth it.
 
-**The corpus still carries the OLD over-replacements.** Session 16 fixed what
-the anonymiser *will* do. Existing anonymised text was produced before the fix
-and still contains "Made in Italy" and ten public bodies replaced by the generic
-entity. "Redo all" on Clusters re-runs it — **~89 LLM calls**, an operator
-decision, not taken.
+~~**The corpus still carries the OLD over-replacements.**~~ **Done on
+2026-09-03.** The encoding repair was applied and the corpus re-anonymised on top
+of it — 81 posts, 0 failures. "Made in Italy" and the public bodies are preserved
+again, and the accented brand aliases match for the first time. Full account in
+Session 17 below, including what it left stale.
+
+## Session 17 — Ε is diagnosed: the encoding damage is not an ingest bug (2026-09-03)
+
+### It was never ingest
+
+Split the 180 posts by how they arrived and the answer is immediate:
+
+| | posts | carry non-ASCII characters | carry `?` inside a word |
+| --- | --- | --- | --- |
+| migrated from Phase 1 (`legacy_id` set) | 133 | **0** | 105 |
+| collected by the `ingest` function | 47 | **47** | **0** |
+
+Ingest's posts are perfect — `🚨`, `¡Enhorabuena, España! 🏆🇪🇸`. The migrated
+rows contain **not one byte above 127**. The damage happened once, on
+2026-07-22, and cannot recur through the pipeline. Everything filed under
+"encoding corruption at ingest" since session 9 pointed at the wrong component.
+
+### Where it happened, exactly
+
+The migration chain was walked link by link, and only the last one is damaged:
+
+1. `migration-backups/phase1/legacy_snapshot_2026-07-22.db` — **clean**, 132 of
+   133 posts carry valid UTF-8.
+2. `DO_NOT_RERUN_load_legacy_2026-07-22.sql` — **clean**, 10,681 non-ASCII bytes.
+3. Postgres — **damaged**.
+
+So it broke in the apply step, which §5 of the runbook specified as:
+
+```powershell
+Get-Content ./load_legacy.sql -Raw -Encoding UTF8 | docker exec -i … psql
+```
+
+`Get-Content -Encoding UTF8` decoded correctly. **The pipe did not.** Windows
+PowerShell 5.1 re-encodes text entering a native command using `$OutputEncoding`,
+which defaults to **ASCII**, and the replacement fallback emits a literal `?` for
+everything else — one per UTF-16 **code unit**, so `è` → `?`, an emoji → `??`,
+and a flag emoji → `????`. Reproduced directly: `"a"+"è"+"😀"+"b"` encoded ASCII
+round-trips to `a???b`.
+
+Because ASCII survives, the load reported `COMMIT`, §6's row counts and orphan
+checks all reconciled, and nothing looked wrong until somebody read the Italian.
+**Every reconciliation step in the runbook counts rows; not one of them looked at
+a character.** §5 now uses `docker cp` + `psql -f` and carries the warning, plus a
+check that a multilingual corpus reporting zero multi-byte rows is a failure.
+
+Applying the model to all 133 rows and comparing against the snapshot:
+**133/133 match exactly.** Not inference — measurement.
+
+Two independent confirmations:
+
+- **The hashtags survived** — `#FlorDeCaña`, `#AprèsSki`, `#dentrocèlitalia` are
+  intact in Postgres today. The legacy system stored them as JSON with `ñ`
+  escapes, which are themselves ASCII, so the pipe had nothing to destroy. Only
+  literally non-ASCII bytes died.
+- **`editors.full_name` is fine.** It reads `Χαρίσιος Ζαφείρης`. The session-13
+  walkthrough listed it as corrupted; that was a terminal that could not print
+  Greek, not stored damage. **That line was wrong and is withdrawn.**
+
+### What is actually damaged
+
+| table.column | damaged values |
+| --- | --- |
+| `raw_posts.post_text` | 132 |
+| `raw_posts.author` | 46 (all the same value: "Sovranit**?** alimentare") |
+| `normalized_posts.clean_text` | 132 |
+| `editorial_assets.generated_text` | 15 |
+| `traceability_links.claim_text` | 3 |
+| **total** | **328** |
+
+Everything else the loader wrote is clean. `analyzed_posts` and `configurations`
+differ from the snapshot for the ordinary reason that sessions 14–15 replaced
+them; `sources` differs by the deliberate 0004 GBfoods→STAR repoint.
+
+### The repair is offline and costs nothing
+
+The clean text is still on disk, so this needs no re-scraping, no provider quota
+and **no LLM calls**. `scripts/build_encoding_repair.mjs` emits 328 UPDATEs, each
+guarded on the md5 of the damaged value — idempotent, inert against anything not
+in the exact expected damaged state, and a no-op on a correctly loaded database.
+
+**Verified against production inside a transaction that was rolled back:**
+503 values byte-identical to the clean snapshot, **0 mismatches**, and the
+database confirmed unchanged afterwards. The script in the repo was then checked
+to emit that exact statement set.
+
+`content_hash` is `generated always as (md5(post_text))`, so it corrects itself.
+
+### Applied, on the operator's go-ahead (2026-09-03)
+
+**328 UPDATEs applied to `bxaovkzemfyxrxbcqask`. Verified after the fact:
+503 values byte-identical to the clean snapshot, 0 mismatches.** The 14 posts
+that still contain a `?` are the 14 that genuinely contain one in the snapshot.
+
+Then, in the same sitting and through the real editor path (signed in as the
+allowlisted editor, PostgREST RPC + function invoke — not service_role):
+
+- `requeue_anonymisation()` → **89 requeued**
+- backfill enqueued **81** — not 89. The eight left behind are scored 0–45 and no
+  longer clear the threshold of 50, so they are not eligible. See below.
+- drained in four batches of 25 → **81 anonymised, 0 dead-lettered, 0 errors**,
+  about two minutes of wall clock on `gpt-5.4-nano`.
+
+Measured afterwards:
+
+| | |
+| --- | --- |
+| anonymised posts carrying real accents | 80 of 81 (the 81st is the one pure-ASCII post) |
+| anonymised posts still carrying `?` damage | **0** |
+| posts leaking any of the 18 brand aliases | **0** |
+| `Made in Italy` correctly left alone | 21 posts |
+| `MASAF` correctly preserved as a public body | 12 posts |
+
+**The accented aliases now work, and this is the proof the repair mattered
+beyond cosmetics:** `Niccolò Branca` appears in 3 raw posts and `Caffè Borghetti`
+in 1; **zero** anonymised posts contain either. Against `Niccol? Branca` those
+aliases could never have matched.
+
+### Two things this left behind, both worth knowing
+
+**Eight posts dropped out of the anonymised set.** `requeue_anonymisation` clears
+`current_result_id` for everything, but the backfill only re-enqueues what is
+currently eligible. These eight were anonymised back when they qualified and have
+since been re-scored below 50. Their `anonymize_job_state` still reads
+`dead_letter` — that is the *mechanism* requeue uses, not a failure; they carry no
+error message. Clusters shows them under **"Not yet anonymised"**, which is
+honest, though the `dead_letter` badge reads worse than the truth.
+
+**The over-replacement long tail is real and now measurable.** 58 distinct
+entities were replaced. Every class session 16 set out to fix is gone — no
+`Made in Italy`, no `Cabina di Regia`, no `AGEA`, no `Australia`, no
+`6,2 milioni di euro`, no `associazioni di categoria`. What remains, on a manual
+read of the 58, is roughly a third that are not companies: trade fairs
+(`Vinitaly 2026`, `Veronafiere`, `Fieracavalli`, `Salone del Vermouth`), events
+(`Fuori Salone`), venues (`Museo del Risorgimento`, `Bar Cavour`), TV programmes
+(`Domenica in`, `Zecchino d'Oro`), associations (`Federazione Apicoltori
+Italiani`), a person (`Al Bano`), **a horse breed (`Lipizzano`)**, and
+**`COLTIVAITALIA`, a government funding package** — that last one corrupts a
+fact the way the session-16 cases did. This is the limitation session 16
+documented as "left to the prompt"; it is no longer an estimate.
+
+### Everything downstream of anonymisation is now stale
+
+74 of the 75 posts that had a previous anonymisation came back with **different
+text**. So the derived layers describe copy that no longer exists:
+
+| | |
+| --- | --- |
+| `post_embeddings` | 90, stale |
+| `clusters` | 21, stale |
+| `cluster_generation_results` | 13, stale |
+
+Re-clustering (embeddings + one naming call per cluster) and then re-generating
+is the next step, and it is spend, so it is the operator's call. Nothing is
+broken in the meantime — the screens work; the clusters just reflect the older
+wording.
+
+### Why this should be done before the ~89 anonymisation calls
+
+Anonymisation reads `post_text`. **68 of the 89 anonymised posts derive from
+damaged text.** Repairing first means the "Redo all" that was already being
+considered for session 16's over-replacement fix corrects the accents in the same
+batch of calls. In the other order the calls are paid for twice.
+
+It also unblocks something already observed: session 15's brand discovery
+proposed `Niccolò Branca` and `Caffè Borghetti`, which can never match
+`Niccol? Branca`. Those aliases start working the moment the text is repaired.
+
+Downstream that was produced by a model reading damaged text, for whoever decides
+how far to re-run:
+
+| derived from damaged text | |
+| --- | --- |
+| `anonymized_posts_current` | 68 of 89 |
+| `post_embeddings` | 68 of 90 |
+| `analyzed_posts` / scores | 132 of 180 (60 of them above the threshold) |
+| `cluster_assignments` | 44 of 54 |
+
+Re-scoring is the expensive, least certain one: the model still read the words,
+only the accents were missing, and re-scoring can move which posts pass the
+threshold and therefore invalidate the clusters and the generated copy resting on
+them. Repair + re-anonymise is the coherent minimum.
+
+### A trap worth naming, because it bit twice in one session
+
+The verification tooling built to check this **had the same bug**. Python's
+`sys.stdin` on this machine decodes using the locale codepage (cp1253), so a
+UTF-8 SQL script read from stdin arrived mangled, and the first dry run reported
+328 mismatches. It was only visible because the check compared md5s against the
+snapshot rather than eyeballing output. Anything on this machine that moves text
+between a file and a process must state its encoding explicitly; the default is
+wrong, and it fails quietly in both directions.
 
 ## Session 16 — the anonymiser stops corrupting facts (2026-09-02)
 
@@ -210,8 +402,10 @@ fix` in `frontend/` is the stated remedy.
 
 ### Still open
 
-- **Ε — encoding corruption at ingest.**
-- Re-anonymise the corpus once the operator decides the ~89 calls are worth it.
+- ~~**Ε — encoding corruption at ingest.**~~ Diagnosed in session 17: it is not
+  ingest, it is one-time migration damage, and the repair is ready and unapplied.
+- Re-anonymise the corpus once the operator decides the ~89 calls are worth it —
+  **after** applying the encoding repair, so the same calls fix both.
 
 ## Session 15 — real scores, and the buttons to produce them (2026-09-01)
 
@@ -296,6 +490,9 @@ constants besides.
 - Session 14 said four hardcoded food assumptions were made configurable. There
   is a **fifth**: `cluster/prompt.ts` still carries a hardcoded CUES brief used
   to name every cluster. Recorded in `docs/presets.md`; not yet fixed.
+  **Fixed since — session 17 checked.** `cluster/prompt.ts` now builds the brief
+  through `buildBrief(domain, themeLabels)` from the operator's configured scope.
+  This bullet stayed open in the record longer than the defect did.
 - Session 14's neutrality claim otherwise holds and was re-proved this session.
 
 ### Where the pipeline stands
@@ -651,7 +848,9 @@ previously known, and one production blocker was fixed.
      currently visible to an editor carries a real LLM score.
    - The corpus encoding corruption is visible on every screen (`qualit?`,
      `L?Italia`, `????`), including the editor's own `full_name` in
-     `public.editors`.
+     `public.editors`. **The `full_name` half of this is wrong** — session 17
+     read it back as `Χαρίσιος Ζαφείρης`, intact. The observing terminal
+     could not print Greek. The corpus damage is real; see session 17.
    - Stage-2 over-replacement produces ungrammatical Italian, e.g. *"Si è
      riunita oggi al MASAF la another food-sector organization"*.
    - `routes/Placeholder.tsx` is now unreferenced — `App.tsx` imports every
@@ -667,8 +866,9 @@ previously known, and one production blocker was fixed.
   feedback and DOCX export are still unbuilt.
 - **Title anonymisation** — either anonymise titles in the worker, or stop
   preferring the raw title in `Clusters.tsx`. The second is a one-line fix.
-- **Encoding corruption** — still unaddressed at ingest, still cosmetic-only for
-  generated copy.
+- **Encoding corruption** — ~~unaddressed at ingest~~. Session 17: not an ingest
+  fault at all, and no longer cosmetic-only once the aliases it blocks are
+  counted. Repair ready, unapplied.
 - **Secret hygiene** — `frontend/.env.local` still holds the Supabase PAT and
   the DB password. Gitignored, but it does not belong in the frontend
   directory. `SUPABASE_ACCESS_TOKEN` is better set as a user environment
