@@ -1760,6 +1760,10 @@ export type Database = {
         Args: { p_request_id: string }
         Returns: undefined
       }
+      admin_delete_generation_result: {
+        Args: { p_result_id: string }
+        Returns: Json
+      }
       backfill_anonymize_jobs: {
         Args: { p_min_relevance?: number }
         Returns: number

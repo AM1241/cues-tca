@@ -260,8 +260,10 @@ function GeneratedDetail({
   onChanged: () => Promise<void> | void
   onOpenResult: (resultId: string) => void
 }) {
-  const { session } = useAuth()
+  const { session, isAdmin } = useAuth()
   const toast = useToast()
+  // Permanent deletion (0027), admin-only: whether the confirm dialog is open.
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   const original = useMemo(() => {
     const r = row.cluster_generation_results
@@ -580,6 +582,121 @@ function GeneratedDetail({
           ))}
         </ul>
       )}
+
+      {/* Admin-only (0027). Separated and unmistakably red: this is the one
+          action on this screen that is not append-only-safe — it can delete
+          an APPROVED result, on deliberate operator instruction, which is why
+          it lives apart from Approve/Reject rather than beside them. */}
+      {isAdmin && (
+        <>
+          <hr className="my-5 border-slate-200" />
+          <h3 className="text-sm font-semibold text-red-700">Danger zone</h3>
+          <p className="mt-1 text-xs text-slate-500">
+            Permanently deletes this generated result — both its post and
+            carousel output, whichever exist, and their reviews. This works
+            even on an approved result; nothing else on this screen does.
+          </p>
+          <button
+            onClick={() => setConfirmingDelete(true)}
+            className="mt-2 rounded-md border border-red-300 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50"
+          >
+            Delete permanently…
+          </button>
+        </>
+      )}
+
+      {confirmingDelete && (
+        <DeleteResultDialog
+          row={row}
+          onClose={() => setConfirmingDelete(false)}
+          onDeleted={async () => {
+            setConfirmingDelete(false)
+            toast.success(`Deleted "${row.cluster_generation_results?.cluster_label}"`)
+            await onChanged()
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+/**
+ * Confirmation for admin_delete_generation_result() (0027). Its own dialog
+ * rather than a native confirm(): the stakes include an approved, already
+ * generated result, and the operator should read a real sentence about that
+ * before the red button is even clickable-by-accident.
+ */
+function DeleteResultDialog({
+  row,
+  onClose,
+  onDeleted,
+}: {
+  row: ReviewRow
+  onClose: () => void
+  onDeleted: () => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const g = row.cluster_generation_results
+  const outputs = [g?.post_output ? 'post' : null, g?.carousel_output ? 'carousel' : null]
+    .filter(Boolean)
+    .join(' + ')
+
+  async function confirmDelete() {
+    setBusy(true)
+    setErr(null)
+    const { error } = await supabase.rpc('admin_delete_generation_result', {
+      p_result_id: row.result_id,
+    })
+    setBusy(false)
+    if (error) {
+      setErr(error.message)
+      return
+    }
+    onDeleted()
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-10 flex items-center justify-center bg-slate-900/40 px-6"
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-lg rounded-lg bg-white p-6 shadow-xl"
+      >
+        <h2 className="text-lg font-semibold text-red-700">Delete this result?</h2>
+        <p className="mt-3 text-sm text-slate-600">
+          Permanently removes "{g?.cluster_label}" — its {outputs || 'output'} and both
+          reviews. <span className="font-medium">This cannot be undone.</span>
+        </p>
+        {row.status === 'approved' && (
+          <p className="mt-2 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            This is currently <span className="font-medium">approved</span>. Deleting it
+            removes it from Export too.
+          </p>
+        )}
+        {err && (
+          <div className="mt-4 rounded-md bg-red-50 p-3 text-xs text-red-800">{err}</div>
+        )}
+        <div className="mt-6 flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={confirmDelete}
+            disabled={busy}
+            className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-60"
+          >
+            {busy ? 'Deleting…' : 'Delete permanently'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
