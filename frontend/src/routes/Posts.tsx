@@ -20,6 +20,15 @@ type PostRow = {
   } | null
 }
 
+/**
+ * The window the screen opens on. A fortnight, because that is the publication
+ * cycle the editorial brief describes — an editor arriving to work on the next
+ * publication should see its material, not four years of archive.
+ */
+const DEFAULT_LOOKBACK_DAYS = 15
+/** Matches sources.lookback_days (0003), so the two controls cannot disagree. */
+const MAX_LOOKBACK_DAYS = 90
+
 function ScoreBar({ value }: { value: number }) {
   const pct = Math.max(0, Math.min(100, value))
   return (
@@ -53,17 +62,51 @@ export function Posts() {
   const [minScore, setMinScore] = useState(0)
   const [onlyIncluded, setOnlyIncluded] = useState(false)
 
+  // How far back to look, by publication date. Unlike the filters below this
+  // one is applied in the QUERY, not to rows already in the browser: the corpus
+  // only grows, and an editor working on the last fortnight should not wait for
+  // every post ever collected to come down the wire first.
+  const [lookbackDays, setLookbackDays] = useState(DEFAULT_LOOKBACK_DAYS)
+  const [showAll, setShowAll] = useState(false)
+  const [reloading, setReloading] = useState(false)
+  // Only for the empty state: when the window returns nothing, the useful fact
+  // is how stale the corpus is, and that cannot come from a query that matched
+  // no rows.
+  const [newestPost, setNewestPost] = useState<string | null>(null)
+
   const load = useCallback(async () => {
-    const { data, error } = await supabase
+    // Deliberately NOT setRows(null): the days box fires on every keystroke, and
+    // replacing the table with a spinner each time makes the screen flash and
+    // costs the editor their scroll position. The old rows stay, dimmed, until
+    // the new ones land.
+    setReloading(true)
+    let query = supabase
       .from('analyzed_posts')
       .select(
         `id, overall_relevance, reason_for_score, included_in_generation, relevance_scores,
          raw_posts!inner ( post_title, post_text, published_at, source_url,
            sources!inner ( name ) )`,
       )
-      .order('overall_relevance', { ascending: false })
+    if (!showAll) {
+      // published_at lives on raw_posts, and the embed is !inner, so this
+      // filters the analyzed_posts rows themselves rather than just the embed.
+      const cutoff = new Date(Date.now() - lookbackDays * 86_400_000).toISOString()
+      query = query.gte('raw_posts.published_at', cutoff)
+    }
+    const { data, error } = await query.order('overall_relevance', { ascending: false })
+    setReloading(false)
     if (error) setError(error.message)
     else setRows((data ?? []) as unknown as PostRow[])
+  }, [lookbackDays, showAll])
+
+  const loadNewest = useCallback(async () => {
+    const { data } = await supabase
+      .from('raw_posts')
+      .select('published_at')
+      .order('published_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    setNewestPost((data as { published_at: string } | null)?.published_at ?? null)
   }, [])
 
   const loadQueue = useCallback(async () => {
@@ -77,7 +120,8 @@ export function Posts() {
   useEffect(() => {
     load()
     loadQueue()
-  }, [load, loadQueue])
+    loadNewest()
+  }, [load, loadQueue, loadNewest])
 
   // Put posts INTO the scoring queue. queue_scoring also rotates the production
   // scoring request when the objective has changed since it was opened —
@@ -154,6 +198,11 @@ export function Posts() {
     return [...set].sort()
   }, [rows])
 
+  const daysSinceNewest = useMemo(() => {
+    if (!newestPost) return null
+    return Math.floor((Date.now() - Date.parse(newestPost)) / 86_400_000)
+  }, [newestPost])
+
   const filtered = useMemo(() => {
     if (!rows) return []
     return rows.filter((r) => {
@@ -175,6 +224,9 @@ export function Posts() {
           <h1 className="text-xl font-semibold">Posts</h1>
           <p className="mt-1 text-sm text-slate-500">
             {filtered.length} of {rows.length} analysed posts
+            <span className="text-slate-400">
+              {' '}· {showAll ? 'all time' : `published in the last ${lookbackDays} days`}
+            </span>
             {queued !== null && queued > 0 && (
               <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-700">
                 {queued} waiting to be scored
@@ -209,6 +261,50 @@ export function Posts() {
           >
             {scoring ? 'Scoring…' : 'Score now'}
           </button>
+          {/* Period. Sits first because it is the only filter that changes what
+              is fetched — the others narrow what is already on screen, and an
+              editor who does not notice the difference wonders where their
+              posts went. */}
+          <div className="text-sm">
+            <span className="mb-1 block text-slate-600">Period</span>
+            <div className="flex items-stretch gap-1.5">
+              <div
+                className={`flex items-center gap-1.5 rounded-md border px-2 py-1.5 ${
+                  showAll ? 'border-slate-200 bg-slate-50 text-slate-400' : 'border-slate-300'
+                }`}
+              >
+                <span className="text-slate-500">Last</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={MAX_LOOKBACK_DAYS}
+                  value={lookbackDays}
+                  disabled={showAll}
+                  onChange={(e) => {
+                    // Clamp rather than reject: an out-of-range number left in
+                    // the box would silently keep showing the previous window.
+                    const n = Number(e.target.value)
+                    if (!Number.isFinite(n)) return
+                    setLookbackDays(Math.min(MAX_LOOKBACK_DAYS, Math.max(1, Math.round(n))))
+                  }}
+                  className="w-14 bg-transparent text-center tabular-nums outline-none disabled:cursor-not-allowed"
+                />
+                <span className="text-slate-500">days</span>
+              </div>
+              <button
+                onClick={() => setShowAll((v) => !v)}
+                aria-pressed={showAll}
+                className={`rounded-md border px-3 text-sm font-medium ${
+                  showAll
+                    ? 'border-slate-900 bg-slate-900 text-white'
+                    : 'border-slate-300 text-slate-700 hover:bg-slate-100'
+                }`}
+              >
+                All
+              </button>
+            </div>
+          </div>
+
           <label className="text-sm">
             <span className="mb-1 block text-slate-600">Source</span>
             <select
@@ -251,7 +347,11 @@ export function Posts() {
         </div>
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+      <div
+        className={`overflow-x-auto rounded-lg border border-slate-200 bg-white transition-opacity ${
+          reloading ? 'opacity-50' : ''
+        }`}
+      >
         <table className="w-full text-sm">
           <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
             <tr>
@@ -319,9 +419,32 @@ export function Posts() {
         </table>
 
         {filtered.length === 0 && (
-          <p className="px-4 py-8 text-center text-sm text-slate-500">
-            No posts match the current filters.
-          </p>
+          <div className="px-4 py-8 text-center text-sm text-slate-500">
+            {/* An empty window is a correct answer, not a fault, and it is worth
+                saying which it is. With nothing collected for six weeks a
+                fortnight's window is legitimately empty, and a bare "no posts
+                match" reads as a broken screen. */}
+            {!showAll && rows.length === 0 && newestPost ? (
+              <>
+                <p className="font-medium text-slate-700">
+                  Nothing was published in the last {lookbackDays} days.
+                </p>
+                <p className="mt-1">
+                  The most recent post in the database is from {newestPost.slice(0, 10)}
+                  {daysSinceNewest !== null && ` — ${daysSinceNewest} days ago`}. Collect
+                  from Sources, widen the window, or press All.
+                </p>
+                <button
+                  onClick={() => setShowAll(true)}
+                  className="mt-3 rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100"
+                >
+                  Show all posts
+                </button>
+              </>
+            ) : (
+              <p>No posts match the current filters.</p>
+            )}
+          </div>
         )}
       </div>
     </div>

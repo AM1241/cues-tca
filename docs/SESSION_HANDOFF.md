@@ -142,6 +142,30 @@ The embedded-column filter was verified against the live API rather than
 assumed: unfiltered returns 43 review rows (41 per-cluster, 2 publication),
 filtered returns 2.
 
+### Posts opens on a window, not the whole archive
+
+The screen fetched every analysed post ever, then filtered in the browser. It now
+takes a **period**: a days box defaulting to **15**, and an **All** button. The
+period filter is applied in the QUERY (`raw_posts.published_at`, through the
+`!inner` embed) rather than to rows already downloaded — the corpus only grows,
+and source/score/included stay client-side because they narrow what is already
+there.
+
+**With today's data the default window is empty, and that is correct.** Nothing
+has been collected since 2026-07-23, 42 days ago, so "the last 15 days" holds
+zero posts. Verified against the live API: 15 days → 0 rows, 90 days → 73,
+all → 180, matching the SQL counts exactly.
+
+A bare "no posts match the current filters" would read as a broken screen, so the
+empty state names the cause instead — how stale the corpus is, and a one-click
+**Show all posts**. The newest date comes from its own tiny query, because a
+query that matched nothing cannot report it.
+
+Two smaller decisions worth keeping: the days box does not blank the table while
+it refetches (it fires per keystroke, and a spinner each time costs the editor
+their scroll position — the old rows dim instead), and the value is clamped to
+1–90 rather than rejected, matching `sources.lookback_days`.
+
 ### Where this leaves the product
 
 Deployed and verified: live bundle `index-qqNChnQe.js`, byte-identical to the
