@@ -150,6 +150,167 @@ Rules:
 - The post's hashtags must be relevant to the cluster's theme, without any identifying names.`;
 }
 
+// =============================================================================
+// The editorial publication — one text per period, themes as its sections
+// =============================================================================
+// What the CUES brief actually asks for. The per-cluster prompt above treats a
+// cluster as the subject of its own post; here the clusters are the *sections*
+// of a single narrative, which is the shape the specification's own worked
+// example takes (opening slide, one slide per theme, closing slide).
+//
+// The difference is not cosmetic. A per-cluster draft may repeat framing its
+// siblings already used, because no call can see the others. One call over all
+// the evidence can say "these five things are the same story", which is the
+// editorial judgement the tool exists to make.
+
+export const PUBLICATION_PROMPT_VERSION = "publication_v1";
+
+/**
+ * Carousel length is 2 + themes, so the theme count is what bounds it. Eight
+ * keeps the longest carousel at ten slides, which is the practical ceiling for
+ * the format; past that a reader stops swiping and the last themes are wasted.
+ * When a run has more clusters than this the caller passes the largest ones —
+ * see index.ts, which is where "largest" is decided and recorded.
+ */
+export const MAX_PUBLICATION_THEMES = 8;
+
+/** Per theme, not per publication: eight themes at twelve posts would swamp the call. */
+const MAX_POSTS_PER_THEME = 4;
+
+export interface PublicationTheme {
+  label: string;
+  posts: GenerationInputPost[];
+}
+
+function buildThemeBlocks(themes: PublicationTheme[]): string {
+  return themes
+    .map((t, i) => {
+      const evidence = t.posts
+        .slice(0, MAX_POSTS_PER_THEME)
+        .map((p) => `   - [${p.generalized_source_name}] ${p.anonymized_text.slice(0, MAX_CHARS_PER_POST)}`)
+        .join("\n");
+      return `Theme ${i + 1}: "${t.label}"\n${evidence}`;
+    })
+    .join("\n\n");
+}
+
+export function buildPublicationPrompt(
+  themes: PublicationTheme[],
+  config: GenerationConfigRow,
+  period: { start: string; end: string },
+  revision?: RevisionContext,
+): string {
+  const domain = config.editorial_domain?.trim() || "its editorial domain";
+  const genericEntity = config.domain_generic_entity?.trim() || "a generic organization";
+  const brief = config.voice_style?.trim() || defaultBrief(domain);
+  const tone = config.voice_tone?.trim() || "objective, insight-driven, professional but accessible";
+  const audience = config.voice_audience?.trim() || `senior decision-makers in ${domain}`;
+  const themesLine = themesToText(config.themes);
+  const slideCount = themes.length + 2;
+
+  return `You are an editorial strategist producing ONE LinkedIn publication about ${domain}.
+
+Editorial brief:
+${brief}
+${themesLine ? `\n${themesLine}\n` : ""}
+Voice: ${tone}
+Audience: ${audience}
+
+Period covered: ${period.start.slice(0, 10)} to ${period.end.slice(0, 10)}.
+
+This publication draws on ${themes.length} editorial theme${themes.length === 1 ? "" : "s"} that emerged
+from the posts collected in that period. Anonymised source posts per theme (company and person
+names have already been replaced with generic descriptions):
+
+${buildThemeBlocks(themes)}
+${revision ? buildRevisionBlock(revision) : ""}
+
+Produce ONE LinkedIn post and ONE carousel of exactly ${slideCount} slides, following the
+required structured output schema exactly.
+
+This is a single editorial piece, not ${themes.length} pieces joined together:
+
+- Find the one story the themes tell together and lead with it. The post is that argument,
+  not a summary of each theme in turn.
+- Carousel slide structure, in order:
+  1. Opening slide — names the shared story and why it matters now.
+  ${themes.map((t, i) => `${i + 2}. "${t.label}"`).join("\n  ")}
+  ${slideCount}. Closing slide — what connects them, and what it asks of the reader.
+- Each theme slide must carry that theme's own evidence, while advancing the argument the
+  opening slide set up. A slide that could be moved to a different publication unchanged
+  has not done its job.
+
+Rules:
+- Do not mention any specific company, brand, or person name. The source posts have already
+  been anonymised — do not attempt to infer, guess, or reintroduce any real identity that was
+  removed; refer only to the generic descriptions already present in the evidence
+  (e.g. "${genericEntity}").
+- Write in English.
+- Ground every claim in the evidence provided; do not invent facts not supported by it.
+- Do not flatten the themes into a list. If two themes genuinely disagree, say so — a
+  publication that finds tension is more useful than one that finds harmony everywhere.
+- Avoid simplistic oppositions (e.g. "traditional good, industrial bad"); the sector's real
+  efforts are the subject.
+- Use short paragraphs and a publication-ready tone.
+- The post's hashtags must suit the publication as a whole, without any identifying names.`;
+}
+
+/** Same shape as a per-cluster result, but the slide count follows the theme count. */
+export function buildPublicationSchema(): JsonSchemaFormat {
+  const base = buildGenerationSchema();
+  return { ...base, name: "editorial_publication" };
+}
+
+/**
+ * Validates the publication's shape. Unlike the per-cluster validator this
+ * cannot assert a fixed five, so it asserts the count the prompt asked for:
+ * a carousel missing a theme slide has silently dropped a theme the operator
+ * selected, and that must fail rather than ship.
+ */
+export function validatePublicationOutput(
+  parsed: Record<string, unknown>,
+  expectedSlides: number,
+): ParsedGenerationOutput {
+  const post = parsed.post as Record<string, unknown> | undefined;
+  const carousel = parsed.carousel as Record<string, unknown> | undefined;
+  if (!post || typeof post.headline !== "string" || typeof post.text !== "string" ||
+    typeof post.cta !== "string" || !Array.isArray(post.hashtags)) {
+    throw new Error("publication output missing a valid post object");
+  }
+  if (!carousel || typeof carousel.title !== "string" || !Array.isArray(carousel.slides) ||
+    typeof carousel.caption !== "string" || typeof carousel.cta !== "string") {
+    throw new Error("publication output missing a valid carousel object");
+  }
+  const slides = carousel.slides as Record<string, unknown>[];
+  if (slides.length !== expectedSlides) {
+    throw new Error(
+      `publication carousel must have exactly ${expectedSlides} slides ` +
+        `(opening + ${expectedSlides - 2} themes + closing), got ${slides.length}`,
+    );
+  }
+  const normalizedSlides = slides.map((s, i) => {
+    if (typeof s.heading !== "string" || typeof s.body !== "string") {
+      throw new Error(`publication carousel slide ${i + 1} missing heading/body`);
+    }
+    return { position: i + 1, heading: s.heading, body: s.body };
+  });
+
+  return {
+    post: {
+      headline: post.headline as string,
+      text: post.text as string,
+      cta: post.cta as string,
+      hashtags: (post.hashtags as unknown[]).filter((h): h is string => typeof h === "string"),
+    },
+    carousel: {
+      title: carousel.title as string,
+      slides: normalizedSlides,
+      caption: carousel.caption as string,
+      cta: carousel.cta as string,
+    },
+  };
+}
+
 export function buildGenerationSchema(): JsonSchemaFormat {
   return {
     name: "cluster_generation_result",

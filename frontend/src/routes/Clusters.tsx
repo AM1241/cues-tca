@@ -8,6 +8,24 @@ import {
   type GenerationResultView,
   type GenerationErrorView,
 } from '../components/generation'
+import { PER_CLUSTER_GENERATION } from '../lib/features'
+
+/**
+ * Mirrors MAX_PUBLICATION_THEMES in supabase/functions/generate/prompt.ts.
+ * Duplicated rather than shared because the Edge Functions are a separate Deno
+ * project with no build-time link to this bundle; the copy exists only to tell
+ * the operator what will happen before they press the button, and the function
+ * remains the authority. If one moves, move the other.
+ */
+const MAX_PUBLICATION_THEMES = 8
+
+type PublicationView = {
+  generation_result_id: string
+  title: string
+  themes: string[]
+  post?: unknown
+  carousel?: { slides: unknown[] }
+}
 
 // anonymized_posts_current joined to its raw_post and source, for the
 // inspection list. replacements is the audit trail written by anonymize-worker.
@@ -113,6 +131,10 @@ export function Clusters() {
   const [generating, setGenerating] = useState(false)
   const [genResults, setGenResults] = useState<GenerationResultView[] | null>(null)
   const [genErrors, setGenErrors] = useState<GenerationErrorView[]>([])
+
+  // The publication: one text per run, themes as its sections.
+  const [publishing, setPublishing] = useState(false)
+  const [publication, setPublication] = useState<PublicationView | null>(null)
   // Each job is one real LLM entity-extraction call. Defaults low on purpose:
   // PHASE4_COMPLETION.md requires the first real run to be bounded and read
   // before scaling up. Backfill enqueues everything eligible either way; this
@@ -354,6 +376,59 @@ export function Clusters() {
   // Synchronous by design — the function blocks until every requested cluster
   // is done (several seconds per cluster), so the response carries the full
   // outcome and no polling is needed.
+  /**
+   * One publication for the selected run. Unlike per-cluster generation there
+   * is nothing to select: the publication is about the whole period, so it
+   * takes every eligible cluster and the backend decides which survive the
+   * theme cap (largest first) and records that choice in source_cluster_ids.
+   *
+   * The period is the run's own. Letting an editor narrow it here would
+   * produce a text stamped with a window that does not match the posts inside
+   * it — the clusters would still carry everything the run covered.
+   */
+  async function publishNow() {
+    if (publishing || !selectedRun || eligibleClusters.length === 0) return
+    setPublishing(true)
+    setPublication(null)
+    const { data: sessionData } = await supabase.auth.getSession()
+    const token = sessionData.session?.access_token
+    const { data, error } = await supabase.functions.invoke('generate', {
+      body: {
+        clustering_run_id: selectedRun.id,
+        cluster_ids: eligibleClusters.map((c) => c.id),
+        output_types: ['post', 'carousel'],
+        kind: 'publication',
+        period_start: selectedRun.period_start,
+        period_end: selectedRun.period_end,
+      },
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    })
+    setPublishing(false)
+
+    if (error) {
+      // Same reasoning as generateNow: a 4xx carries its real message in the
+      // body, not in supabase-js's generic "non-2xx status code".
+      let message = error.message
+      try {
+        const body = await (error as { context?: Response }).context?.json()
+        if (body?.error) message = body.error
+      } catch {
+        /* body already consumed or not JSON — keep the generic message */
+      }
+      toast.error(message)
+      return
+    }
+    if (data?.ok === false) {
+      toast.error(data.error ?? 'The publication failed to generate.')
+      return
+    }
+
+    setPublication(data.publication as PublicationView)
+    toast.success('Publication drafted — approve it in Review.')
+    // loadRuns also refreshes the per-run generated counts in the selector.
+    await loadRuns()
+  }
+
   async function generateNow() {
     if (generating || !selectedRunId || selectedClusterIds.size === 0) return
     const output_types = [...(wantPost ? ['post'] : []), ...(wantCarousel ? ['carousel'] : [])]
@@ -423,6 +498,13 @@ export function Clusters() {
   const selectedRun = useMemo(
     () => runs?.find((r) => r.id === selectedRunId) ?? null,
     [runs, selectedRunId],
+  )
+  // Every cluster the publication can draw on. label_failed clusters are
+  // excluded for the same reason per-cluster generation greys them out: the
+  // backend refuses them, and a theme with no name cannot become a slide.
+  const eligibleClusters = useMemo(
+    () => [...clustersById.values()].filter((c) => !c.label_failed),
+    [clustersById],
   )
   const postCountByCluster = useMemo(() => {
     const counts = new Map<string, number>()
@@ -548,9 +630,58 @@ export function Clusters() {
         </details>
       )}
 
+      {/* The publication — one text for the run's period, themes as sections.
+          This is what the CUES brief asks for; see lib/features.ts for why the
+          per-cluster block below is switched off rather than deleted. */}
+      {selectedRun?.status === 'completed' && clustersById.size > 0 && (
+        <div className="mb-6 rounded-lg border border-indigo-200 bg-indigo-50/40 p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-900">Create the publication</h2>
+              <p className="mt-0.5 text-xs text-slate-600">
+                One LinkedIn post and one carousel covering{' '}
+                <span className="font-medium">
+                  {fmtDate(selectedRun.period_start)} to {fmtDate(selectedRun.period_end)}
+                </span>
+                , with each theme as a section.{' '}
+                {eligibleClusters.length > MAX_PUBLICATION_THEMES
+                  ? `${eligibleClusters.length} themes found — the ${MAX_PUBLICATION_THEMES} largest are used, to keep the carousel readable.`
+                  : `${eligibleClusters.length} theme${eligibleClusters.length === 1 ? '' : 's'} → ${eligibleClusters.length + 2} slides.`}
+              </p>
+              {/* The period is the run's own, not a separate choice. A window
+                  narrower than the run's would put posts in the text that fall
+                  outside the period it claims to cover. */}
+              <p className="mt-1 text-xs text-slate-500">
+                To publish a different period, run clustering again over those dates.
+              </p>
+            </div>
+            <button
+              onClick={publishNow}
+              disabled={publishing || eligibleClusters.length === 0}
+              className="shrink-0 rounded-md bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+            >
+              {publishing ? 'Writing…' : 'Create publication'}
+            </button>
+          </div>
+
+          {publication && (
+            <div className="mt-4 rounded-md border border-slate-200 bg-white p-3">
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                Published draft — review and approve it in Review
+              </p>
+              <h3 className="mt-1 text-sm font-semibold text-slate-900">{publication.title}</h3>
+              <p className="mt-1 text-xs text-slate-500">
+                {publication.themes.length} themes ·{' '}
+                {publication.carousel ? `${publication.carousel.slides.length} slides` : 'post only'}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Generate — only offered for a completed run, per the handoff: the
           backend rejects incomplete/failed runs anyway, so don't offer them. */}
-      {selectedRun?.status === 'completed' && clustersById.size > 0 && (
+      {PER_CLUSTER_GENERATION && selectedRun?.status === 'completed' && clustersById.size > 0 && (
         <div className="mb-6 rounded-lg border border-slate-200 bg-white p-4">
           <div className="flex items-start justify-between gap-4">
             <div>

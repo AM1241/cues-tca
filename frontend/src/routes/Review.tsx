@@ -4,6 +4,7 @@ import { useAuth } from '../lib/useAuth'
 import { useToast } from '../components/toast-context'
 import { Spinner, EmptyState, ErrorNotice } from '../components/ui'
 import type { Database, Json } from '../lib/database.types'
+import { PER_CLUSTER_GENERATION } from '../lib/features'
 import {
   PostOutputCard,
   CarouselOutputCard,
@@ -134,11 +135,21 @@ function GeneratedReview() {
          superseded_by_result_id,
          cluster_generation_results!cluster_generation_reviews_result_id_fkey!inner (
            cluster_label, model, created_at, raw_post_ids, post_output, carousel_output,
-           cluster_id, clustering_run_id,
+           cluster_id, clustering_run_id, kind, source_cluster_ids, period_start, period_end,
            cluster_generation_requests!cluster_generation_results_generation_request_id_fkey (
              feedback, regenerates_result_id
            )
          )`,
+      )
+      // Per-cluster drafts are hidden while PER_CLUSTER_GENERATION is off:
+      // showing 41 single-theme drafts beside the publication would ask the
+      // editor to choose between two different products. The rows are not
+      // deleted — flipping the flag brings them straight back. The embed is
+      // !inner, so this filters the review rows themselves, not just the embed.
+      .filter(
+        'cluster_generation_results.kind',
+        PER_CLUSTER_GENERATION ? 'in' : 'eq',
+        PER_CLUSTER_GENERATION ? '(per_cluster,publication)' : 'publication',
       )
       .order('updated_at', { ascending: false })
     if (error) setError(error.message)

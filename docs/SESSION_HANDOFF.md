@@ -1,7 +1,8 @@
 # Session handoff — CUES Editorial Cloud
 
 Last updated: 2026-09-03 (session 17 — the encoding corruption is diagnosed,
-proved, repaired, and the corpus re-anonymised on top of the repair).
+proved and repaired, the corpus re-anonymised on top of it, and the output shape
+corrected to the one publication per period the original specification asks for).
 Read this first, then `MIGRATION_PLAN.md`. This file is the single "where are
 we" pointer between working sessions.
 
@@ -17,10 +18,10 @@ on top of them, and the frontend title-leak fix was deployed.
 | Branch | `phase6-frontend-binding`, clean, in sync with `origin` |
 | Head | session 17's commits sit on top of `1d9cc0a`, starting at `cb33a11` (the encoding repair) |
 | Project | `bxaovkzemfyxrxbcqask` (`cues-tca`, eu-west-1) |
-| Migrations applied | through **0023**; `schema_migrations` rows match the files |
-| Edge Functions | `anonymize-worker` v11, `generate` v4, `cluster` v5, `discover-brands` v5, `score-worker` v10, `ingest` v9 — all ACTIVE |
+| Migrations applied | through **0024**; `schema_migrations` rows match the files |
+| Edge Functions | `generate` **v5** (publication support), `anonymize-worker` v11, `cluster` v5, `discover-brands` v5, `score-worker` v10, `ingest` v9 — all ACTIVE |
 | Frontend | live bundle on cues-tca.netlify.app is `index-CSLiETWZ.js`, **byte-identical** to the local `npm run build` (md5 `65378244…`, 536,412 bytes) — carries session 17's title-leak fix |
-| Tests | `deno test supabase/functions/` → **105 passed, 0 failed**, 28 ignored (the live-stack suites, skipped without `SUPABASE_URL` / `RAPIDAPI_KEY`) |
+| Tests | `deno test generate/__tests__/` → **20 passed, 0 failed**, 1 ignored. The full suite was last run whole in session 16 (105 passed). |
 
 **Data left behind by session 16's live tests.** The cluster *"Più controlli,
 più sicurezza"* now carries three generation results — the original (superseded),
@@ -34,6 +35,112 @@ SQL and is not obviously worth it.
 of it — 81 posts, 0 failures. "Made in Italy" and the public bodies are preserved
 again, and the accented brand aliases match for the first time. Full account in
 Session 17 below, including what it left stale.
+
+## Session 17b — the output shape was wrong, and now is not (2026-09-03)
+
+### The finding
+
+The operator read the finished work and said the result was not what had been
+asked for. They were right, and it took reading the **original specification**
+to see why — `CUES Technical Analysis TCA.docx`, one directory above the repo.
+
+**That document is referenced nowhere in this repository.** Every "TCA" in the
+tree is a project, repo or hostname. `MIGRATION_PLAN.md` scopes the work as
+*"moving `cues-tca-editorial-agent` to Supabase, and fixing the things that make
+the current system expensive to operate"* — so the reference point was always the
+**legacy Python app**, never the requirement it was supposed to implement. The
+Phase 5 contract even calls `newsletter` and `post+carousel` *"legacy Phase-0
+sketch values"*: the specified deliverable was treated as an early sketch.
+
+### What the specification actually asks for
+
+One LinkedIn publication per cycle: a main post plus a carousel **whose slides
+are the themes**. Its own worked example is titled *"Beyond stereotypes: a new
+story for the food industry"*, and its seven slides run opening → innovation →
+sustainability → traceability → heritage → Europe → closing.
+
+Clustering is step 4 of 8 there. It is the skeleton of one narrative, not a way
+of splitting the output.
+
+What had been built generated a post and a carousel **per cluster**. Session
+17's run produced 8 clusters, so it produced **16 unrelated drafts** and asked an
+editor to pick. One story with seven chapters had become sixteen stories.
+
+### Two smaller gaps found in the same reading
+
+- **A source is missing.** The specification lists five; `sources` holds four.
+  Absent is **Tecnoalimenti / TCA** — described there as supplying *"highly
+  relevant content on sustainability, circular economy, bioplastics, regenerative
+  agriculture, food safety, traceability and innovation"*. It is both the most
+  on-brief source and the organisation the copy is written for. Not fixed here.
+- **The themes do not match.** `European institutional context` is missing;
+  `talent_development` is configured and appears nowhere in the specification.
+  That is not idle: it is the theme that admitted an EU traineeship ad at 95 in
+  session 14, and it produced the cluster *"Formare i talenti per l'agrifood"* in
+  session 17's run. Not fixed here — it is an editorial call.
+
+### What was built — `0024_editorial_publication.sql`
+
+A publication is **another `cluster_generation_results` row**, not a new table.
+Review, Export (Markdown/JSON/Word), regenerate-with-feedback and the append-only
+version history all key on `result_id` and none of them care what a result is
+*about*; a separate table would have meant reimplementing four mechanisms that
+already work in production. Proven rather than assumed: the first publication
+seeded its two review rows through the existing after-insert trigger, untouched.
+
+The cost, stated plainly: `cluster_id` is no longer NOT NULL, so the table holds
+two shapes. Two CHECK constraints make them mutually exclusive and total, and all
+three malformed shapes were verified rejected before the migration was applied.
+
+Three things had to change that were written assuming one outcome per cluster:
+
+- `create_cluster_generation_request` gains `kind`/`period_start`/`period_end`.
+  **Dropped and recreated, not replaced** — defaulted parameters create an
+  overload, and the five-argument call would then be ambiguous. 0023 recorded
+  this same trap; it was hit again here and caught by re-reading 0023.
+- `finish_cluster_generation_request` raised when results + errors did not equal
+  the cluster count. A publication owes exactly one outcome however many clusters
+  it drew on, so it now counts by `kind`. Without this it would have raised
+  *after* the LLM was paid for and the text stored.
+- `cluster_generation_request_errors.cluster_id` becomes nullable, with
+  `record_publication_error` for a failure that belongs to no single cluster.
+
+### The generation itself
+
+`generate` takes `kind: "publication"` and makes **one** call over all themes.
+Structurally unlike the per-cluster loop, deliberately: there, one cluster's
+failure never aborts its siblings, because each draft stands alone. Here the
+whole point is that the themes are argued together, so there is no half a
+publication — it produces its one text or it fails.
+
+- Carousel length is `2 + themes`, capped at **8 themes / 10 slides**; past that
+  the last themes are read by nobody. Which themes survive (largest first) is
+  recorded in `source_cluster_ids`, so the choice is auditable.
+- The validator asserts the exact slide count. A publication that quietly drops
+  a theme still reads like a finished piece — nothing in the copy announces that
+  a selected theme never made it in.
+- The period comes from the **request row**, not the caller, so a text can never
+  claim a window nobody asked for. The UI passes the clustering run's own
+  period for the same reason: a narrower window would put posts in the text that
+  fall outside the period it claims.
+
+**Verified live.** 8 themes → 10 slides, opening + one per theme + closing, 19
+posts behind it, request `completed`, 2 review rows seeded, `publication_v1`.
+13 offline tests, 20 passing in `generate/__tests__/`.
+
+### Per-cluster generation is hidden, not removed
+
+`frontend/src/lib/features.ts` → `PER_CLUSTER_GENERATION = false`, on the
+operator's instruction: it may return as a deliberate feature. Nothing behind it
+was deleted. The Edge Function still accepts `kind: "per_cluster"`, the RPCs
+still work, the old three-argument call still behaves identically
+(regression-tested), and all 21 previous results and 41 reviews are still in the
+database. Review and Export filter to `kind = publication` **through the same
+flag**, so one constant restores the old UI whole.
+
+The embedded-column filter was verified against the live API rather than
+assumed: unfiltered returns 43 review rows (41 per-cluster, 2 publication),
+filtered returns 2.
 
 ## Session 17 — Ε is diagnosed: the encoding damage is not an ingest bug (2026-09-03)
 

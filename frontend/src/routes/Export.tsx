@@ -18,6 +18,7 @@ import {
   type GenerationExport,
 } from '../lib/exporters'
 import { assetsToDocx, generationsToDocx } from '../lib/docx'
+import { PER_CLUSTER_GENERATION } from '../lib/features'
 
 type Asset = Database['public']['Tables']['editorial_assets']['Row']
 
@@ -159,8 +160,16 @@ function GeneratedExport({
         // superseded_by_result_id) and PostgREST will not guess between them.
         `result_id, output_type, status, edited_output,
          cluster_generation_results!cluster_generation_reviews_result_id_fkey!inner (
-           cluster_label, model, created_at, raw_post_ids, post_output, carousel_output
+           cluster_label, model, created_at, raw_post_ids, post_output, carousel_output,
+           kind, period_start, period_end
          )`,
+      )
+      // Matches Review: while per-cluster generation is off, only publications
+      // are exportable. See lib/features.ts.
+      .filter(
+        'cluster_generation_results.kind',
+        PER_CLUSTER_GENERATION ? 'in' : 'eq',
+        PER_CLUSTER_GENERATION ? '(per_cluster,publication)' : 'publication',
       )
       .order('updated_at', { ascending: false })
       .then(({ data, error }) => {

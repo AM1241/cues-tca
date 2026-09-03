@@ -124,8 +124,11 @@ export async function getClusterPostInputs(db: SupabaseClient, runId: string, cl
 
 export interface PreviousResultRow {
   id: string;
-  cluster_id: string;
+  /** Null on a publication, which belongs to many clusters (0024). */
+  cluster_id: string | null;
   clustering_run_id: string;
+  kind: "per_cluster" | "publication";
+  source_cluster_ids: string[] | null;
   output_types: string[];
   post_output: unknown;
   carousel_output: unknown;
@@ -138,7 +141,9 @@ export async function getGenerationResult(
 ): Promise<PreviousResultRow | null> {
   const { data, error } = await db
     .from("cluster_generation_results")
-    .select("id, cluster_id, clustering_run_id, output_types, post_output, carousel_output")
+    .select(
+      "id, cluster_id, clustering_run_id, kind, source_cluster_ids, output_types, post_output, carousel_output",
+    )
     .eq("id", resultId)
     .maybeSingle();
   if (error) throw new Error(`cluster_generation_results lookup failed: ${error.message}`);
@@ -171,6 +176,11 @@ export async function createGenerationRequest(
     outputTypes: string[];
     feedback?: string | null;
     regeneratesResultId?: string | null;
+    /** 'per_cluster' (the pre-0024 default) or 'publication'. */
+    kind?: "per_cluster" | "publication";
+    /** Required for a publication, rejected by the DB for a per-cluster request. */
+    periodStart?: string | null;
+    periodEnd?: string | null;
   },
 ): Promise<string> {
   const { data, error } = await db.rpc("create_cluster_generation_request", {
@@ -179,8 +189,68 @@ export async function createGenerationRequest(
     p_output_types: args.outputTypes,
     p_feedback: args.feedback ?? null,
     p_regenerates_result_id: args.regeneratesResultId ?? null,
+    p_kind: args.kind ?? "per_cluster",
+    p_period_start: args.periodStart ?? null,
+    p_period_end: args.periodEnd ?? null,
   });
   if (error) throw new Error(`create_cluster_generation_request failed: ${error.message}`);
+  return data as string;
+}
+
+/** A publication's failure belongs to the request, not to any one cluster. */
+export async function recordPublicationError(
+  db: SupabaseClient,
+  args: { requestId: string; errorType: string; errorMessage: string },
+): Promise<void> {
+  const { error } = await db.rpc("record_publication_error", {
+    p_request_id: args.requestId,
+    p_error_type: args.errorType,
+    p_error_message: args.errorMessage.slice(0, 2000),
+  });
+  if (error) throw new Error(`record_publication_error failed: ${error.message}`);
+}
+
+export interface CompletePublicationArgs {
+  requestId: string;
+  title: string;
+  sourceClusterIds: string[];
+  rawPostIds: string[];
+  anonymizeResultIds: string[];
+  outputTypes: string[];
+  postOutput: unknown | null;
+  carouselOutput: unknown | null;
+  configSnapshot: unknown;
+  promptVersion: string;
+  promptHash: string;
+  model: string;
+  providerResponse?: unknown;
+}
+
+/**
+ * The publication's counterpart to completeGenerationResult. Note what is NOT
+ * passed: the period. complete_editorial_publication copies it from the
+ * request row, so a result can never claim to cover a window nobody asked for.
+ */
+export async function completeEditorialPublication(
+  db: SupabaseClient,
+  args: CompletePublicationArgs,
+): Promise<string> {
+  const { data, error } = await db.rpc("complete_editorial_publication", {
+    p_request_id: args.requestId,
+    p_title: args.title,
+    p_source_cluster_ids: args.sourceClusterIds,
+    p_raw_post_ids: args.rawPostIds,
+    p_anonymize_result_ids: args.anonymizeResultIds,
+    p_output_types: args.outputTypes,
+    p_post_output: args.postOutput ?? null,
+    p_carousel_output: args.carouselOutput ?? null,
+    p_config_snapshot: args.configSnapshot,
+    p_prompt_version: args.promptVersion,
+    p_prompt_hash: args.promptHash,
+    p_model: args.model,
+    p_provider_response: args.providerResponse ?? null,
+  });
+  if (error) throw new Error(`complete_editorial_publication failed: ${error.message}`);
   return data as string;
 }
 
