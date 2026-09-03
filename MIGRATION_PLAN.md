@@ -426,13 +426,13 @@ Progress (2026-07-23, built against the cloud seed data, in parallel with Phase 
   the browser already holds, so a round trip would have bought a bucket, a
   storage policy, signed URLs outliving RLS, and a cleanup job to move bytes that
   were already there. Revisit only if shareable links are wanted.
-- [ ] **Check:** an editor completes collect → score → generate → approve → export
-  on the production URL. **No longer blocked** — the `score-worker` guard was
-  settled in session 14 (`MANUAL_BATCH_CAP`), and every stage has since run on
-  real data. What is missing is the last step itself: as of 2026-09-03 there are
-  25 reviews and **zero approvals**, which is also why Export opens empty (its
-  default filter is `approved`). This is the one remaining gate on the product,
-  and it needs an editor session, not code.
+- [x] **Check: done (2026-09-04, session 18).** An editor completed
+  collect → score → generate → approve → export on the production URL — as
+  MIGRATION_PLAN.md said at the time, this needed an editor session, not code,
+  and the operator did it themselves between sessions. Verified live: 3
+  approved reviews now exist where session 17 ended at zero, and Export's
+  default `approved` filter is confirmed non-empty. This closes the last open
+  item from the original phase plan.
 
 ## Optional automation
 

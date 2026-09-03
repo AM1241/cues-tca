@@ -1,27 +1,34 @@
 # Session handoff — CUES Editorial Cloud
 
-Last updated: 2026-09-03 (session 17 — the encoding corruption is diagnosed,
-proved and repaired, the corpus re-anonymised on top of it, and the output shape
-corrected to the one publication per period the original specification asks for).
+Last updated: 2026-09-04 (session 18 — Sources gets an admin tier and a real
+delete, generated copy gets the same, and Objective is reorganised around what
+each setting actually reaches instead of being a flat stack of eleven sections).
 Read this first, then `MIGRATION_PLAN.md`. This file is the single "where are
 we" pointer between working sessions.
 
-## Verified state at the end of session 17 (checked 2026-09-03)
+## Verified state at the end of session 18 (checked 2026-09-04)
 
 Everything below was confirmed against the live systems, not inferred from the
-repo. Session 17 **did change data**: the encoding repair and a full
-re-anonymisation were applied, then the clusters and generated copy were rebuilt
-on top of them, and the frontend title-leak fix was deployed.
+repo.
 
 | | |
 | --- | --- |
 | Branch | `phase6-frontend-binding`, clean, in sync with `origin` |
-| Head | session 17's commits sit on top of `1d9cc0a`, starting at `cb33a11` (the encoding repair) |
+| Head | `a666e41` |
 | Project | `bxaovkzemfyxrxbcqask` (`cues-tca`, eu-west-1) |
-| Migrations applied | through **0024**; `schema_migrations` rows match the files |
-| Edge Functions | `generate` **v5** (publication support), `anonymize-worker` v11, `cluster` v5, `discover-brands` v5, `score-worker` v10, `ingest` v9 — all ACTIVE |
-| Frontend | live bundle on cues-tca.netlify.app is `index-qqNChnQe.js`, **byte-identical** to the local `npm run build` (md5 `e4ff5fb8…`, 535,863 bytes) — carries the publication UI and the title-leak fix |
-| Tests | `deno test generate/__tests__/` → **20 passed, 0 failed**, 1 ignored. The full suite was last run whole in session 16 (105 passed). |
+| Migrations applied | through **0027**; `schema_migrations` rows match the files |
+| Edge Functions | `discover-brands` **v6** (lookback-bounded), `generate` v5, `anonymize-worker` v11, `cluster` v5, `score-worker` v10, `ingest` v9 — all ACTIVE |
+| Frontend | live bundle on cues-tca.netlify.app is `index-DC0nDJW-.js`, **byte-identical** to the local `npm run build` (md5 `ff139af3…`, 550,324 bytes) |
+| Tests | No new Deno suites this session — see "Not done this session" below. `generate/__tests__/` last run whole in session 17 (20 passed). The two new RPCs (0026, 0027) were verified live and inside rolled-back transactions instead; see their sections. |
+| Editors | 1 row, `hzafeiris@f-in.eu`, `role = 'admin'` — the only account, so every non-admin test this session used a simulated JWT inside a transaction that was rolled back, never a second real account |
+| Sources | **5**: European Commission, Fratelli Branca Distillerie, MASAF, STAR/GBfoods, Tecnoalimenti (added this session — see below) |
+| Reviews | 47 total: **3 approved**, 3 superseded, 41 draft. Export's default `approved` filter is no longer empty — confirmed live: 2 approved `publication` posts exist and match it. |
+
+**The Phase 7 gate is closed.** MIGRATION_PLAN.md's last unchecked box —
+"an editor completes collect → score → generate → approve → export on the
+production URL" — asked for a human, not code. The operator did it themselves
+between sessions: 3 approvals now exist where session 17 ended at zero. Checked
+off below.
 
 **Data left behind by session 16's live tests.** The cluster *"Più controlli,
 più sicurezza"* now carries three generation results — the original (superseded),
@@ -35,6 +42,300 @@ SQL and is not obviously worth it.
 of it — 81 posts, 0 failures. "Made in Italy" and the public bodies are preserved
 again, and the accented brand aliases match for the first time. Full account in
 Session 17 below, including what it left stale.
+
+## Session 18 — an admin tier, a real delete on both sides, and an Objective screen that says where it goes (2026-09-04)
+
+Ten commits, walking through an operator's actual use of the product rather
+than a planned feature list — most of this started as a question ("can I
+delete a source?", "why did this say 0 when it clearly ran?") that turned up a
+real gap once it was chased down.
+
+### A user guide exists, but is not in git
+
+Before the code work: a full Word document was generated — cover page, one
+section per screen, step-by-step instructions, 14 screenshots taken from the
+live production site with a real login (Playwright, not mockups) — and sent
+directly to the operator, with a copy left on their Desktop. It is not a repo
+artefact and carries no version history here.
+
+**It is already slightly behind** everything below: it documents the nav order
+before the reorder, the Sources form before the admin lock and the URL/address
+merge. Worth a short refresh pass before it is handed to anyone else, not a
+blocker for anything in this file.
+
+### Nav bar reordered to match the pipeline (`c40e78e`)
+
+Was Posts, Sources, Objective, Clusters, Generate, Review, Export — build-date
+order. Now **Sources, Objective, Posts, Clusters, Generate, Review, Export**,
+matching CLAUDE.md's own pipeline description, and the post-login landing route
+moved from `/posts` to `/sources` for the same reason: the first thing done
+with this tool is collect, not read scores that do not exist yet.
+
+### Sources gets an admin tier (`0025_source_admin_lock.sql`, `03b221f`)
+
+`editors.role` (`'editor'` | `'admin'`) has existed since the very first RLS
+migration and had never been read by anything — every editor had identical
+privileges. `is_admin()` mirrors `is_editor()`; creating a source and changing
+its name/url/type/company_name/collection address is now admin-only.
+`lookback_days` and the enabled toggle stay open to every editor, on the
+operator's explicit instruction — pausing or resuming collection is routine
+operation, not configuration.
+
+RLS cannot express "any editor may update these two columns, only an admin may
+touch the rest" on its own: editor and admin both map to the Postgres role
+`authenticated`, so there is no column-level GRANT to lean on the way
+`cluster_generation_reviews` does for the service_role/authenticated split. A
+`BEFORE UPDATE` trigger does the column check instead, and rejects outright —
+not silently reverts — anything outside the two allowed columns for a
+non-admin. **Verified: 6/6 scenarios inside a rolled-back transaction**
+(non-admin insert rejected, non-admin protected-column update rejected,
+non-admin lookback+enabled update succeeds, and the same three checks for
+admin succeeding) before being applied, then the admin path re-verified
+against the live API.
+
+**The non-admin frontend branch (a lookback-only edit form, "Add source"
+hidden) was never seen live.** There is only one real account, and downgrading
+it — even briefly — to see the non-admin UI risked interfering with the
+operator's own concurrent use of the tool, so it was skipped deliberately. The
+code path is simple, deterministic React (`isAdmin ? fullForm : lookbackOnly`)
+and was read carefully, not just written.
+
+### URL and the collection address became one field, on request
+
+The operator's ask: stop showing "RapidAPI" — it names the vendor behind
+collection, which should not be visible — and stop asking for the same value
+twice. **Checked before merging anything**: `url` and the field that actually
+drives collection are byte-identical for 3 of 5 real sources, but **MASAF and
+Fratelli Branca Distillerie genuinely need them to differ** (a posts-feed URL
+for a human vs. the bare company page the collector needs), proven against the
+live provider in an earlier session. A blind merge would have broken both
+silently.
+
+Shipped instead: one visible field ("URL"), plus a collapsed "Collect from a
+different address (rare)" field — never named after the vendor — that defaults
+empty (meaning "same as URL") and is pre-expanded only when editing a source
+that already has a real override. Functionality for the two sources that need
+it is unchanged; the common case is one field, not two.
+
+A list-row note surfacing this divergence to admins was added, then removed
+one message later on the operator's ask (`52e4abf`) — it is still visible and
+editable in the Edit popup, just not cluttering the list.
+
+### Why Tecnoalimenti said 0 when it had just run successfully
+
+The operator added Tecnoalimenti as a 5th source (closing a gap flagged
+earlier: the original specification names 5 sources, only 4 existed) and hit
+three real things in one sitting, all now fixed:
+
+1. First `Collect` attempt: `skipped`, `no_rapidapi_identifier` — the field
+   was labelled **"(optional)"** although ingest skips a source outright
+   without it. Fixed by the field merge above; the field that drives
+   collection is no longer separately labelled at all.
+2. Second attempt: `ok`, 46 posts fetched, **0 inserted** — all 46 were older
+   than the 30-day lookback. `last_fetched_at` still updated, because it
+   stamps "the provider round-trip succeeded," not "something new arrived" —
+   confirmed against `stamp_source_last_fetched()` (0007), which fires on
+   `status = 'ok'` regardless of post count.
+3. The toast never said *why* it was 0 — `posts_skipped_out_of_window` was
+   already in the ingest response and simply was not surfaced. Fixed: the
+   toast now reads e.g. `"0 new, 46 outside your lookback window"`.
+
+Widening the lookback on a third attempt got 3 real posts in. All three fixes
+are in `frontend/src/routes/Sources.tsx`.
+
+### `discover-brands` (Find Names) now respects the source's own lookback (`5a5b35d`, deployed as **v6**)
+
+It read the N most recent posts ever collected, unbounded by date — a source
+with a long history could surface brand names from copy far outside anything
+currently being collected. Now bounded by `sources.lookback_days`, the same
+window `Collect` itself uses, applied as a `.gte('published_at', …)` filter
+before the existing sample-size cap.
+
+**Verified live, both directions**: European Commission (15-day lookback) now
+reads exactly the 20 posts inside that window. Fratelli Branca and
+STAR/GBfoods currently have nothing published inside their windows and
+correctly return the existing empty result at zero cost — not a bug, the
+direct and correct consequence of the fix.
+
+### An admin can permanently delete a source (`0026_purge_source.sql`, `09dff8e`)
+
+0002 shipped deliberately with no DELETE path for `sources`:
+`raw_posts.source_id` is `ON DELETE RESTRICT`, and nine tables read from
+`raw_posts`, so any source with real history is load-bearing. The operator's
+need was real and distinct from disabling: a source added by mistake, or one
+that should genuinely leave no trace.
+
+Before writing anything, every FK touching `raw_posts` and `anonymize_results`
+was mapped against `pg_constraint` — a mix of `CASCADE` and `RESTRICT` in an
+order that matters (`clustering_run_posts` restricts on *both* and must be
+cleared first; `anonymize_results` before `raw_posts`; the remaining
+`RESTRICT` children after). `purge_source()` follows that exact order inside
+one transaction.
+
+**The one check nothing in the schema can enforce on its own**:
+`cluster_generation_results.raw_post_ids` is a plain `uuid[]`, because Postgres
+cannot put a foreign key on an array element. That is precisely the reference
+that matters most — it is the traceability behind copy an editor may have
+already approved. `purge_source()` checks it explicitly and **refuses
+outright** if any of the source's posts are cited by a generation result,
+naming which results and whether any are approved, rather than silently
+orphaning a citation nothing else could have caught.
+
+**Verified: 6 scenarios inside a rolled-back transaction** — non-admin
+rejected; admin blocked from purging MASAF (71 posts, 18 citations, 3
+approved, all named in the refusal); admin cleanly purging Tecnoalimenti (0
+citations) with every one of the 9 touched tables confirmed empty afterward —
+then the MASAF refusal re-verified live against the real API, full message
+included in this file's own history (`09dff8e`'s commit body). **Not actually
+applied to any real source** — every test ran inside `begin; … rollback;`.
+Today, only **European Commission** and **Tecnoalimenti** have zero citations
+in generated copy and could be purged without a refusal; the other three all
+currently would be blocked.
+
+Frontend: a red "Delete" per row, admin-only, opening a confirm dialog that
+states the consequence and offers the enabled toggle as the reversible
+alternative before the destructive one.
+
+### An admin can permanently delete one generated result, even an approved one (`0027_admin_delete_generation_result.sql`, `3bb87be`)
+
+The direct follow-on from the above: `purge_source`'s refusal on MASAF names
+copy that blocks it, three pieces of it approved, and there was no way to act
+on that on purpose. `cluster_generation_results` has been append-only by
+trigger since 0016, no exception, for anyone — and session 16 built "an
+approval is never revoked" on that same premise. Both govern what the
+**system** does automatically (regeneration, re-scoring); the operator asked
+for a deliberate **admin** action instead, and confirmed explicitly — asked
+directly, given what it means — that it should work even on an approved
+result.
+
+The trigger now allows exactly one exception: `DELETE` when a
+transaction-local flag (`cues.allow_result_delete`) is set. Nothing reachable
+from PostgREST can set that flag — only `admin_delete_generation_result()`
+does, immediately before the one delete it performs, scoped to that
+transaction alone. `UPDATE` stays blocked unconditionally, for everyone,
+always. Pointers *from* elsewhere *to* the deleted result
+(`regenerates_result_id`, `superseded_by_result_id`) are cleared rather than
+blocking the delete or being left dangling — losing "this was a regeneration
+of X" is an acceptable trade against the alternative of the feature being
+useless for exactly the case it exists for.
+
+**Verified inside a rolled-back transaction**, including a rigged scenario
+built specifically to prove the pointer-clearing *fires* rather than merely
+not erroring (no real row happened to have one at test time, so one was
+planted): non-admin rejected; a draft deleted cleanly; an **approved** result
+deleted cleanly (`was_approved: true` correctly reported); both planted
+dangling pointers confirmed nulled; a raw `UPDATE` and a raw `DELETE`
+bypassing the RPC both still rejected — at the **grant level**, before the
+trigger even runs, a second layer of defence that was not deliberately added
+and was a welcome surprise on discovery; the other two approved results
+confirmed untouched throughout. Re-verified live with a nonexistent UUID
+(clean 404-style rejection, proving the function is reachable and gated).
+
+Frontend: a visually separated red "Danger zone" at the bottom of Review's
+detail pane, admin-only, with its own confirm dialog that names the result and
+warns explicitly when deleting it will remove it from Export.
+
+**Nothing has actually been deleted with either RPC.** MASAF's 3 approved
+citations and 15 drafts are all still exactly where they were; deleting them
+to actually unblock a source purge is the operator's call, one row at a time,
+whenever they choose to make it.
+
+### Objective reorganised around what each setting actually reaches (`31041c0`)
+
+The operator's read: eleven flat sections gave no indication of where a change
+landed. Fixed by reading the actual prompt-builder code — grep, not memory —
+before touching any UI, to map every field precisely:
+
+- `score-worker/prompt.ts` substitutes only `{{DOMAIN}}` and `{{THEMES}}`.
+- `cluster/prompt.ts`'s `buildBrief` reads the same two.
+- `generate/prompt.ts` reads domain, themes, and all three voice fields.
+- `anonymize-worker` reads the two `domain_generic_entity` fields, the three
+  toggles, `company_aliases`, and — the one field that reaches two screens —
+  `min_relevance_score`, via `backfill_anonymize_jobs` defaulting to it when
+  called with `null`.
+
+Regrouped into four numbered stages, each carrying which screen(s) it reaches
+as a coloured badge using the nav bar's own names: **Scope** (Domain, Themes →
+Posts, Clusters *and* Generate, honestly, since all three genuinely read them),
+**Deciding what's relevant** (Relevance threshold, Scoring engine → Posts —
+the threshold's hint now says it gates Clusters too, not generation alone),
+**Anonymising and grouping** (the two Anonymised-wording fields moved out of
+"Editorial scope," where they had no functional connection, into here where
+they are actually read; Anonymisation toggles; Company and brand names;
+Clustering → Clusters), **Writing the final text** (Tone, Audience, and the
+renamed brief field → Generate).
+
+**"Style" is renamed "Editorial brief" and upgraded to a textarea.** It was
+never a stylistic descriptor: `generate/prompt.ts` reads
+`config.voice_style` as *the* main brief text, falling back to a
+domain-derived sentence only when blank. **Confirmed live, and left as a
+finding rather than fixed**: the field's current stored value is *"Find posts
+most relevant to the current editorial objective"* — a scoring-sounding
+instruction sitting in the one field that should say what the publication is
+actually about. The content is the operator's call.
+
+Verified visually against a local `vite preview` build on real production
+data before deploying, not just compiled — every stage header, the moved
+fields, and the renamed textarea confirmed by screenshot.
+
+### Scoring model is a closed dropdown, not free text (`a666e41`)
+
+"Model" and "Pinned build" were two plain text inputs. Pinned build is not
+cosmetic: `score-worker` sends `request.model_snapshot` to OpenAI as the
+literal model parameter on every scoring call, copied from this field the
+moment a scoring request opens. A typo there does not fail on save — it fails
+quietly on every score afterwards.
+
+Confirmed there is exactly **one** model this pipeline's own code ever calls:
+`gpt-5.4-nano-2026-03-17` is hardcoded as the default in `score-worker`,
+`anonymize-worker`, `cluster`, `generate` and `discover-brands` alike.
+Replaced the two fields with one dropdown carrying that one pair — same
+reasoning already applied to "Combining theme scores" next to it: a closed
+list of one real option today, so a second is a visible choice later rather
+than free text now. A stored value that does not match the known list (from
+before this shipped, or written directly in the database) is shown labelled
+"not a standard option," never silently swapped for the first real one.
+
+Verified against a local preview build on real data: the live value
+(`gpt-5.4-nano-2026-03-17`) selects cleanly with no fallback warning.
+
+### Clusters explains a 0-cluster run instead of hiding the button
+
+Answers an operator question directly: with 1 eligible post, a cluster can
+never form regardless of settings (`groupBySimilarity`, `cluster/grouping.ts`,
+needs at least `min_cluster_size` — default 2 — similar posts to keep a
+group). With exactly 2, it depends on whether their cosine similarity clears
+the configured threshold (default 0.75); if not, both become "unclustered."
+Either way, the "Create the publication" panel used to simply not render, with
+no explanation.
+
+Now states the three distinguishable cases (zero embedded / exactly one /
+several but not similar enough) with a concrete next step. **Verified against
+a real run already sitting in history, not a synthetic one**: a local preview
+build against production data found a genuine 0-cluster run (7 posts
+embedded, all still "unclustered"), and the new message renders exactly as
+intended against it.
+
+### Not done this session, worth naming
+
+- **No Deno test files were added for `purge_source` or
+  `admin_delete_generation_result`.** Both were verified exhaustively but only
+  via rolled-back SQL transactions and live API calls in this conversation,
+  not committed, repeatable test suites. Given both are destructive,
+  admin-only, and now load-bearing for how the operator plans to unblock
+  MASAF, they are strong candidates for real coverage next.
+- The user guide Word document was not refreshed to match the nav reorder,
+  the admin lock, or the URL/address merge.
+- `min_cluster_size`'s UI floor stayed at 2 even though the database itself
+  permits `>= 1` (`0014`'s own CHECK constraint) — noted, not changed; a
+  1-post "cluster" is arguably not a cluster at all, and nobody asked for it.
+- The Editorial brief field's evidently-wrong content was flagged, not fixed.
+- Deploys were unusually slow twice this session (one push took ~20 minutes
+  and needed an empty-commit nudge before it landed; another took ~140s where
+  every other deploy all session took ~20s) — Netlify-side, not code; GitHub
+  showed no commit status for either push, and this environment has no
+  Netlify CLI/dashboard access to see why. Worth a glance at the Netlify
+  dashboard's own deploy log if it keeps happening.
 
 ## Session 17b — the output shape was wrong, and now is not (2026-09-03)
 
