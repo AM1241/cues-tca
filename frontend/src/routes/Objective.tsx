@@ -42,6 +42,24 @@ function toThemeId(label: string): string {
   return label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/(^_|_$)/g, '')
 }
 
+/**
+ * Known-good (alias, pinned build) pairs for the scoring model. This used to
+ * be two free-text fields — an operator could type anything into "Pinned
+ * build", and that exact string is what score-worker sends to OpenAI as the
+ * model parameter (`request.model_snapshot`, set from this value when the
+ * request is created). A typo here does not fail loudly on save; it fails
+ * quietly on every score the next time the queue drains.
+ *
+ * Deliberately a closed list of one, same reasoning as "Combining theme
+ * scores" below: gpt-5.4-nano-2026-03-17 is the only build this pipeline's
+ * own code ever calls (score-worker, anonymize-worker, cluster, generate,
+ * discover-brands all hardcode it as their own default). The list exists so
+ * a second, real option is a visible choice later, not a free-text box today.
+ */
+const MODEL_OPTIONS = [
+  { model: 'gpt-5.4-nano', snapshot: 'gpt-5.4-nano-2026-03-17', label: 'gpt-5.4-nano (build 2026-03-17)' },
+] as const
+
 function toDraft(c: Config, themes: Theme[]): Draft {
   const aliasObj = (c.company_aliases ?? {}) as Record<string, string>
   return {
@@ -287,18 +305,31 @@ export function Objective() {
         hint="Which model scores a post, and how its per-theme scores become one number."
       >
         <div className="space-y-3">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <TextField
-              label="Model"
-              value={draft.scoring_model}
-              onChange={(v) => patch({ scoring_model: v })}
-            />
-            <TextField
-              label="Pinned build"
+          <label className="block text-sm">
+            <span className="mb-1 block font-medium text-slate-700">Model</span>
+            <select
               value={draft.scoring_model_snapshot}
-              onChange={(v) => patch({ scoring_model_snapshot: v })}
-            />
-          </div>
+              onChange={(e) => {
+                const opt = MODEL_OPTIONS.find((o) => o.snapshot === e.target.value)
+                if (opt) patch({ scoring_model: opt.model, scoring_model_snapshot: opt.snapshot })
+              }}
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm sm:w-auto"
+            >
+              {/* A value saved before this became a closed list — or written
+                  directly in the database — is shown, not silently swapped for
+                  the first real option the moment this screen loads. */}
+              {!MODEL_OPTIONS.some((o) => o.snapshot === draft.scoring_model_snapshot) && (
+                <option value={draft.scoring_model_snapshot}>
+                  {draft.scoring_model_snapshot || '(none set)'} — not a standard option
+                </option>
+              )}
+              {MODEL_OPTIONS.map((o) => (
+                <option key={o.snapshot} value={o.snapshot}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </label>
           <label className="block text-sm">
             <span className="mb-1 block font-medium text-slate-700">
               Combining theme scores
@@ -318,10 +349,13 @@ export function Objective() {
             choice rather than a hidden default.
           </p>
           <p className="text-xs text-slate-500">
-            The pinned build is the exact dated model recorded on every score, so a
-            result can still name what produced it after the alias moves. Changing
-            either field opens a new scoring request the next time you queue —
-            existing scores stay until you re-score.
+            Model used to be two free-text fields — an alias and its exact dated
+            build. The dated build is what actually reaches OpenAI on every score, so
+            a typo there did not fail on save; it failed quietly on every score
+            afterwards. It's a closed list for the same reason "Combining theme
+            scores" is: one real option today, so a second is a visible choice
+            rather than free text. Changing it opens a new scoring request the next
+            time you queue — existing scores stay until you re-score.
           </p>
         </div>
       </Section>
