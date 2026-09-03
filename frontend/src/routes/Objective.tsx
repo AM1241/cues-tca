@@ -158,7 +158,7 @@ export function Objective() {
 
   return (
     <div className="max-w-2xl">
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-2 flex items-center justify-between">
         <h1 className="text-xl font-semibold">Editorial objective</h1>
         <div className="flex items-center gap-3">
           {dirty && (
@@ -173,11 +173,21 @@ export function Objective() {
           </button>
         </div>
       </div>
+      <p className="mb-6 text-sm text-slate-500">
+        Grouped by which screen a change actually reaches — every group below names it.
+        Nothing here takes effect on its own: Posts still needs Score now, Clusters still
+        needs Run clustering, on the settings that were active at the time.
+      </p>
 
-      <Section
-        title="Editorial scope"
-        hint="What this publication is actually about. Themes are angles within this scope, not the scope itself."
-      >
+      {/* ============================================================ */}
+      <StageHeader
+        n={1}
+        title="Scope"
+        reaches={['Posts', 'Clusters', 'Generate']}
+        detail="The domain and the themes are read almost everywhere: they shape the scoring rubric, name the clusters, and appear in the final text's brief. Get these right first — everything else narrows within them."
+      />
+
+      <Section title="Domain">
         <TextField
           label="Domain"
           value={draft.editorial_domain}
@@ -188,23 +198,11 @@ export function Objective() {
           strongly it matches one in the abstract — an unrelated sector's
           sustainability story is not a sustainability story for this publication.
         </p>
-        <div className="mt-4 space-y-3">
-          <TextField
-            label="Anonymised company wording"
-            value={draft.domain_generic_entity}
-            onChange={(v) => patch({ domain_generic_entity: v })}
-          />
-          <TextField
-            label="…and for a second organisation in the same post"
-            value={draft.domain_generic_entity_alt}
-            onChange={(v) => patch({ domain_generic_entity_alt: v })}
-          />
-        </div>
       </Section>
 
       <Section
         title="Themes"
-        hint="The angles the scorer rates each post against, within the domain above."
+        hint="The angles Posts scores each item against, within the domain above."
       >
         <div className="flex flex-wrap gap-2">
           {draft.themes.map((t) => (
@@ -250,29 +248,17 @@ export function Objective() {
         </p>
       </Section>
 
-      <Section title="Voice" hint="Passed to the generator's prompt.">
-        <div className="space-y-3">
-          <TextField
-            label="Tone"
-            value={draft.voice_tone}
-            onChange={(v) => patch({ voice_tone: v })}
-          />
-          <TextField
-            label="Audience"
-            value={draft.voice_audience}
-            onChange={(v) => patch({ voice_audience: v })}
-          />
-          <TextField
-            label="Style"
-            value={draft.voice_style}
-            onChange={(v) => patch({ voice_style: v })}
-          />
-        </div>
-      </Section>
+      {/* ============================================================ */}
+      <StageHeader
+        n={2}
+        title="Deciding what's relevant"
+        reaches={['Posts']}
+        detail="Controls the Posts screen only: which model scores an item, and which scored items are worth carrying forward at all."
+      />
 
       <Section
         title="Relevance threshold"
-        hint="Posts below this overall score are excluded from generation."
+        hint="Posts below this score are excluded from BOTH anonymisation and the final text — not generation alone."
       >
         <div className="flex items-center gap-4">
           <input
@@ -290,6 +276,10 @@ export function Objective() {
             {draft.min_relevance_score}
           </span>
         </div>
+        <p className="mt-2 text-xs text-slate-500">
+          A post scoring below this never becomes eligible for Anonymise now on
+          Clusters either — this is the one setting that reaches two screens at once.
+        </p>
       </Section>
 
       <Section
@@ -336,45 +326,29 @@ export function Objective() {
         </div>
       </Section>
 
+      {/* ============================================================ */}
+      <StageHeader
+        n={3}
+        title="Anonymising and grouping"
+        reaches={['Clusters']}
+        detail="Everything here runs on the Clusters screen: what a company name becomes once hidden, which names are hidden at all, and how similar posts are grouped into the themes a publication is built from."
+      />
+
       <Section
-        title="Clustering"
-        hint="How anonymised posts are grouped into themes before generation."
+        title="Anonymised wording"
+        hint="What a hidden company becomes in the text — for the source itself, and for a second organisation named in the same post."
       >
         <div className="space-y-3">
-          <label className="block text-sm">
-            <span className="mb-1 block font-medium text-slate-700">
-              Similarity threshold
-            </span>
-            <div className="flex items-center gap-4">
-              <input
-                type="range"
-                min={0.5}
-                max={0.95}
-                step={0.01}
-                value={draft.cluster_similarity_threshold}
-                onChange={(e) =>
-                  patch({ cluster_similarity_threshold: Number(e.target.value) })
-                }
-                className="w-64"
-              />
-              <span className="w-12 text-right font-semibold tabular-nums">
-                {draft.cluster_similarity_threshold.toFixed(2)}
-              </span>
-            </div>
-          </label>
-          <label className="block text-sm">
-            <span className="mb-1 block font-medium text-slate-700">
-              Minimum cluster size
-            </span>
-            <input
-              type="number"
-              min={2}
-              max={20}
-              value={draft.min_cluster_size}
-              onChange={(e) => patch({ min_cluster_size: Number(e.target.value) })}
-              className="w-24 rounded-md border border-slate-300 px-3 py-2"
-            />
-          </label>
+          <TextField
+            label="Anonymised company wording"
+            value={draft.domain_generic_entity}
+            onChange={(v) => patch({ domain_generic_entity: v })}
+          />
+          <TextField
+            label="…and for a second organisation in the same post"
+            value={draft.domain_generic_entity_alt}
+            onChange={(v) => patch({ domain_generic_entity_alt: v })}
+          />
         </div>
       </Section>
 
@@ -452,6 +426,140 @@ export function Objective() {
           </button>
         </div>
       </Section>
+
+      <Section
+        title="Clustering"
+        hint="How anonymised posts are grouped into themes, still on the Clusters screen."
+      >
+        <div className="space-y-3">
+          <label className="block text-sm">
+            <span className="mb-1 block font-medium text-slate-700">
+              Similarity threshold
+            </span>
+            <div className="flex items-center gap-4">
+              <input
+                type="range"
+                min={0.5}
+                max={0.95}
+                step={0.01}
+                value={draft.cluster_similarity_threshold}
+                onChange={(e) =>
+                  patch({ cluster_similarity_threshold: Number(e.target.value) })
+                }
+                className="w-64"
+              />
+              <span className="w-12 text-right font-semibold tabular-nums">
+                {draft.cluster_similarity_threshold.toFixed(2)}
+              </span>
+            </div>
+          </label>
+          <label className="block text-sm">
+            <span className="mb-1 block font-medium text-slate-700">
+              Minimum cluster size
+            </span>
+            <input
+              type="number"
+              min={2}
+              max={20}
+              value={draft.min_cluster_size}
+              onChange={(e) => patch({ min_cluster_size: Number(e.target.value) })}
+              className="w-24 rounded-md border border-slate-300 px-3 py-2"
+            />
+          </label>
+        </div>
+      </Section>
+
+      {/* ============================================================ */}
+      <StageHeader
+        n={4}
+        title="Writing the final text"
+        reaches={['Generate']}
+        detail="Read only when a post or publication is actually written on the Clusters screen's Create publication button. Nothing here touches scoring or anonymisation."
+      />
+
+      <Section
+        title="Editorial brief"
+        hint="The main instruction: what this publication is trying to say, and why. This is the field that used to be labelled “Style” — it is a direction, not a stylistic descriptor."
+      >
+        <label className="block text-sm">
+          <textarea
+            value={draft.voice_style}
+            onChange={(e) => patch({ voice_style: e.target.value })}
+            rows={3}
+            placeholder="e.g. Highlight how organisations in this sector communicate change, value and responsibility, and give the institutional context around them."
+            className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+          />
+        </label>
+        <p className="mt-2 text-xs text-slate-500">
+          Left blank, the generator falls back to a generic sentence built from the
+          Domain above — usable, but worth writing your own once you know what this
+          publication is actually for.
+        </p>
+      </Section>
+
+      <Section title="Voice" hint="Shorter dials on the same text — tone and who it's written for.">
+        <div className="space-y-3">
+          <TextField
+            label="Tone"
+            value={draft.voice_tone}
+            onChange={(v) => patch({ voice_tone: v })}
+          />
+          <TextField
+            label="Audience"
+            value={draft.voice_audience}
+            onChange={(v) => patch({ voice_audience: v })}
+          />
+        </div>
+      </Section>
+    </div>
+  )
+}
+
+const STAGE_COLORS: Record<string, string> = {
+  Posts: 'bg-blue-100 text-blue-700',
+  Clusters: 'bg-violet-100 text-violet-700',
+  Generate: 'bg-teal-100 text-teal-700',
+}
+
+/**
+ * One per pipeline stage. Exists because the flat stack of sections this
+ * screen used to be gave no indication of where a change actually landed —
+ * an operator could not tell "Style" only ever reached Generate, or that
+ * Relevance threshold reaches both Posts and Clusters, without reading the
+ * source. The `reaches` badges are the same names as the nav bar and the
+ * button an operator will actually press next.
+ */
+function StageHeader({
+  n,
+  title,
+  reaches,
+  detail,
+}: {
+  n: number
+  title: string
+  reaches: string[]
+  detail: string
+}) {
+  return (
+    <div className="mb-3 mt-8 first:mt-0">
+      <div className="flex items-center gap-2">
+        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-slate-900 text-xs font-semibold text-white">
+          {n}
+        </span>
+        <h2 className="text-base font-semibold text-slate-900">{title}</h2>
+        <span className="text-slate-300">·</span>
+        <div className="flex gap-1.5">
+          {reaches.map((r) => (
+            <span
+              key={r}
+              className={`rounded px-1.5 py-0.5 text-xs font-medium ${STAGE_COLORS[r] ?? 'bg-slate-100 text-slate-600'}`}
+            >
+              → {r}
+            </span>
+          ))}
+        </div>
+      </div>
+      <p className="mt-1 text-sm text-slate-500">{detail}</p>
     </div>
   )
 }
