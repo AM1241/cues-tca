@@ -1,28 +1,24 @@
 # Session handoff — CUES Editorial Cloud
 
-Last updated: 2026-09-04 (session 18 — Sources gets an admin tier and a real
-delete, generated copy gets the same, and Objective is reorganised around what
-each setting actually reaches instead of being a flat stack of eleven sections).
+Last updated: 2026-09-04 (session 19 — real Deno tests for purge_source and
+admin_delete_generation_result, which turned up and fixed a real bug: purge_source
+could never actually purge a source that had been scored or anonymised, i.e.
+nearly every real one).
 Read this first, then `MIGRATION_PLAN.md`. This file is the single "where are
 we" pointer between working sessions.
 
-## Verified state at the end of session 18 (checked 2026-09-04)
+## Verified state at the end of session 19 (checked 2026-09-04)
 
-Everything below was confirmed against the live systems, not inferred from the
-repo.
+Everything below is LOCAL — this session never touched the live project. No
+Supabase MCP access was available this session (see "Not done this session").
 
 | | |
 | --- | --- |
-| Branch | `phase6-frontend-binding`, clean, in sync with `origin` |
-| Head | `a666e41` |
-| Project | `bxaovkzemfyxrxbcqask` (`cues-tca`, eu-west-1) |
-| Migrations applied | through **0027**; `schema_migrations` rows match the files |
-| Edge Functions | `discover-brands` **v6** (lookback-bounded), `generate` v5, `anonymize-worker` v11, `cluster` v5, `score-worker` v10, `ingest` v9 — all ACTIVE |
-| Frontend | live bundle on cues-tca.netlify.app is `index-DC0nDJW-.js`, **byte-identical** to the local `npm run build` (md5 `ff139af3…`, 550,324 bytes) |
-| Tests | No new Deno suites this session — see "Not done this session" below. `generate/__tests__/` last run whole in session 17 (20 passed). The two new RPCs (0026, 0027) were verified live and inside rolled-back transactions instead; see their sections. |
-| Editors | 1 row, `hzafeiris@f-in.eu`, `role = 'admin'` — the only account, so every non-admin test this session used a simulated JWT inside a transaction that was rolled back, never a second real account |
-| Sources | **5**: European Commission, Fratelli Branca Distillerie, MASAF, STAR/GBfoods, Tecnoalimenti (added this session — see below) |
-| Reviews | 47 total: **3 approved**, 3 superseded, 41 draft. Export's default `approved` filter is no longer empty — confirmed live: 2 approved `publication` posts exist and match it. |
+| Branch | `phase6-frontend-binding`, **not yet committed**: `0028_purge_source_append_only_fix.sql` and `supabase/functions/_admin_rpcs/__tests__/` (3 files) are new and untracked |
+| Local stack | `supabase start` + `db reset` on Docker, migrations through **0028** applied clean |
+| Project (live, unchanged this session) | `bxaovkzemfyxrxbcqask` (`cues-tca`, eu-west-1) — still on migration **0027**; 0028 has NOT been applied here, on purpose, pending the operator's go-ahead |
+| Tests | **17 new Deno test steps, all green**, against the local stack (real Docker Postgres, not a rolled-back transaction or a live call): `_admin_rpcs/__tests__/purge_source_test.ts` (6 steps) and `_admin_rpcs/__tests__/admin_delete_generation_result_test.ts` (8 steps), sharing `fixtures.ts`. See below for what they cover and how the fix was proven to matter. |
+| Sources / Reviews | Unchanged from session 18 — 5 sources, 47 reviews (3 approved). MASAF is still blocked from purge exactly as it was; nothing about live data changed this session. |
 
 **The Phase 7 gate is closed.** MIGRATION_PLAN.md's last unchecked box —
 "an editor completes collect → score → generate → approve → export on the
@@ -42,6 +38,134 @@ SQL and is not obviously worth it.
 of it — 81 posts, 0 failures. "Made in Italy" and the public bodies are preserved
 again, and the accented brand aliases match for the first time. Full account in
 Session 17 below, including what it left stale.
+
+## Session 19 — Deno tests for the two admin RPCs found a real bug in one of them (2026-09-04)
+
+Picked up the single item session 18 flagged as most worth doing next: "no Deno
+test files were added for `purge_source` or `admin_delete_generation_result`."
+Writing real tests against a real database is what found the bug below — neither
+the live calls nor the rolled-back transactions session 18 verified with happened
+to exercise the one shape that mattered.
+
+### purge_source could never purge a real source
+
+`purge_source()` (0026) deletes from `scoring_results` and `anonymize_results` as
+part of its own documented contract — both counted in its return jsonb. Neither
+table's append-only trigger (0005, 0014) has ever had an exception, for anyone,
+including `SECURITY DEFINER` callers — that guarantee is what the rest of the
+schema relies on. The consequence: `purge_source` raised
+`"scoring_results is append-only (DELETE blocked)"` and aborted the whole
+transaction the moment it reached a source that had been scored or anonymised
+even once — which is nearly every real source, since a `raw_posts` insert
+auto-enqueues scoring under an active production request.
+
+**Confirmed before writing any fix**, directly against a fresh local database in
+a rolled-back transaction: inserted a source, a post, one `scoring_results` row,
+then ran exactly the `delete from scoring_results where raw_post_id = any(...)`
+statement `purge_source` itself runs. It raised immediately.
+
+Every prior verification of `purge_source` (0026's own commit history) happened
+to purge Tecnoalimenti, which had zero citations *and*, apparently, no
+`scoring_results`/`anonymize_results` rows at the moment each test ran — so the
+gap was never exercised. **Today, purging MASAF to unblock it — the operator's
+actual stated goal — would have hit this exact error**, not the citation refusal
+0026 documents; 71 scored posts, not 18 cited ones, would have been the first
+wall.
+
+### The fix — `0028_purge_source_append_only_fix.sql`
+
+Mirrors 0027's own approach exactly, on the two tables 0027 left alone: a
+transaction-local flag (`cues.allow_purge_delete`, distinct from 0027's
+`cues.allow_result_delete` so each flag maps to exactly one calling function on
+exactly the tables it may touch), set once by `purge_source()` itself immediately
+before its ordered deletes, checked by both triggers. `UPDATE` stays blocked
+unconditionally for everyone, always, on both tables — only this one `DELETE`
+path, from this one function, is exempted.
+
+**Proven to be the actual fix, not just plausible**: with 0028 removed and the
+database reset to 0027, the new "clean purge" test (below) fails with exactly
+`anonymize_results is append-only (DELETE blocked)` — the same error found by
+hand above. Restoring 0028 and resetting again turns it green. This is the
+regression test for the bug, not just a test that happens to pass.
+
+**Not applied to the live project.** `bxaovkzemfyxrxbcqask` is still on 0027.
+Applying 0028 is the operator's call — see "Pending" below.
+
+### The tests — `supabase/functions/_admin_rpcs/__tests__/`
+
+New directory (underscore-prefixed, like `_shared`, so the Supabase CLI does not
+try to deploy it as a function — these two RPCs have no Edge Function handler of
+their own; the frontend calls them directly via PostgREST RPC, so the tests do
+too, through per-role **authenticated** clients built the same way
+`ingest/__tests__/handler_test.ts` already does it: a real Auth user, signed in
+for real, `is_admin()`/`is_editor()` reading a real `auth.uid()` — never the
+service-role key, which the RPCs would see as neither).
+
+`fixtures.ts` holds what both suites share: building a real scored → promoted →
+anonymised → embedded → clustered post. Every table on that path
+(`scoring_results`, `scoring_job_state`, `scoring_dead_letter`,
+`anonymize_results`, `anonymize_job_state`, `anonymize_dead_letter`,
+`post_embeddings`, `clustering_runs`, `clustering_run_posts`, `clusters`,
+`cluster_generation_requests`, `cluster_generation_results`) grants
+`service_role` **SELECT only** — confirmed by grep across every migration before
+assuming otherwise — so every fixture row is built through the same
+`SECURITY DEFINER` RPCs the real score-worker/anonymize-worker/cluster functions
+use, never a raw insert.
+
+`purge_source_test.ts` (6 steps): both auth-gate rejections, not-found, the
+citation-block refusal (asserts the message names the blocking `cluster_label`,
+`result_id`, and `"approved":true`, and that nothing was touched), and the
+clean-purge regression test — a source with three posts covering every path
+`purge_source` claims to clear (full success chain including
+`clustering_run_posts`; scored-then-anonymize-dead-lettered; scoring-itself-
+dead-lettered) plus an `ingest_run_sources` row, asserting both the returned
+jsonb counts **and** that every one of those tables is actually empty afterward,
+including the `post_embeddings` cascade off the `anonymize_results` delete.
+
+`admin_delete_generation_result_test.ts` (8 steps): both auth-gate rejections,
+not-found, a clean draft delete, an **approved** delete (`was_approved: true`),
+and — the two pointer-clearing paths kept genuinely separate because they clear
+different columns in different directions — deleting an *older* result clears a
+newer regeneration's `cluster_generation_requests.regenerates_result_id` back-
+reference to it, while deleting a *newer* result (one recorded via
+`supersede_generation_review` as replacing an older draft) clears the older
+review's `superseded_by_result_id`. Also re-verifies, now as a permanent
+regression test rather than a one-off finding, session 18's "welcome surprise":
+a raw `UPDATE`/`DELETE` on `cluster_generation_results` fails at the **grant**
+level (`service_role` has no such grant at all) before the append-only trigger
+would even run.
+
+All 17 steps pass together in one run; see the run transcript pattern in
+`score-worker/__tests__/handler_test.ts`'s own header for how to invoke —
+same `docker run` shape, targeting `_admin_rpcs/__tests__/` instead.
+
+### A Windows/Git-Bash trap, worth adding to every test file's own header
+
+The `docker run -v "$PWD/...":/app -w /app ...` invocation documented at the top
+of every existing test file **does not work as written** from Git Bash on this
+machine: `$PWD` and the bind-mount path get silently mangled by MSYS path
+conversion, and Docker fails with `the working directory '.../app' is invalid`.
+Fix: prefix the command with `MSYS_NO_PATHCONV=1` and use `$(pwd -W)` (a real
+Windows path) in the volume mount instead of `$PWD`. Not yet propagated into the
+other test files' own header comments — worth doing in a pass if this keeps
+tripping people up.
+
+### Not done this session
+
+- **0028 was not applied to the live project.** Purging MASAF for real still
+  needs both this migration applied there and the operator deleting its 3
+  approved + 15 draft citing results first (unchanged from session 18).
+- **Nothing was committed or pushed.** `0028_purge_source_append_only_fix.sql`
+  and the three new files under `_admin_rpcs/__tests__/` are new, untracked.
+- **The Supabase MCP server had no valid access token this session** —
+  `execute_sql` returned `Unauthorized. Please provide a valid access token`.
+  Worked around by using the local Docker stack instead (which is the more
+  correct tool for writing/running a real test suite anyway), but the token in
+  `.mcp.json`/the environment is worth checking if quick live SQL is needed
+  next session.
+- The other three items from session 18's own "not done" list (the Editorial
+  brief content, the stale Word user guide, `min_cluster_size`'s UI floor) —
+  untouched, not in scope this session.
 
 ## Session 18 — an admin tier, a real delete on both sides, and an Objective screen that says where it goes (2026-09-04)
 
