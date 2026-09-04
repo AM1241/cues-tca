@@ -15,7 +15,7 @@ we" pointer between working sessions.
 | Migrations applied | through **0028** — confirmed against the live project, `migration list --linked` shows local and remote matching at 0028 |
 | Edge Functions | `slide-images` **deployed this session** (new), plus `discover-brands` v6, `generate` v5, `anonymize-worker` v11, `cluster` v5, `score-worker` v10, `ingest` v9 |
 | Tests | 24 offline Deno tests for `slide-images` (scripted fetch, no network) + session 19's 17 live-stack steps for the admin RPCs. Frontend `npm run build` clean. |
-| Frontend | the slide panel is **committed and pushed but its Netlify build was not confirmed before this session ended** — check the live bundle hash before assuming it is there |
+| Frontend | live bundle on cues-tca.netlify.app is `index-C1PbHM0E.js`, **identical to the local `npm run build`**. Netlify built in ~40s. Verified on the production URL as the real editor: the slide panel renders and all 7 thumbnails draw. |
 | Sources / Reviews | Unchanged — 5 sources, 47 reviews (3 approved). MASAF still blocked from purge; no live data was altered this session. |
 
 **The access token was never the problem, and session 19's record of it was
@@ -160,9 +160,10 @@ function, not a blocked origin. Run the dev server as
 
 ### Not done this session
 
-- **The Netlify build of the pushed frontend was never confirmed.** The commit
-  is on `origin`; whether the live bundle carries the slide panel was not
-  checked before the session ended.
+- **No real AI carousel has been produced end to end through the live UI.** The
+  function was proven live with a direct call, and the panel was proven live
+  with the free variant; the paid button on the production site has not been
+  pressed by anyone yet.
 - `docs/` was not given a page about the slide feature; this section is the
   only record.
 - The Word user guide (session 18) is now further behind — it does not mention
