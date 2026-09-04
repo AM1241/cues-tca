@@ -1,24 +1,39 @@
 # Session handoff — CUES Editorial Cloud
 
-Last updated: 2026-09-04 (session 19 — real Deno tests for purge_source and
-admin_delete_generation_result, which turned up and fixed a real bug: purge_source
-could never actually purge a source that had been scored or anonymised, i.e.
-nearly every real one).
+Last updated: 2026-09-04 (session 20 — a carousel can be downloaded as PNG
+slides, optionally over gpt-image-2 backgrounds; and the "expired" Supabase
+token that blocked session 19 turned out never to have been expired at all).
 Read this first, then `MIGRATION_PLAN.md`. This file is the single "where are
 we" pointer between working sessions.
 
-## Verified state at the end of session 19 (checked 2026-09-04)
-
-Everything below is LOCAL — this session never touched the live project. No
-Supabase MCP access was available this session (see "Not done this session").
+## Verified state at the end of session 20 (checked 2026-09-04)
 
 | | |
 | --- | --- |
-| Branch | `phase6-frontend-binding`, **not yet committed**: `0028_purge_source_append_only_fix.sql` and `supabase/functions/_admin_rpcs/__tests__/` (3 files) are new and untracked |
-| Local stack | `supabase start` + `db reset` on Docker, migrations through **0028** applied clean |
-| Project (live, unchanged this session) | `bxaovkzemfyxrxbcqask` (`cues-tca`, eu-west-1) — still on migration **0027**; 0028 has NOT been applied here, on purpose, pending the operator's go-ahead |
-| Tests | **17 new Deno test steps, all green**, against the local stack (real Docker Postgres, not a rolled-back transaction or a live call): `_admin_rpcs/__tests__/purge_source_test.ts` (6 steps) and `_admin_rpcs/__tests__/admin_delete_generation_result_test.ts` (8 steps), sharing `fixtures.ts`. See below for what they cover and how the fix was proven to matter. |
-| Sources / Reviews | Unchanged from session 18 — 5 sources, 47 reviews (3 approved). MASAF is still blocked from purge exactly as it was; nothing about live data changed this session. |
+| Branch | `phase6-frontend-binding`, clean, **pushed** — head `e369d16` |
+| Project | `bxaovkzemfyxrxbcqask` (`cues-tca`, eu-west-1) |
+| Migrations applied | through **0028** — confirmed against the live project, `migration list --linked` shows local and remote matching at 0028 |
+| Edge Functions | `slide-images` **deployed this session** (new), plus `discover-brands` v6, `generate` v5, `anonymize-worker` v11, `cluster` v5, `score-worker` v10, `ingest` v9 |
+| Tests | 24 offline Deno tests for `slide-images` (scripted fetch, no network) + session 19's 17 live-stack steps for the admin RPCs. Frontend `npm run build` clean. |
+| Frontend | the slide panel is **committed and pushed but its Netlify build was not confirmed before this session ended** — check the live bundle hash before assuming it is there |
+| Sources / Reviews | Unchanged — 5 sources, 47 reviews (3 approved). MASAF still blocked from purge; no live data was altered this session. |
+
+**The access token was never the problem, and session 19's record of it was
+wrong.** `SUPABASE_ACCESS_TOKEN` lives in `frontend/.env.local`, which neither
+`npx supabase` nor the MCP server ever reads — so both reported
+`Unauthorized`, and session 19 concluded the token was dead and spent the whole
+session working around a wall that did not exist. Passing it explicitly works:
+
+```bash
+TOKEN=$(node -e "…read SUPABASE_ACCESS_TOKEN from frontend/.env.local…")
+SUPABASE_ACCESS_TOKEN="$TOKEN" npx supabase functions deploy <name> --project-ref bxaovkzemfyxrxbcqask
+```
+
+`migration list --linked` and `db push --linked` additionally need `-p "$PW"`
+(`SUPABASE_DB_PASSWORD`, same file) and do **not** accept `--project-ref`.
+`db push` emits a pgdelta SSL-certificate error *after* applying — that is the
+schema-diff engine (`[experimental.pgdelta]`), not the migration; verify with
+`migration list` rather than trusting or panicking at the exit output.
 
 **The Phase 7 gate is closed.** MIGRATION_PLAN.md's last unchecked box —
 "an editor completes collect → score → generate → approve → export on the
@@ -38,6 +53,122 @@ SQL and is not obviously worth it.
 of it — 81 posts, 0 failures. "Made in Italy" and the public bodies are preserved
 again, and the accented brand aliases match for the first time. Full account in
 Session 17 below, including what it left stale.
+
+## Session 20 — a carousel becomes images, and the words are never drawn by a model (2026-09-04)
+
+### What was asked for, and what the specification actually says
+
+The operator asked to "make the carousel slides into images via GPT", believing
+the original brief called for it. It does not. All 398 paragraphs of
+`CUES Technical Analysis TCA.docx` were searched for
+`image|visual|design|graphic|DALL|render|PNG`: it asks for *"short carousel
+slide texts"* and *"Export LinkedIn-ready main post and carousel slide text"*.
+Every occurrence of "image" is metaphorical (*"not by creating a polished image
+of the industry"*) or refers to packaging design inside a source post.
+
+The gap it names is real, though, and sits one step further on: a LinkedIn
+carousel is **published as images** (or a PDF document), so a tool that stops at
+slide text leaves the last step manual. That is what this session built.
+
+### The one thing this must never do
+
+Hand the slide's words to an image model. Image models still garble exact
+multi-line text, so an editor would approve wording in Review and publish
+something subtly different — silently breaking the guarantee the whole review
+layer exists to make (0017 keeps the model's words and the editor's edit
+separately answerable, forever). **The text is therefore always drawn by our own
+code from the approved output, character for character**, in both variants. The
+model's only job is the picture behind it.
+
+### `frontend/src/lib/slides.ts` — the renderer
+
+Canvas, 1080×1080 (LinkedIn's square), no dependency at all. Two variants:
+`flat` (a designed gradient template) and `image` (a generated background under
+a scrim). Real production copy was the test: a live carousel whose headings and
+bodies are far longer than the specification's tidy example still fits, because
+`fitBlock` shrinks until it does rather than overflowing.
+
+**The scrim is what makes the image variant safe, and it took two attempts.**
+The first was a uniform veil heavy enough to guarantee contrast — which also
+erased the picture, so both variants rendered nearly identically. It is now
+directional: dark down the left column and along the top and bottom edges where
+the text and chrome sit, close to clear through the middle-right. Legibility no
+longer depends on what the model happened to return.
+
+### `supabase/functions/slide-images/` — one background, one request
+
+`gpt-image-2-2026-04-21` (pinned snapshot, like every other model here), POST
+`/v1/images/generations`, admin-gated through the shared `authenticate()`.
+`_shared/openai_images.ts` is a separate client because `_shared/openai.ts`
+commits itself to "Responses API, structured outputs only".
+
+One slide per request, deliberately: generation takes 15-60s, so a
+whole-carousel call would outlive any sensible function timeout and lose every
+image when it tripped. Per-slide means real progress, and a failure costs one
+image rather than ten.
+
+The prompt does three things that each fix a specific failure: forbids text in
+the terms models actually add it (signage, captions, watermarks), demands a
+dark low-key image so the scrim stays light, and reserves the left column
+compositionally because that is where the text lands. Plus no faces and no
+branding — the corpus is anonymised, and restoring identity in the picture
+would be absurd.
+
+**Nothing is stored.** The image returns to the browser, which composites and
+downloads. Persisting would mean a bucket, a policy, signed URLs and a cleanup
+job — the trade `lib/docx.ts` already rejected. The cost of that choice, stated
+plainly: regenerating is billed again.
+
+### Two bugs found by looking at the running UI, not by reading the code
+
+1. **Selecting "AI background image" fired all seven paid requests
+   immediately**, with no click on Generate. It escaped billing only because
+   the function was not deployed yet. A `variant !== 'flat'` guard inside an
+   effect was not enough. `renderSlideAt` now takes the variant as an
+   **argument** and the automatic path hardcodes `'flat'`, so it is
+   structurally incapable of spending anything whatever the component state is.
+   Verified by counting network calls: **zero** after switching the radio.
+2. The first build **downloaded each slide as it rendered**, so the only place
+   to look at a paid-for image was the Downloads folder, after the money was
+   spent. Generate and download are now separate steps, with the slides shown
+   on screen in between, click-to-enlarge, per-slide `redo`, and a free
+   `Download`.
+
+Both were caught by screenshotting the real screen with real data. Neither
+would have been visible in the diff.
+
+### Verified live, end to end
+
+Signed in as the real editor against the deployed function: `200`, a genuine
+`gpt-image-2` image in 18.5s. Nine images generated in total across testing
+(seven low, two medium) for roughly **15 cents**.
+
+Measured, so the operator can choose: **low ≈ $0.006/image, 14-19s; medium ≈
+$0.053, 50-64s; high ≈ $0.211**. The default is **low**, because the scrim
+darkens half the detail anyway and the difference is hard to see in the
+finished slide. Official pricing is per token ($30/1M output), not per image —
+these are derived figures, so confirm against the OpenAI usage dashboard after
+a real run.
+
+### A CORS trap that will bite the next person
+
+Production `ALLOWED_ORIGINS` allows `localhost:5173` but **not** 5174/5175.
+Vite silently moves to the next free port when 5173 is taken, and the symptom
+is `Failed to send a request to the Edge Function` — which reads like a missing
+function, not a blocked origin. Run the dev server as
+`npm run dev -- --port 5173 --strictPort` so it fails loudly instead.
+
+### Not done this session
+
+- **The Netlify build of the pushed frontend was never confirmed.** The commit
+  is on `origin`; whether the live bundle carries the slide panel was not
+  checked before the session ended.
+- `docs/` was not given a page about the slide feature; this section is the
+  only record.
+- The Word user guide (session 18) is now further behind — it does not mention
+  slides at all.
+- The Editorial brief field's wrong content, and `min_cluster_size`'s UI floor,
+  remain open from session 18.
 
 ## Session 19 — Deno tests for the two admin RPCs found a real bug in one of them (2026-09-04)
 
