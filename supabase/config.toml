@@ -491,3 +491,9 @@ verify_jwt = false
 # is the primary caller, via a real editor Bearer token.
 [functions.generate]
 verify_jwt = false
+
+# slide-images: dual auth, same as the rest. Called from Review, once per
+# carousel slide, with a real editor Bearer token; the internal path exists so
+# the gate is the same code as everywhere else rather than a second dialect.
+[functions.slide-images]
+verify_jwt = false

@@ -13,6 +13,7 @@ import {
   type PostOutput,
   type CarouselOutput,
 } from '../components/generation'
+import { SlideDownload } from '../components/SlideDownload'
 
 type Asset = Database['public']['Tables']['editorial_assets']['Row']
 
@@ -581,6 +582,17 @@ function GeneratedDetail({
             </li>
           ))}
         </ul>
+      )}
+
+      {/* Carousels only: a post has no slides to render. Driven by `draft`,
+          which is what is on screen — including unsaved edits — so the files
+          match what the operator is actually looking at rather than the last
+          saved state. */}
+      {draft && row.output_type === 'carousel' && (
+        <>
+          <hr className="my-5 border-slate-200" />
+          <SlideDownload carousel={draft as CarouselOutput} />
+        </>
       )}
 
       {/* Admin-only (0027). Separated and unmistakably red: this is the one
