@@ -158,6 +158,34 @@ is `Failed to send a request to the Edge Function` — which reads like a missin
 function, not a blocked origin. Run the dev server as
 `npm run dev -- --port 5173 --strictPort` so it fails loudly instead.
 
+### Two demo accounts exist now, and they closed an old gap
+
+Created for the operator's managers to trial the tool:
+`demo.editor@f-in.eu` (role `editor`) and `demo.admin@f-in.eu` (role `admin`).
+Both pre-confirmed, so they work without a real mailbox — which also means
+there is no password-reset path for them; reset via the Auth admin API or the
+dashboard. **Passwords are deliberately not recorded in this repo.**
+
+Session 18 shipped the admin tier (0025) but noted the non-admin path "was
+never seen live", because there was only ever one real account. There are three
+now, so it was tested properly for the first time, against
+`demo.editor@f-in.eu` on the live project:
+
+| attempt | result |
+| --- | --- |
+| insert a source | `403` — RLS (`new row violates row-level security`) |
+| `purge_source` | refused — *only an admin may delete a source* |
+| rename a source | `403` — the 0025 trigger, naming the protected columns |
+| change `lookback_days` | **allowed**, as designed |
+| `admin_delete_generation_result` | refused — *only an admin may delete generated copy* |
+
+Nothing was modified: the lookback write set the column to the value it already
+held. The admin lock holds exactly as 0025 claimed.
+
+**`editors` now has 3 rows, not 1.** Anything that assumed a single account —
+including "every non-admin test used a simulated JWT inside a rolled-back
+transaction" — is out of date.
+
 ### Not done this session
 
 - **No real AI carousel has been produced end to end through the live UI.** The
