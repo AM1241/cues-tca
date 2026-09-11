@@ -134,14 +134,21 @@ it("authenticated non-editor -> 403 and no run row", async () => {
   assertEquals(await runCount(), before);
 });
 
-it("editor but not admin -> 403 and no run row", async () => {
-  // Every invocation costs metered quota, so collection is admin-only until
-  // real usage has been measured.
-  const before = await runCount();
-  const res = await handleIngest(request({ source_ids: [sourceA] }, tokens[emails.editor]), { db });
-  assertEquals(res.status, 403);
-  assertEquals((await res.json()).error.includes("admin"), true);
-  assertEquals(await runCount(), before);
+it("editor without admin -> allowed, and attributed to them", async () => {
+  // Collection was admin-only "while provider quota is being measured". It has
+  // been measured; the whole workflow is open to anyone on the editors
+  // allowlist. What is still admin-only — adding, renaming and deleting a
+  // source, and deleting generated copy — is enforced in the database (0025,
+  // 0026, 0027), not here.
+  const { fetchImpl } = scriptedFetch([{ body: [] }]);
+  const res = await handleIngest(
+    request({ source_ids: [sourceA] }, tokens[emails.editor]),
+    { db, fetchImpl, sleep: noSleep },
+  );
+  assertEquals(res.status, 200);
+  const body = await res.json();
+  assertEquals(body.totals.trigger_source, "manual");
+  assertEquals(body.totals.triggered_by_email, emails.editor);
 });
 
 it("admin -> allowed, recorded as manual with the actor snapshot", async () => {

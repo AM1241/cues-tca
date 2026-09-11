@@ -4,6 +4,7 @@ import { useAuth } from '../lib/useAuth'
 import { useToast } from '../components/toast-context'
 import { Spinner, ErrorNotice } from '../components/ui'
 import type { Database } from '../lib/database.types'
+import { functionErrorMessage } from '../lib/functionError'
 
 type Source = Database['public']['Tables']['sources']['Row']
 
@@ -135,7 +136,7 @@ export function Sources() {
     })
     setDiscovering(null)
 
-    if (error) return toast.error(error.message)
+    if (error) return toast.error(await functionErrorMessage(error, 'Discovery failed'))
     if (data?.ok === false) return toast.error(data.error ?? 'Discovery failed')
 
     const t = data?.totals
@@ -173,7 +174,7 @@ export function Sources() {
     setCollecting(null)
 
     if (error) {
-      toast.error(error.message)
+      toast.error(await functionErrorMessage(error, 'Collection failed'))
       return
     }
     const results: CollectResult[] = (data?.results as CollectResult[]) ?? []

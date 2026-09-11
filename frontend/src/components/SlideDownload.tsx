@@ -26,6 +26,13 @@ import { downloadBlob } from '../lib/exporters'
  * function was not deployed yet. Passing the variant explicitly means the
  * automatic path hardcodes 'flat' and is structurally incapable of spending
  * anything, whatever the component state happens to be.
+ *
+ * A PICTURE IS BOUGHT ONCE
+ * Backgrounds are kept for the life of this panel, so changing a word redraws
+ * the text on the picture that was already paid for instead of buying it
+ * again. Only `redo` — which says so — deliberately buys a new one. The panel
+ * is remounted (Review keys it by result id) when a different carousel is
+ * opened, so a picture can never be carried over to copy it was not made for.
  */
 type SlideState = {
   slide: CarouselSlide
@@ -38,6 +45,14 @@ type SlideState = {
 function initialStates(slides: CarouselSlide[]): SlideState[] {
   return slides.map((slide) => ({ slide, status: 'idle', blob: null, url: null, error: null }))
 }
+
+/**
+ * How long the copy must stand still before the slides are redrawn.
+ *
+ * Long enough that ordinary typing produces one pass rather than one per
+ * character; short enough that a pause reads as "it updated", not as a wait.
+ */
+const EDIT_SETTLE_MS = 400
 
 export function SlideDownload({ carousel }: { carousel: CarouselOutput }) {
   const [variant, setVariant] = useState<SlideVariant>('flat')
@@ -59,6 +74,23 @@ export function SlideDownload({ carousel }: { carousel: CarouselOutput }) {
    */
   const backgroundsRef = useRef(new Map<number, HTMLImageElement>())
 
+  /** Slide positions whose background has been bought. Display only. */
+  const [paidPositions, setPaidPositions] = useState<number[]>([])
+
+  /**
+   * Which pass over the copy the slides on screen belong to.
+   *
+   * Every render reads this when it starts and checks it again before it
+   * writes. A pass that has been superseded — because the copy changed, or the
+   * variant did — therefore cannot put its result on screen, no matter how the
+   * timing falls out. See the note above the render effect for what went wrong
+   * without it.
+   */
+  const renderGenerationRef = useRef(0)
+
+  /** The `variant::copy` the slides on screen were drawn for. */
+  const renderedKey = useRef<string | null>(null)
+
   // Object URLs are freed when the set is replaced or the component unmounts;
   // revoking eagerly would blank an <img> still on screen.
   const urlsRef = useRef<string[]>([])
@@ -66,7 +98,23 @@ export function SlideDownload({ carousel }: { carousel: CarouselOutput }) {
     urlsRef.current.forEach(URL.revokeObjectURL)
     urlsRef.current = []
   }
-  useEffect(() => () => releaseUrls(), [])
+  useEffect(
+    () => () => {
+      // Retiring the generation on unmount stops an in-flight render writing
+      // into a component that is gone.
+      //
+      // `renderedKey` MUST be cleared in the same breath. Refs survive a
+      // remount, so leaving it set means the render effect sees "already drawn"
+      // and skips, while the pass that was actually drawing has just been
+      // retired — and the slides sit on "Generating…" forever. React's
+      // StrictMode mounts every component twice in development, so this is not
+      // a corner case: it is what happens on every single page load.
+      renderGenerationRef.current++
+      renderedKey.current = null
+      releaseUrls()
+    },
+    [],
+  )
 
   const total = slides.length
 
@@ -74,6 +122,11 @@ export function SlideDownload({ carousel }: { carousel: CarouselOutput }) {
     async (index: number, useVariant: SlideVariant, opts: { reuseBackground: boolean }) => {
       const slide = slides[index]
       if (!slide) return
+      // Fixed when this render starts. Everything below refuses to write once
+      // it no longer matches — a stale result is discarded, never displayed.
+      const generation = renderGenerationRef.current
+      const current = () => renderGenerationRef.current === generation
+
       setStates((prev) =>
         prev.map((s, i) => (i === index ? { ...s, status: 'working', error: null } : s)),
       )
@@ -84,13 +137,24 @@ export function SlideDownload({ carousel }: { carousel: CarouselOutput }) {
           quality,
           background: reused,
         })
-        if (background) backgroundsRef.current.set(slide.position, background)
+        // No object URL is created for a superseded render: it would never be
+        // shown and nothing would ever revoke it.
+        if (!current()) return
+        if (background) {
+          backgroundsRef.current.set(slide.position, background)
+          // Mirrored into state purely so the cost shown on the button can be
+          // the number of pictures that will actually be bought.
+          setPaidPositions((prev) =>
+            prev.includes(slide.position) ? prev : [...prev, slide.position],
+          )
+        }
         const url = URL.createObjectURL(blob)
         urlsRef.current.push(url)
         setStates((prev) =>
           prev.map((s, i) => (i === index ? { ...s, status: 'done', blob, url, error: null } : s)),
         )
       } catch (e) {
+        if (!current()) return
         setStates((prev) =>
           prev.map((s, i) =>
             i === index ? { ...s, status: 'error', error: (e as Error).message } : s,
@@ -103,40 +167,72 @@ export function SlideDownload({ carousel }: { carousel: CarouselOutput }) {
 
   /**
    * Re-render the free previews whenever the copy or the variant changes.
-   * Keyed on the carousel's actual content so an editor's edit refreshes the
-   * slides, while an unrelated re-render does not restart the loop.
+   *
+   * `carousel` is Review's LIVE draft: it changes on every keystroke, not on
+   * save. The first version keyed the render loop straight off it, so typing a
+   * four-letter word started four seven-slide passes at once — and a pass only
+   * checked whether it had been superseded BETWEEN slides, so the render
+   * already in flight always finished and wrote its result. Whichever pass
+   * happened to be slowest won. An editor who typed "full" watched the slide
+   * sit on "fu" until something unrelated redrew it.
+   *
+   * Two changes, and both are needed:
+   *   - the copy is debounced, so a burst of typing produces one pass;
+   *   - a pass writes only while it is the current generation, so a late
+   *     straggler is discarded however the timing falls out.
+   *
+   * The second is the one that protects the guarantee this panel exists to
+   * make — that the words on the image are the words that were approved.
    */
-  const contentKey = useMemo(
-    () => `${variant}::${JSON.stringify(carousel)}`,
-    [variant, carousel],
-  )
-  const renderedKey = useRef<string | null>(null)
+  const contentKey = useMemo(() => JSON.stringify(carousel), [carousel])
+  const [settledContentKey, setSettledContentKey] = useState(contentKey)
 
   useEffect(() => {
-    if (renderedKey.current === contentKey) return
-    renderedKey.current = contentKey
+    if (settledContentKey === contentKey) return
+    const timer = setTimeout(() => setSettledContentKey(contentKey), EDIT_SETTLE_MS)
+    return () => clearTimeout(timer)
+  }, [contentKey, settledContentKey])
 
+  /** The editor has typed something the slides on screen do not show yet. */
+  const stale = contentKey !== settledContentKey
+
+  /**
+   * Only the copy is debounced. A variant change applies at once: waiting on a
+   * radio click would open a window in which `generateAll` could spend real
+   * money and then have its results wiped by a settle that was already queued.
+   */
+  const renderKey = `${variant}::${settledContentKey}`
+
+  useEffect(() => {
+    if (renderedKey.current === renderKey) return
+    renderedKey.current = renderKey
+
+    const generation = ++renderGenerationRef.current
     releaseUrls()
-    backgroundsRef.current.clear()
+    // Backgrounds are deliberately NOT cleared here. Clearing them meant every
+    // edited word threw away every picture already bought and charged for them
+    // again on the next Generate — while the code that exists to prevent that
+    // (`reuseBackground`) was never once called with `true`.
     setStates(initialStates(slides))
 
     // Only the free variant renders on sight. The paid one waits for the
     // button — see the note at the top of this file.
-    if (variant !== 'flat') return
+    if (variant !== 'flat') {
+      // Any earlier pass is already barred from writing by the bump above, so
+      // nothing is left rendering.
+      setBusy(false)
+      return
+    }
 
-    let cancelled = false
-    ;(async () => {
+    void (async () => {
       setBusy(true)
       for (let i = 0; i < slides.length; i++) {
-        if (cancelled) break
+        if (renderGenerationRef.current !== generation) return
         await renderSlideAt(i, 'flat', { reuseBackground: false })
       }
-      setBusy(false)
+      if (renderGenerationRef.current === generation) setBusy(false)
     })()
-    return () => {
-      cancelled = true
-    }
-  }, [contentKey, slides, variant, renderSlideAt])
+  }, [renderKey, slides, variant, renderSlideAt])
 
   async function generateAll() {
     setBusy(true)
@@ -144,7 +240,9 @@ export function SlideDownload({ carousel }: { carousel: CarouselOutput }) {
       // Skip what is already produced, so pressing this after a partial
       // failure only pays for what is actually missing.
       if (states[i]?.status === 'done') continue
-      await renderSlideAt(i, variant, { reuseBackground: false })
+      // Reuse the picture for this slide if one was already bought: after an
+      // edit that is every slide, and the whole pass costs nothing.
+      await renderSlideAt(i, variant, { reuseBackground: true })
     }
     setBusy(false)
   }
@@ -160,6 +258,19 @@ export function SlideDownload({ carousel }: { carousel: CarouselOutput }) {
   const doneCount = states.filter((s) => s.status === 'done').length
   const failed = states.filter((s) => s.status === 'error')
   const remaining = total - doneCount
+
+  /**
+   * How many pictures pressing Generate would actually BUY — which is not the
+   * same as how many slides it would draw. After an edit every slide needs
+   * drawing again, but each one that already has a picture is redrawn for
+   * nothing. Showing `remaining` here would have quoted a price for work that
+   * is free.
+   */
+  const paid = new Set(paidPositions)
+  const needsBuying =
+    variant === 'image'
+      ? states.filter((s) => s.status !== 'done' && !paid.has(s.slide.position)).length
+      : 0
 
   return (
     <div>
@@ -206,9 +317,22 @@ export function SlideDownload({ carousel }: { carousel: CarouselOutput }) {
       {variant === 'image' && (
         <div className="mt-3 rounded-md bg-amber-50 p-2.5">
           <p className="text-xs text-amber-800">
-            Nothing is generated until you press the button below. It creates{' '}
-            <strong>{remaining} image{remaining === 1 ? '' : 's'}</strong> and bills for each
-            one. Downloading what you see is free; generating again is not.
+            {needsBuying > 0 ? (
+              <>
+                Nothing is generated until you press the button below. It creates{' '}
+                <strong>
+                  {needsBuying} image{needsBuying === 1 ? '' : 's'}
+                </strong>{' '}
+                and bills for each one. Downloading what you see is free; generating again is
+                not.
+              </>
+            ) : (
+              <>
+                Every slide already has a picture you have paid for.{' '}
+                <strong>Redrawing puts your new wording on them and costs nothing.</strong> Only{' '}
+                <em>redo</em> on a single slide buys a new picture.
+              </>
+            )}
           </p>
           <label className="mt-2 block text-xs text-amber-900">
             Quality{' '}
@@ -257,14 +381,16 @@ export function SlideDownload({ carousel }: { carousel: CarouselOutput }) {
                 <span className="flex gap-1.5">
                   <button
                     onClick={() => downloadBlob(slideFilename(s.slide.position), s.blob!)}
-                    className="text-[10px] text-slate-500 underline underline-offset-2 hover:text-slate-900"
+                    disabled={stale}
+                    title={stale ? 'Waiting for your edits to be drawn' : undefined}
+                    className="text-[10px] text-slate-500 underline underline-offset-2 hover:text-slate-900 disabled:no-underline disabled:opacity-40"
                   >
                     save
                   </button>
                   {variant === 'image' && (
                     <button
                       onClick={() => renderSlideAt(i, 'image', { reuseBackground: false })}
-                      disabled={busy}
+                      disabled={busy || stale}
                       title="Generates a new picture for this slide only, and bills for it"
                       className="text-[10px] text-amber-700 underline underline-offset-2 hover:text-amber-900 disabled:opacity-50"
                     >
@@ -275,8 +401,8 @@ export function SlideDownload({ carousel }: { carousel: CarouselOutput }) {
               )}
               {s.status === 'error' && (
                 <button
-                  onClick={() => renderSlideAt(i, variant, { reuseBackground: false })}
-                  disabled={busy}
+                  onClick={() => renderSlideAt(i, variant, { reuseBackground: true })}
+                  disabled={busy || stale}
                   className="text-[10px] text-red-600 underline underline-offset-2 disabled:opacity-50"
                 >
                   retry
@@ -297,21 +423,27 @@ export function SlideDownload({ carousel }: { carousel: CarouselOutput }) {
         {variant === 'image' && remaining > 0 && (
           <button
             onClick={generateAll}
-            disabled={busy}
+            disabled={busy || stale}
             className="rounded-md bg-slate-900 px-4 py-1.5 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-60"
           >
-            {busy ? 'Generating…' : `Generate ${remaining} image${remaining === 1 ? '' : 's'}`}
+            {busy
+              ? 'Generating…'
+              : needsBuying > 0
+                ? `Generate ${needsBuying} image${needsBuying === 1 ? '' : 's'}`
+                : `Redraw ${remaining} slide${remaining === 1 ? '' : 's'} — free`}
           </button>
         )}
         <button
           onClick={downloadAll}
-          disabled={doneCount === 0 || busy}
+          disabled={doneCount === 0 || busy || stale}
           className="rounded-md border border-slate-300 px-4 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
         >
           Download {doneCount || ''} {doneCount === 1 ? 'slide' : 'slides'}
         </button>
         <span className="text-xs text-slate-500">
-          {doneCount} of {total} ready{busy ? '…' : ''}
+          {stale
+            ? 'Redrawing for your edits…'
+            : `${doneCount} of ${total} ready${busy ? '…' : ''}`}
         </span>
       </div>
 

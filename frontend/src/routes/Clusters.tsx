@@ -9,6 +9,7 @@ import {
   type GenerationErrorView,
 } from '../components/generation'
 import { PER_CLUSTER_GENERATION } from '../lib/features'
+import { functionErrorMessage } from '../lib/functionError'
 
 /**
  * Mirrors MAX_PUBLICATION_THEMES in supabase/functions/generate/prompt.ts.
@@ -318,7 +319,7 @@ export function Clusters() {
     setAnonymising(false)
 
     if (error) {
-      toast.error(error.message)
+      toast.error(await functionErrorMessage(error, 'Anonymisation failed'))
       return
     }
     if (data?.ok === false) {
@@ -369,7 +370,7 @@ export function Clusters() {
     })
     setRunning(false)
     if (error) {
-      toast.error(error.message)
+      toast.error(await functionErrorMessage(error, 'Clustering failed'))
       return
     }
     if (data?.ok === false) {
@@ -426,16 +427,9 @@ export function Clusters() {
     setPublishing(false)
 
     if (error) {
-      // Same reasoning as generateNow: a 4xx carries its real message in the
-      // body, not in supabase-js's generic "non-2xx status code".
-      let message = error.message
-      try {
-        const body = await (error as { context?: Response }).context?.json()
-        if (body?.error) message = body.error
-      } catch {
-        /* body already consumed or not JSON — keep the generic message */
-      }
-      toast.error(message)
+      // A 4xx carries its real message in the body, not in supabase-js's
+      // generic "non-2xx status code" — see lib/functionError.ts.
+      toast.error(await functionErrorMessage(error, 'The publication failed to generate.'))
       return
     }
     if (data?.ok === false) {
@@ -473,16 +467,9 @@ export function Clusters() {
 
     if (error) {
       // Upfront validation errors (400/404/422) are non-2xx: nothing was
-      // created, and the real reason is in the response body, not in
-      // supabase-js's generic "non-2xx status code" message.
-      let message = error.message
-      try {
-        const body = await (error as { context?: Response }).context?.json()
-        if (body?.error) message = body.error
-      } catch {
-        /* body already consumed or not JSON — keep the generic message */
-      }
-      toast.error(message)
+      // created, and the real reason is in the response body — see
+      // lib/functionError.ts.
+      toast.error(await functionErrorMessage(error, 'Generation failed'))
       return
     }
 

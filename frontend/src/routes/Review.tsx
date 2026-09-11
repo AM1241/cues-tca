@@ -14,6 +14,7 @@ import {
   type CarouselOutput,
 } from '../components/generation'
 import { SlideDownload } from '../components/SlideDownload'
+import { functionErrorMessage } from '../lib/functionError'
 
 type Asset = Database['public']['Tables']['editorial_assets']['Row']
 
@@ -350,15 +351,8 @@ function GeneratedDetail({
 
     if (error) {
       // Upfront validation (400/404/422) is non-2xx: nothing was written and
-      // the real reason is in the body, not supabase-js's generic message.
-      let message = error.message
-      try {
-        const body = await (error as { context?: Response }).context?.json()
-        if (body?.error) message = body.error
-      } catch {
-        /* body already consumed or not JSON */
-      }
-      toast.error(message)
+      // the real reason is in the body — see lib/functionError.ts.
+      toast.error(await functionErrorMessage(error, 'Regeneration failed'))
       return
     }
 

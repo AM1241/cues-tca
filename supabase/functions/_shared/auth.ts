@@ -13,7 +13,23 @@
  *              by backfill jobs. Never present in a browser.
  *   editor   — a real end-user access token in `Authorization: Bearer`,
  *              verified by calling auth.getUser(), then required to be present
- *              in public.editors with role 'admin'.
+ *              in public.editors. ANY role on that list may proceed.
+ *
+ * WHY ROLE IS NOT CHECKED HERE ANY MORE
+ * Every stage used to demand role 'admin', with the stated reason "while
+ * provider quota is being measured". Session 20 measured it, and the
+ * restriction outlived its purpose: a manager trialling the tool on a real
+ * editor account could not run a single step of the workflow — not collect,
+ * score, anonymise, cluster, generate, nor produce slides — while the user
+ * guide told him all of it was open to him. He reported it as two broken
+ * buttons, because the two he happened to press were the first two.
+ *
+ * What stays admin-only is unchanged, and none of it lives in this file:
+ *   - adding, renaming or deleting a source   — 0025 (trigger) and 0026 (RPC)
+ *   - deleting generated copy                 — 0027 (RPC)
+ * Those are enforced in the DATABASE, by is_admin(), so they hold against any
+ * caller by any route — including one that never passes through here at all.
+ * That is the property worth protecting, and it is untouched.
  *
  * Rules this file exists to enforce:
  *   - No decoded-but-unverified JWT claim ever selects the auth path. The old
@@ -90,13 +106,8 @@ export async function authenticate(
   if (editorErr) throw new RequestError(403, "Not authorised.");
   if (!editor) throw new RequestError(403, "Not on the editors allowlist.");
 
-  if (editor.role !== "admin") {
-    throw new RequestError(
-      403,
-      "Collection is restricted to admin editors while provider quota is being measured.",
-    );
-  }
-
+  // Being on the allowlist is the whole test. Admin is NOT required here — see
+  // the header for why that restriction was lifted and what still enforces it.
   return {
     kind: "editor",
     triggerSource: "manual",

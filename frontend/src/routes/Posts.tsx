@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { Spinner, ErrorNotice } from '../components/ui'
 import { useToast } from '../components/toast-context'
+import { functionErrorMessage } from '../lib/functionError'
 
 // analyzed_posts joined to its raw_post and that post's source. relevance_scores
 // is a jsonb map { theme: 0-100 }; overall_relevance is the server-derived score.
@@ -196,7 +197,7 @@ export function Posts() {
     setScoring(false)
 
     if (error) {
-      toast.error(error.message)
+      toast.error(await functionErrorMessage(error, 'Scoring failed'))
       return
     }
     if (data?.ok === false) {

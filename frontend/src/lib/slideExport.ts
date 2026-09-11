@@ -21,6 +21,7 @@
 import { supabase } from './supabase'
 import type { CarouselOutput, CarouselSlide } from '../components/generation'
 import { DEFAULT_THEME, renderSlidePng, type SlideVariant } from './slides'
+import { functionErrorMessage } from './functionError'
 
 export type SlideQuality = 'low' | 'medium' | 'high'
 
@@ -63,7 +64,10 @@ export async function fetchSlideBackground(
   })
 
   if (error) {
-    throw new SlideImageError(slide.position, error.message || 'the image request failed')
+    throw new SlideImageError(
+      slide.position,
+      await functionErrorMessage(error, 'the image request failed'),
+    )
   }
   const payload = data as { ok?: boolean; error?: string; image_b64?: string; output_format?: string }
   if (!payload?.ok || !payload.image_b64) {
