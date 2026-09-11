@@ -10,12 +10,12 @@ we" pointer between working sessions.
 
 | | |
 | --- | --- |
-| Branch | `phase6-frontend-binding` — session 21 is `4421f84` (the three fixes) plus the commit carrying this entry |
+| Branch | `phase6-frontend-binding`, clean, **pushed** — `4421f84` (the three fixes) and `b89da3a` (docs) |
 | Project | `bxaovkzemfyxrxbcqask` (`cues-tca`, eu-west-1) |
 | Migrations applied | through **0028**, unchanged — session 21 wrote no SQL |
 | Edge Functions | **all seven redeployed this session** (the shared `authenticate()` changed, and every one bundles it): `ingest` v10, `score-worker` v11, `anonymize-worker` v12, `cluster` v6, `generate` v6, `discover-brands` v7, `slide-images` v2 |
 | Tests | 81 ingest Deno tests against the local stack + 24 offline `slide-images` tests, all passing. Frontend `npm run build` and `oxlint` clean. |
-| Frontend | **Local only — NOT deployed.** The three frontend fixes below are in the working tree and have not reached cues-tca.netlify.app; the live bundle is still session 20's `index-C1PbHM0E.js`. |
+| Frontend | **Deployed.** Live bundle on cues-tca.netlify.app is `index-CuPwK0Jh.js`, **identical to the local npm run build**. Verified on the production URL signed in as `demo.editor@f-in.eu`, the real non-admin account: 7 of 7 slides draw, the race test returns one byte-identical image across three reads, and a refused call shows the whole sentence rather than the generic one. |
 | Live data | 5 sources, 231 raw posts, 26 generation results, 51 reviews (4 approved), 3 editors. Nothing was altered this session: every live write was a value set to what it already held. |
 
 **The workflow is open to every editor now, not just admins.** `_shared/auth.ts`
@@ -242,10 +242,6 @@ it also lists what the guide is simply missing (slides, the nav reorder).
 
 ### Not done
 
-- **The frontend is not deployed.** All three frontend fixes are local. The
-  Edge Function change IS live, so a plain editor can already work — but until
-  Netlify rebuilds they still meet the opaque error message, the slide race and
-  the repeated image purchase.
 - The reviewer's other ~20 notes — six proposed tab renames, requests to
   explain how themes, clusters, slides and the publication text relate to one
   another, a definition of `approved`/`published`/`draft`/`rejected`, and a
