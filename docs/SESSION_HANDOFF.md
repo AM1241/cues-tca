@@ -1,22 +1,37 @@
 # Session handoff — CUES Editorial Cloud
 
-Last updated: 2026-09-04 (session 20 — a carousel can be downloaded as PNG
-slides, optionally over gpt-image-2 backgrounds; and the "expired" Supabase
-token that blocked session 19 turned out never to have been expired at all).
+Last updated: 2026-09-11 (session 21 — the first reader outside the team found
+three defects, and the two that looked like broken buttons were one closed door
+in front of the entire workflow).
 Read this first, then `MIGRATION_PLAN.md`. This file is the single "where are
 we" pointer between working sessions.
 
-## Verified state at the end of session 20 (checked 2026-09-04)
+## Verified state at the end of session 21 (checked 2026-09-11)
 
 | | |
 | --- | --- |
-| Branch | `phase6-frontend-binding`, clean, **pushed** — head `e369d16` |
+| Branch | `phase6-frontend-binding` — session 21 is `4421f84` (the three fixes) plus the commit carrying this entry |
 | Project | `bxaovkzemfyxrxbcqask` (`cues-tca`, eu-west-1) |
-| Migrations applied | through **0028** — confirmed against the live project, `migration list --linked` shows local and remote matching at 0028 |
-| Edge Functions | `slide-images` **deployed this session** (new), plus `discover-brands` v6, `generate` v5, `anonymize-worker` v11, `cluster` v5, `score-worker` v10, `ingest` v9 |
-| Tests | 24 offline Deno tests for `slide-images` (scripted fetch, no network) + session 19's 17 live-stack steps for the admin RPCs. Frontend `npm run build` clean. |
-| Frontend | live bundle on cues-tca.netlify.app is `index-C1PbHM0E.js`, **identical to the local `npm run build`**. Netlify built in ~40s. Verified on the production URL as the real editor: the slide panel renders and all 7 thumbnails draw. |
-| Sources / Reviews | Unchanged — 5 sources, 47 reviews (3 approved). MASAF still blocked from purge; no live data was altered this session. |
+| Migrations applied | through **0028**, unchanged — session 21 wrote no SQL |
+| Edge Functions | **all seven redeployed this session** (the shared `authenticate()` changed, and every one bundles it): `ingest` v10, `score-worker` v11, `anonymize-worker` v12, `cluster` v6, `generate` v6, `discover-brands` v7, `slide-images` v2 |
+| Tests | 81 ingest Deno tests against the local stack + 24 offline `slide-images` tests, all passing. Frontend `npm run build` and `oxlint` clean. |
+| Frontend | **Local only — NOT deployed.** The three frontend fixes below are in the working tree and have not reached cues-tca.netlify.app; the live bundle is still session 20's `index-C1PbHM0E.js`. |
+| Live data | 5 sources, 231 raw posts, 26 generation results, 51 reviews (4 approved), 3 editors. Nothing was altered this session: every live write was a value set to what it already held. |
+
+**The workflow is open to every editor now, not just admins.** `_shared/auth.ts`
+no longer checks `role`; being on the `editors` allowlist is the whole test.
+What stays admin-only is unchanged and none of it lives in that file — adding,
+renaming and deleting a source (0025, 0026) and deleting generated copy (0027),
+all enforced in the database by `is_admin()`. See session 21 below for why.
+
+**The Word user guide has a factual error, and now a place to record such
+things.** `docs/user-guide-corrections.md` is new: the guide is not in git, so
+it drifts silently, and that file is where the drift gets written down.
+
+## Standing notes carried forward
+
+Still true, and still worth reading before working here. Session 20's own state
+table is gone: the block above supersedes every row of it.
 
 **The access token was never the problem, and session 19's record of it was
 wrong.** `SUPABASE_ACCESS_TOKEN` lives in `frontend/.env.local`, which neither
@@ -53,6 +68,191 @@ SQL and is not obviously worth it.
 of it — 81 posts, 0 failures. "Made in Italy" and the public bodies are preserved
 again, and the accented brand aliases match for the first time. Full account in
 Session 17 below, including what it left stale.
+
+## Session 21 — the first outside reader, and the door that was shut in front of the whole product (2026-09-11)
+
+### How the work arrived
+
+The operator's colleague read the Word user guide on 2026-09-09 **while signed
+in as `demo.editor@f-in.eu`** and returned it annotated: 3 Word comments, 78
+tracked insertions written straight into the sentences, and 3 screenshots he
+pasted in himself. Two of those show a red toast reading `Edge Function
+returned a non-2xx status code` — one after pressing Collect, one after Find
+names.
+
+He reported it as two broken buttons. It was not two buttons.
+
+### 1 + 2. Every stage was admin-only, and nobody had ever checked the allowed case
+
+`_shared/authenticate()` ended with `if (editor.role !== "admin") throw 403`,
+and **all seven** Edge Functions call it: `ingest`, `discover-brands`,
+`score-worker`, `anonymize-worker`, `cluster`, `generate`, `slide-images`. A
+plain editor could not run a single step of the pipeline. He pressed the first
+two things on the first screen, hit the wall, and stopped — which is why the
+rest of his feedback is questions about the guide rather than reports from
+using the tool.
+
+The gate's own comment said it stood "while provider quota is being measured".
+Session 20 measured it. Session 18 shipped the admin tier and noted the
+non-admin path "was never seen live"; session 20 created the demo accounts and
+tested the four things that are *supposed* to be refused — and never tested the
+things that are supposed to be **allowed**. That asymmetry is the whole bug:
+every test asked "is this locked?", none asked "can an ordinary user work?".
+
+**The operator's decision, taken this session:** admin-only means deletions,
+and adding or removing a LinkedIn source. Nothing else. The role check is gone
+from `auth.ts` and the allowlist is the whole test. What stays admin-only is
+untouched and lives in the database, not in that file — `sources` INSERT RLS,
+the 0025 rename trigger, `purge_source` (0026) and
+`admin_delete_generation_result` (0027), each behind `is_admin()`, so they hold
+against any caller by any route, including ones that never pass through
+`authenticate()` at all.
+
+Verified, in this order:
+
+- 81 ingest Deno tests against a real local Postgres, including the one
+  rewritten from *"editor but not admin -> 403"* to **"editor without admin ->
+  allowed, and attributed to them"**; plus 24 offline `slide-images` tests.
+- All seven functions redeployed; the deployed `ingest` and `slide-images`
+  bundles were re-downloaded from the Management API and checked — the old
+  refusal string absent, the allowlist check present.
+- Live, as `demo.editor@f-in.eu` with its real password: `ingest`,
+  `discover-brands` and `slide-images` each returned **400 on input
+  validation**, a status only reachable after authentication succeeds, and
+  `ingest_runs` did not grow because the unknown-source-id check runs before
+  the run row is created.
+- Best of all, and not by us: `ingest_runs` holds a `manual` run by
+  `demo.editor@f-in.eu` at 2026-09-10 14:21 UTC, `completed`. A real person on
+  a real non-admin account collected real posts through the product, hours
+  after the deploy.
+
+### The message existed all along, and the UI threw it away
+
+A separate defect behind the same two screenshots. Every function answers
+`{ ok: false, error: "<a sentence written for a human>" }` with a real status,
+but `supabase-js` reports every non-2xx as a `FunctionsHttpError` whose
+`.message` is the constant `Edge Function returned a non-2xx status code`. The
+real body is on `error.context`, a `Response`.
+
+Three of the nine `functions.invoke` call sites already knew this and read the
+body by hand. **The other six did not — and they were the six he pressed.**
+
+`frontend/src/lib/functionError.ts` is new and all nine go through it now. It
+also covers what the three hand-rolled copies did not: a non-JSON body, an HTML
+error page (never shown raw), an empty body, a network-level failure — which
+gets the ALLOWED_ORIGINS hint, because that failure reads like a missing
+function and is almost always a blocked origin — and a second read of a
+`Response` whose body is already consumed. Eight scenarios exercised with
+`node --experimental-strip-types`, then confirmed in the running UI, where the
+toast now carries the whole sentence.
+
+### 3. The slide that showed half a word
+
+He added "full" to a heading and the image drew **"fu"** for about a minute,
+then later the whole word. This is the defect that matters most, because it is
+the only explicit guarantee the product makes: the words on the image are the
+words you approved, character for character. His note sits directly underneath
+that sentence in the guide.
+
+`SlideDownload` is fed Review's **live** draft — it changes on every keystroke,
+not on save. Each character re-keyed the render effect and started a fresh
+seven-slide pass, and a pass checked whether it had been superseded only
+*between* slides: the render already in flight always finished and wrote its
+result. Whichever pass was slowest won.
+
+Proved before fixing, by reverting the file to HEAD and rendering the same
+sentence two ways — in one shot, where no race is possible, and character by
+character — then hashing the PNG bytes:
+
+| | before | after |
+| --- | --- | --- |
+| one shot | `a09931a7…` | `a09931a7…` |
+| typed character by character | `b3f6931f…` | `a09931a7…` |
+| the same image three seconds later | `8112c8a3…` | `a09931a7…` |
+
+Three different images for one sentence, and the third changed again on its own
+three seconds later. After the fix, three separate runs each produced the
+byte-identical correct image.
+
+Two changes, both needed. A **generation counter**: every render fixes it on
+entry and refuses to write once superseded, so a straggler cannot land however
+the timing falls out. A **400 ms settle** on the copy, so a burst of typing
+produces one pass rather than one per character. While a redraw is pending the
+panel says *Redrawing for your edits…* and every download and paid button is
+disabled — an editor can no longer save bytes that do not match the words in
+front of them.
+
+**A trap introduced and caught in the same hour.** Retiring the generation on
+unmount is correct, but `renderedKey` is a ref and refs survive a remount, so
+the effect saw "already drawn" and skipped while the pass that had been drawing
+was retired: slides sat on "Generating…" forever. React StrictMode mounts
+everything twice in development, so this was not a corner case, it was every
+page load. Both are cleared together now. It was found by opening the screen,
+not by reading the diff.
+
+### A picture was being bought over and over
+
+Found while fixing the above, and it was spending real money. `backgroundsRef`
+exists so that changing a word redraws the text on a picture already paid for —
+documented in the file, with `reuseBackground` plumbed all the way through
+`renderOneSlide`. **It was never once called with `true`**, and the render
+effect cleared the whole map on any content change. Every edited word therefore
+threw away every generated background, and the next Generate bought all seven
+again.
+
+Backgrounds are now kept for the life of the panel and reused; only `redo`,
+which says it bills, deliberately buys a new one. They cannot leak between
+carousels, because Review keys the detail component by `result_id` and a
+different result remounts the panel.
+
+The cost the screen quotes had to change with it, or the fix would have been
+invisible and the number a lie: the button counts pictures that will actually
+be **bought**, not slides that will be drawn. With every background owned it
+reads *Redraw 7 slides — free*, and the amber box says the same.
+
+Measured in the running UI with `slide-images` intercepted, so nothing was
+spent: 7 calls to generate, then a word edited and all seven redrawn for **0**
+additional calls. Session 20's property — switching the radio spends nothing —
+still holds, at 0 calls.
+
+### The guide is wrong about who may change settings
+
+`docs/user-guide-corrections.md` is new. The guide tells readers the difference
+between the two roles is "actions that change the configuration or delete
+permanently". Deletions, yes. Configuration, no: `configurations` UPDATE has no
+`is_admin()` test and never did, so a plain user can change the threshold, the
+scoring engine, the brief, the tone and the name list. Confirmed live by
+PATCHing `min_relevance_score` as `demo.editor` **to the value it already
+held** — a write that proves the permission and changes nothing.
+
+The guide is not in git, so it drifts with every release and nobody finds out
+until a reader does. That file is where the drift is recorded from now on, and
+it also lists what the guide is simply missing (slides, the nav reorder).
+
+### Two traps for the next person
+
+- **The documented `docker run` for the ingest tests is incomplete.** Without
+  `-e RAPIDAPI_KEY=…` and `-e INGEST_INTERNAL_SECRET=…` — values in
+  `supabase/functions/.env.test` — 19 of 81 tests fail with `undefined` where a
+  status should be, which reads like a logic break and is a missing env var.
+  Add both to the `MSYS_NO_PATHCONV=1 … $(pwd -W)` form this machine needs.
+- **`python` here is Windows Python**, so `/tmp/x` means `C:\tmp\x` while the
+  Git Bash tools mean `%TEMP%\x`. Writing a file with `echo >` and reading it
+  back with `python` fails silently. Pipe, rather than going through disk.
+
+### Not done
+
+- **The frontend is not deployed.** All three frontend fixes are local. The
+  Edge Function change IS live, so a plain editor can already work — but until
+  Netlify rebuilds they still meet the opaque error message, the slide race and
+  the repeated image purchase.
+- The reviewer's other ~20 notes — six proposed tab renames, requests to
+  explain how themes, clusters, slides and the publication text relate to one
+  another, a definition of `approved`/`published`/`draft`/`rejected`, and a
+  question about whose account and payment the client should use — are product
+  decisions, not defects. They are untouched, and summarised in
+  `docs/user-guide-corrections.md` §3.
+- `react-router` GHSA-qwww-vcr4-c8h2 (high) on 7.18.1, pre-existing.
 
 ## Session 20 — a carousel becomes images, and the words are never drawn by a model (2026-09-04)
 
