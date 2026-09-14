@@ -1,21 +1,21 @@
 # Session handoff — CUES Editorial Cloud
 
-Last updated: 2026-09-11 (session 21 — the first reader outside the team found
-three defects, and the two that looked like broken buttons were one closed door
-in front of the entire workflow).
+Last updated: 2026-09-14 (session 22 — the carousel stops being a by-product:
+Review now opens with the finished post, and making the slides big enough to
+read revealed markdown asterisks that were being published).
 Read this first, then `MIGRATION_PLAN.md`. This file is the single "where are
 we" pointer between working sessions.
 
-## Verified state at the end of session 21 (checked 2026-09-11)
+## Verified state at the end of session 22 (checked 2026-09-14)
 
 | | |
 | --- | --- |
-| Branch | `phase6-frontend-binding`, clean, **pushed** — `4421f84` (the three fixes) and `b89da3a` (docs) |
+| Branch | `phase6-frontend-binding` — session 22 is `30368b2` (markdown), `0202db7` (scoring engine) and `5523b58` (the publication panel), plus the commit carrying this entry |
 | Project | `bxaovkzemfyxrxbcqask` (`cues-tca`, eu-west-1) |
-| Migrations applied | through **0028**, unchanged — session 21 wrote no SQL |
-| Edge Functions | **all seven redeployed this session** (the shared `authenticate()` changed, and every one bundles it): `ingest` v10, `score-worker` v11, `anonymize-worker` v12, `cluster` v6, `generate` v6, `discover-brands` v7, `slide-images` v2 |
-| Tests | 81 ingest Deno tests against the local stack + 24 offline `slide-images` tests, all passing. Frontend `npm run build` and `oxlint` clean. |
-| Frontend | **Deployed.** Live bundle on cues-tca.netlify.app is `index-CuPwK0Jh.js`, **identical to the local npm run build**. Verified on the production URL signed in as `demo.editor@f-in.eu`, the real non-admin account: 7 of 7 slides draw, the race test returns one byte-identical image across three reads, and a refused call shows the whole sentence rather than the generic one. |
+| Migrations applied | through **0028**, unchanged — no SQL since session 20 |
+| Edge Functions | unchanged this session. Session 21 redeployed all seven (the shared `authenticate()` changed, and every one bundles it): `ingest` v10, `score-worker` v11, `anonymize-worker` v12, `cluster` v6, `generate` v6, `discover-brands` v7, `slide-images` v2 |
+| Tests | This session: 16 `stripEmphasis` cases, `npm run build` and `oxlint` clean, and the panel exercised in the running app (navigation, live edit, restore-to-identical). The Deno suites were not re-run — nothing they cover changed; they last passed in session 21 at 81 + 24. |
+| Frontend | **Rebuilt, not yet deployed at the time of writing** — the three commits above are local. Session 21’s bundle `index-CuPwK0Jh.js` is what cues-tca.netlify.app still serves until Netlify rebuilds. |
 | Live data | 5 sources, 231 raw posts, 26 generation results, 51 reviews (4 approved), 3 editors. Nothing was altered this session: every live write was a value set to what it already held. |
 
 **The workflow is open to every editor now, not just admins.** `_shared/auth.ts`
@@ -68,6 +68,112 @@ SQL and is not obviously worth it.
 of it — 81 posts, 0 failures. "Made in Italy" and the public bodies are preserved
 again, and the accented brand aliases match for the first time. Full account in
 Session 17 below, including what it left stale.
+
+## Session 22 — the carousel stops being a by-product (2026-09-14)
+
+### Why this was worth a session
+
+The operator's reading of the reviewer's notes, and mine, converged on the same
+thing: the slides are the product, and the screen treated them as housekeeping.
+Measured before anything was changed — **118×118px thumbnails, ~11,500px down
+the detail pane, below the raw LinkedIn citation links, under a heading reading
+"Download as slides"**. The citation block, which exists for traceability and
+is consulted almost never, outranked the finished publication.
+
+A mock-up was built first and published as an artifact, with the **real**
+renderer ported into the page and the **real** publication as its content, so
+the layout could be chosen by looking rather than by description. The operator
+picked the stacked arrangement: the post on top, the bench beneath it.
+
+### `SlideDownload` → `PublicationPanel`
+
+Review now opens with the publication. 510px, at 304px down, called **"Your
+publication"**.
+
+- **The post as a reader meets it** — title, the caption and CTA as the
+  accompanying words, the slide, a `1/7` counter, swipe dots, a muted action
+  row; navigation and a filmstrip underneath.
+- **The bench** — heading and body for the slide currently shown above, the
+  file itself beside them with its own name (`slide-01.png · 1080×1080`), then
+  the publication's own title, caption and CTA.
+
+Both bands read and write the same `carousel` prop, so an edit below changes
+the post above once the copy settles. **There is deliberately no second place
+to edit the same text**: `CarouselOutputEditor` is gone from this screen and
+the panel is the editor. Two editing surfaces over one draft is how drafts
+diverge.
+
+### The automatic render path still cannot spend, by a different argument
+
+Session 20 wrote, emphatically, that the automatic path hardcodes `'flat'` and
+is "structurally incapable of spending anything". It no longer hardcodes it: it
+now picks per slide, passing `'image'` **only** where a background has already
+been bought — which is then handed straight back in, so `renderOneSlide` never
+reaches for the network — and `'flat'` everywhere else.
+
+**The invariant is unchanged and is the thing to preserve: the automatic path
+never passes a combination that could trigger a fetch.** What the change buys is
+a preview that stays populated while you type instead of blanking, which matters
+a great deal now that it is the first thing on the screen rather than the last.
+
+One consequence worth knowing. Because every slide now draws immediately,
+"how many would Generate buy" is no longer "how many are not drawn". The cost
+quoted on the button is the number of slides *without a picture*, so it never
+prices work that is free.
+
+### The asterisks, found by making the slides big enough to see them
+
+The generator writes emphasis as markdown — `**like this**` — and canvas has no
+idea what that means, so the markers were wrapped, measured and **painted into
+the PNG**, and published on. Nobody had ever seen it, because the only place a
+slide was ever shown was 118px wide.
+
+`stripEmphasis()` removes the markers before anything is measured. The rule was
+written twice, and both failures of the first attempt were real:
+
+- it listed the punctuation it expected after a closing marker and **missed an
+  em dash** — which is exactly what closes `*connections*` on slide 7 of the
+  publication sitting in Review right now. The boundary is now "not a word
+  character", not a list of characters someone remembered.
+- a sweep for leftover unpaired markers ate the trailing asterisks of a
+  partly-masked name. That is a word, not notation. The sweep is gone: unpaired
+  markup is rare and visible; silently editing someone's text is neither.
+
+16 cases pass, including nested emphasis, `snake_case_name`, `2 * 3 = 6` and a
+lone asterisk. Confirmed end to end in the running app — the Body field shows
+`**modern logistics + rigorous enforcement**` and the file beside it draws it
+clean.
+
+### The scoring engine left the Objective screen
+
+The reviewer asked for it and the operator agreed: which model scores a post,
+and how per-theme scores combine, decide nothing about writing a publication.
+
+**Removed from the form and from the UPDATE, not merely hidden.** A form that
+still writes a field it no longer shows will overwrite a value changed elsewhere
+with whatever it happened to load; the screen can no longer touch
+`scoring_model`, `scoring_model_snapshot` or `aggregation_strategy` at all.
+
+They remain in `configurations`, changed by SQL or in the dashboard. Session
+18's reason for making the model a closed dropdown has not gone away and is
+recorded where the dropdown used to be: `scoring_model_snapshot` reaches OpenAI
+verbatim, so a wrong value does not fail on save — it fails silently on every
+score afterwards. Editing it by hand now happens without that guard-rail.
+
+### Not done
+
+- **Steps 06 and the two-column layout on wide screens** from the agreed
+  sequence: full-screen presentation with arrow keys, and the bench beside the
+  post rather than under it. Left out deliberately; the screen works without
+  them.
+- The generator is still *asked* for markdown. Stripping at render fixes every
+  publication that already exists, which is why it was done there first, but the
+  carousel prompt could stop producing emphasis it has no way to render.
+- Everything in session 21's "Not done" that is a product decision — the tab
+  renames, the orange badge self-description, Tone/Audience dropdowns, the
+  definitions of approved/published/draft/rejected, and the TCA account and
+  payment question.
+- `react-router` GHSA-qwww-vcr4-c8h2 (high) on 7.18.1, pre-existing.
 
 ## Session 21 — the first outside reader, and the door that was shut in front of the whole product (2026-09-11)
 
