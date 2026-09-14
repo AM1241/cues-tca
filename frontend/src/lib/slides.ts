@@ -95,6 +95,40 @@ export type RenderOptions = {
 // =============================================================================
 
 /**
+ * Markdown emphasis, removed before anything is measured or drawn.
+ *
+ * The generator writes emphasis the way it writes everything else — as markdown
+ * (`**like this**`, `*or this*`). Canvas has no idea what that means, so until
+ * now the asterisks were laid out, measured and PAINTED INTO THE IMAGE, and
+ * published on them. At 118px thumbnails nobody ever saw it; the moment the
+ * preview got bigger it was the first thing the eye landed on.
+ *
+ * Stripping the markers keeps every word the editor approved — only the
+ * notation goes — so the guarantee this renderer exists to make is untouched.
+ *
+ * Deliberately narrow. Paired `**`/`__`, and single `*`/`_` only when they hug
+ * a word and sit at a word boundary. A lone asterisk mid-word (a footnote mark,
+ * a multiplication sign, a redacted name) is left exactly where it is: removing
+ * that would change the meaning rather than the notation, which is the one
+ * thing this file must never do.
+ */
+export function stripEmphasis(text: string): string {
+  return text
+    .replace(/\*\*([\s\S]+?)\*\*/g, '$1')
+    .replace(/__([\s\S]+?)__/g, '$1')
+    // A single marker counts only where a word begins or ends. The boundary is
+    // "not a word character", not a list of punctuation: the first attempt
+    // listed the punctuation it expected and missed an em dash, which is
+    // exactly what closes *connections* on slide 7 of the live publication.
+    .replace(/(^|[^\w*])\*([^*\n]+?)\*(?![\w*])/g, '$1$2')
+    .replace(/(^|[^\w_])_([^_\n]+?)_(?![\w_])/g, '$1$2')
+  // No sweep for leftover markers. One was tried and it ate the trailing
+  // asterisks of a partly-masked name, which is a word, not notation —
+  // unpaired markup is rare and visible, silently editing someone's text is
+  // neither.
+}
+
+/**
  * Greedy wrap on real measured widths rather than a character-count estimate:
  * the difference shows up immediately on headings, where one word spilling past
  * the margin is the whole slide's first impression.
@@ -279,6 +313,11 @@ export function drawSlide(ctx: CanvasRenderingContext2D, opts: RenderOptions): v
   const { slide, total, publicationTitle } = opts
   const opening = slide.position === 1
 
+  // Emphasis markers are notation, not words — see stripEmphasis. Done once,
+  // here, so every measurement below sees the text that will actually be drawn.
+  const headingText = stripEmphasis(slide.heading)
+  const bodyText = stripEmphasis(slide.body)
+
   if (variant === 'image' && opts.background) {
     drawCover(ctx, opts.background)
     drawScrim(ctx, theme)
@@ -297,10 +336,10 @@ export function drawSlide(ctx: CanvasRenderingContext2D, opts: RenderOptions): v
   // so it gets the whole canvas for its heading and drops the body — an
   // opening slide that also explains itself has already lost the swipe.
   if (opening) {
-    const heading = fitBlock(ctx, slide.heading, contentWidth, available * 0.62, 92, '800', 48, 1.16)
+    const heading = fitBlock(ctx, headingText, contentWidth, available * 0.62, 92, '800', 48, 1.16)
     const bodyMax = available - heading.lines.length * heading.lineHeight - 120
-    const body = slide.body.trim()
-      ? fitBlock(ctx, slide.body, contentWidth, Math.max(bodyMax, 120), 38, '400', 26, 1.42)
+    const body = bodyText.trim()
+      ? fitBlock(ctx, bodyText, contentWidth, Math.max(bodyMax, 120), 38, '400', 26, 1.42)
       : null
 
     const totalHeight = heading.lines.length * heading.lineHeight +
@@ -319,10 +358,10 @@ export function drawSlide(ctx: CanvasRenderingContext2D, opts: RenderOptions): v
     return
   }
 
-  const heading = fitBlock(ctx, slide.heading, contentWidth, available * 0.4, 68, '800', 38, 1.18)
+  const heading = fitBlock(ctx, headingText, contentWidth, available * 0.4, 68, '800', 38, 1.18)
   const usedByHeading = heading.lines.length * heading.lineHeight + 44
   const body = fitBlock(
-    ctx, slide.body, contentWidth, available - usedByHeading - 60, 40, '400', 24, 1.46,
+    ctx, bodyText, contentWidth, available - usedByHeading - 60, 40, '400', 24, 1.46,
   )
 
   // Centred as a block rather than pinned to the top. Slide bodies are two or
@@ -347,7 +386,7 @@ export function drawSlide(ctx: CanvasRenderingContext2D, opts: RenderOptions): v
 
   drawLines(ctx, body, MARGIN, y, theme.body, '400')
 
-  drawFooter(ctx, theme, publicationTitle)
+  drawFooter(ctx, theme, stripEmphasis(publicationTitle))
 }
 
 /**
