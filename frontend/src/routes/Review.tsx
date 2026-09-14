@@ -9,11 +9,10 @@ import {
   PostOutputCard,
   CarouselOutputCard,
   PostOutputEditor,
-  CarouselOutputEditor,
   type PostOutput,
   type CarouselOutput,
 } from '../components/generation'
-import { SlideDownload } from '../components/SlideDownload'
+import { PublicationPanel } from '../components/PublicationPanel'
 import { functionErrorMessage } from '../lib/functionError'
 
 type Asset = Database['public']['Tables']['editorial_assets']['Row']
@@ -453,8 +452,13 @@ function GeneratedDetail({
             onChange={(next) => setDraft(next)}
           />
         )}
+        {/* Carousels get the publication panel instead of a plain field list:
+            the finished post first, then the slide being edited, then the
+            publication's own text. It is the editor AND the preview AND the
+            download, because splitting them is what buried the slides at the
+            bottom of this screen in the first place. */}
         {draft && row.output_type === 'carousel' && (
-          <CarouselOutputEditor
+          <PublicationPanel
             carousel={draft as CarouselOutput}
             onChange={(next) => setDraft(next)}
           />
@@ -576,17 +580,6 @@ function GeneratedDetail({
             </li>
           ))}
         </ul>
-      )}
-
-      {/* Carousels only: a post has no slides to render. Driven by `draft`,
-          which is what is on screen — including unsaved edits — so the files
-          match what the operator is actually looking at rather than the last
-          saved state. */}
-      {draft && row.output_type === 'carousel' && (
-        <>
-          <hr className="my-5 border-slate-200" />
-          <SlideDownload carousel={draft as CarouselOutput} />
-        </>
       )}
 
       {/* Admin-only (0027). Separated and unmistakably red: this is the one

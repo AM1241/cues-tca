@@ -10,13 +10,19 @@ import {
 import { downloadBlob } from '../lib/exporters'
 
 /**
- * Downloading an approved carousel as PNG slides.
+ * The publication: what was written, what it will look like, and the files.
  *
- * GENERATE AND DOWNLOAD ARE SEPARATE STEPS, deliberately. An earlier version
- * downloaded each slide the moment it was rendered, which meant the only place
- * to look at a paid-for image was the Downloads folder, after the money was
- * spent. Now every slide is shown here as it arrives; downloading is a second,
- * free click, and a slide whose picture is wrong can be regenerated on its own.
+ * This used to be a strip of 118px thumbnails called "Download as slides",
+ * sitting below the citation list at the very bottom of Review. The framing was
+ * backwards. On LinkedIn a carousel IS the images; the text is the source they
+ * are drawn from. So the finished post now leads, and the editing happens
+ * underneath it.
+ *
+ * TWO BANDS, ONE DRAFT
+ * The preview and the bench read and write the same `carousel` prop. Editing a
+ * heading below changes the post above after the copy settles — there is no
+ * second copy of the text to fall out of step, which is the whole reason they
+ * are stacked rather than living on separate screens.
  *
  * WHY renderSlideAt TAKES THE VARIANT AS AN ARGUMENT
  * The flat variant renders automatically, because it is free. The paid one must
@@ -24,15 +30,23 @@ import { downloadBlob } from '../lib/exporters'
  * guard inside an effect was not enough: an earlier build fired all seven paid
  * requests merely on switching the radio, and only escaped billing because the
  * function was not deployed yet. Passing the variant explicitly means the
- * automatic path hardcodes 'flat' and is structurally incapable of spending
- * anything, whatever the component state happens to be.
+ * automatic path decides for itself and cannot be talked into spending.
+ *
+ * THE AUTOMATIC PATH STILL CANNOT SPEND, and it is worth being exact about why,
+ * because it no longer hardcodes 'flat'. It now picks per slide: 'image' only
+ * where a background has ALREADY been bought (passed straight back in, so
+ * `renderOneSlide` never reaches for the network), otherwise 'flat'. The
+ * invariant is unchanged and is the thing to preserve — the automatic path
+ * never passes a combination that could trigger a fetch. What it buys is a
+ * preview that stays populated while you type instead of blanking, which
+ * matters a great deal now that it is the first thing on the screen.
  *
  * A PICTURE IS BOUGHT ONCE
  * Backgrounds are kept for the life of this panel, so changing a word redraws
- * the text on the picture that was already paid for instead of buying it
- * again. Only `redo` — which says so — deliberately buys a new one. The panel
- * is remounted (Review keys it by result id) when a different carousel is
- * opened, so a picture can never be carried over to copy it was not made for.
+ * the text on the picture already paid for. Only `redo` — which says so — buys
+ * a new one. Review keys its detail component by result id, so opening a
+ * different carousel remounts this and no picture is ever carried over to copy
+ * it was not made for.
  */
 type SlideState = {
   slide: CarouselSlide
@@ -54,11 +68,18 @@ function initialStates(slides: CarouselSlide[]): SlideState[] {
  */
 const EDIT_SETTLE_MS = 400
 
-export function SlideDownload({ carousel }: { carousel: CarouselOutput }) {
+export function PublicationPanel({
+  carousel,
+  onChange,
+}: {
+  carousel: CarouselOutput
+  onChange: (next: CarouselOutput) => void
+}) {
   const [variant, setVariant] = useState<SlideVariant>('flat')
   const [quality, setQuality] = useState<SlideQuality>('low')
   const [busy, setBusy] = useState(false)
   const [zoomed, setZoomed] = useState<string | null>(null)
+  const [current, setCurrent] = useState(0)
 
   const slides = useMemo(
     () => [...carousel.slides].sort((a, b) => a.position - b.position),
@@ -81,10 +102,8 @@ export function SlideDownload({ carousel }: { carousel: CarouselOutput }) {
    * Which pass over the copy the slides on screen belong to.
    *
    * Every render reads this when it starts and checks it again before it
-   * writes. A pass that has been superseded — because the copy changed, or the
-   * variant did — therefore cannot put its result on screen, no matter how the
-   * timing falls out. See the note above the render effect for what went wrong
-   * without it.
+   * writes. A pass that has been superseded cannot put its result on screen,
+   * however the timing falls out.
    */
   const renderGenerationRef = useRef(0)
 
@@ -101,14 +120,12 @@ export function SlideDownload({ carousel }: { carousel: CarouselOutput }) {
   useEffect(
     () => () => {
       // Retiring the generation on unmount stops an in-flight render writing
-      // into a component that is gone.
-      //
-      // `renderedKey` MUST be cleared in the same breath. Refs survive a
-      // remount, so leaving it set means the render effect sees "already drawn"
-      // and skips, while the pass that was actually drawing has just been
-      // retired — and the slides sit on "Generating…" forever. React's
-      // StrictMode mounts every component twice in development, so this is not
-      // a corner case: it is what happens on every single page load.
+      // into a component that is gone. `renderedKey` MUST be cleared with it:
+      // refs survive a remount, so leaving it set means the effect sees
+      // "already drawn" and skips while the pass that was drawing has just been
+      // retired — slides then sit on "Generating…" forever. StrictMode mounts
+      // everything twice in development, so this is every page load, not a
+      // corner case.
       renderGenerationRef.current++
       renderedKey.current = null
       releaseUrls()
@@ -125,7 +142,7 @@ export function SlideDownload({ carousel }: { carousel: CarouselOutput }) {
       // Fixed when this render starts. Everything below refuses to write once
       // it no longer matches — a stale result is discarded, never displayed.
       const generation = renderGenerationRef.current
-      const current = () => renderGenerationRef.current === generation
+      const isCurrent = () => renderGenerationRef.current === generation
 
       setStates((prev) =>
         prev.map((s, i) => (i === index ? { ...s, status: 'working', error: null } : s)),
@@ -139,11 +156,9 @@ export function SlideDownload({ carousel }: { carousel: CarouselOutput }) {
         })
         // No object URL is created for a superseded render: it would never be
         // shown and nothing would ever revoke it.
-        if (!current()) return
+        if (!isCurrent()) return
         if (background) {
           backgroundsRef.current.set(slide.position, background)
-          // Mirrored into state purely so the cost shown on the button can be
-          // the number of pictures that will actually be bought.
           setPaidPositions((prev) =>
             prev.includes(slide.position) ? prev : [...prev, slide.position],
           )
@@ -154,7 +169,7 @@ export function SlideDownload({ carousel }: { carousel: CarouselOutput }) {
           prev.map((s, i) => (i === index ? { ...s, status: 'done', blob, url, error: null } : s)),
         )
       } catch (e) {
-        if (!current()) return
+        if (!isCurrent()) return
         setStates((prev) =>
           prev.map((s, i) =>
             i === index ? { ...s, status: 'error', error: (e as Error).message } : s,
@@ -166,23 +181,15 @@ export function SlideDownload({ carousel }: { carousel: CarouselOutput }) {
   )
 
   /**
-   * Re-render the free previews whenever the copy or the variant changes.
-   *
    * `carousel` is Review's LIVE draft: it changes on every keystroke, not on
    * save. The first version keyed the render loop straight off it, so typing a
    * four-letter word started four seven-slide passes at once — and a pass only
    * checked whether it had been superseded BETWEEN slides, so the render
-   * already in flight always finished and wrote its result. Whichever pass
-   * happened to be slowest won. An editor who typed "full" watched the slide
-   * sit on "fu" until something unrelated redrew it.
+   * already in flight always finished and wrote its result. Whichever pass was
+   * slowest won, and an editor who typed "full" watched the slide sit on "fu".
    *
-   * Two changes, and both are needed:
-   *   - the copy is debounced, so a burst of typing produces one pass;
-   *   - a pass writes only while it is the current generation, so a late
-   *     straggler is discarded however the timing falls out.
-   *
-   * The second is the one that protects the guarantee this panel exists to
-   * make — that the words on the image are the words that were approved.
+   * The debounce means a burst of typing produces one pass; the generation
+   * counter means a superseded pass cannot write at all.
    */
   const contentKey = useMemo(() => JSON.stringify(carousel), [carousel])
   const [settledContentKey, setSettledContentKey] = useState(contentKey)
@@ -198,8 +205,8 @@ export function SlideDownload({ carousel }: { carousel: CarouselOutput }) {
 
   /**
    * Only the copy is debounced. A variant change applies at once: waiting on a
-   * radio click would open a window in which `generateAll` could spend real
-   * money and then have its results wiped by a settle that was already queued.
+   * radio click would open a window in which a purchase could be wiped by a
+   * settle that was already queued.
    */
   const renderKey = `${variant}::${settledContentKey}`
 
@@ -209,40 +216,48 @@ export function SlideDownload({ carousel }: { carousel: CarouselOutput }) {
 
     const generation = ++renderGenerationRef.current
     releaseUrls()
-    // Backgrounds are deliberately NOT cleared here. Clearing them meant every
+    // Backgrounds are deliberately NOT cleared. Clearing them meant every
     // edited word threw away every picture already bought and charged for them
-    // again on the next Generate — while the code that exists to prevent that
-    // (`reuseBackground`) was never once called with `true`.
+    // again on the next Generate.
     setStates(initialStates(slides))
-
-    // Only the free variant renders on sight. The paid one waits for the
-    // button — see the note at the top of this file.
-    if (variant !== 'flat') {
-      // Any earlier pass is already barred from writing by the bump above, so
-      // nothing is left rendering.
-      setBusy(false)
-      return
-    }
 
     void (async () => {
       setBusy(true)
       for (let i = 0; i < slides.length; i++) {
         if (renderGenerationRef.current !== generation) return
-        await renderSlideAt(i, 'flat', { reuseBackground: false })
+        // The only place the automatic path chooses a variant, and it chooses
+        // 'image' ONLY where the picture is already in hand — which is then
+        // passed straight back in, so nothing is fetched. See the header.
+        const owned = backgroundsRef.current.has(slides[i].position)
+        await renderSlideAt(i, owned ? 'image' : 'flat', { reuseBackground: true })
       }
       if (renderGenerationRef.current === generation) setBusy(false)
     })()
-  }, [renderKey, slides, variant, renderSlideAt])
+  }, [renderKey, slides, renderSlideAt])
+
+  // Keep the selected slide in range when the editor adds or removes one.
+  useEffect(() => {
+    if (current > total - 1) setCurrent(Math.max(0, total - 1))
+  }, [current, total])
+
+  const paid = useMemo(() => new Set(paidPositions), [paidPositions])
+
+  /**
+   * How many pictures pressing Generate would actually BUY. Not the same as how
+   * many slides it would draw: after an edit every slide is redrawn, but each
+   * one that already has a picture is redrawn for nothing.
+   */
+  const needsBuying = variant === 'image'
+    ? slides.filter((s) => !paid.has(s.position)).length
+    : 0
 
   async function generateAll() {
     setBusy(true)
     for (let i = 0; i < slides.length; i++) {
-      // Skip what is already produced, so pressing this after a partial
-      // failure only pays for what is actually missing.
-      if (states[i]?.status === 'done') continue
-      // Reuse the picture for this slide if one was already bought: after an
-      // edit that is every slide, and the whole pass costs nothing.
-      await renderSlideAt(i, variant, { reuseBackground: true })
+      // Skip what is already bought — pressing this after a partial failure
+      // only pays for what is actually missing.
+      if (paid.has(slides[i].position)) continue
+      await renderSlideAt(i, 'image', { reuseBackground: true })
     }
     setBusy(false)
   }
@@ -255,32 +270,134 @@ export function SlideDownload({ carousel }: { carousel: CarouselOutput }) {
     }
   }
 
+  function setSlideField(position: number, patch: Partial<CarouselSlide>) {
+    onChange({
+      ...carousel,
+      slides: carousel.slides.map((s) => (s.position === position ? { ...s, ...patch } : s)),
+    })
+  }
+
   const doneCount = states.filter((s) => s.status === 'done').length
   const failed = states.filter((s) => s.status === 'error')
-  const remaining = total - doneCount
+  const shown = states[current]
+  const editing = slides[current]
 
-  /**
-   * How many pictures pressing Generate would actually BUY — which is not the
-   * same as how many slides it would draw. After an edit every slide needs
-   * drawing again, but each one that already has a picture is redrawn for
-   * nothing. Showing `remaining` here would have quoted a price for work that
-   * is free.
-   */
-  const paid = new Set(paidPositions)
-  const needsBuying =
-    variant === 'image'
-      ? states.filter((s) => s.status !== 'done' && !paid.has(s.slide.position)).length
-      : 0
+  const statusLine = stale
+    ? 'Redrawing for your edits…'
+    : busy
+      ? `Drawing ${doneCount} of ${total}…`
+      : `${doneCount} of ${total} ready`
 
   return (
     <div>
-      <h3 className="text-sm font-semibold text-slate-700">Download as slides</h3>
+      <h3 className="text-sm font-semibold text-slate-700">Your publication</h3>
       <p className="mt-1 text-xs text-slate-500">
-        One PNG per slide, 1080×1080, ready to upload. The wording is drawn from the
-        approved text exactly as it stands here — no model rewrites it into the picture.
+        {total} slides, 1080×1080, ready to upload. The wording is drawn from the text below
+        exactly as it stands — no model rewrites it into the picture.
       </p>
 
-      <fieldset className="mt-3">
+      {/* ================= the post, as a reader meets it ================= */}
+      <div className="mx-auto mt-4 w-full max-w-lg overflow-hidden rounded-lg border border-slate-200 bg-white">
+        <div className="flex items-center gap-3 px-4 pt-4">
+          <span className="flex h-11 w-11 flex-none items-center justify-center rounded-full bg-slate-900 text-[11px] font-semibold tracking-wide text-emerald-400">
+            CUES
+          </span>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold text-slate-800">
+              {carousel.title || 'Untitled publication'}
+            </p>
+            <p className="text-xs text-slate-500">Carousel · {total} slides</p>
+          </div>
+        </div>
+
+        {(carousel.caption.trim() || carousel.cta.trim()) && (
+          <div className="space-y-2 px-4 pb-3 pt-2 text-sm leading-relaxed text-slate-700">
+            {carousel.caption.trim() && <p>{carousel.caption}</p>}
+            {carousel.cta.trim() && <p className="text-slate-500">{carousel.cta}</p>}
+          </div>
+        )}
+
+        <div className="relative bg-slate-900">
+          {shown?.url ? (
+            <img
+              src={shown.url}
+              alt={`Slide ${shown.slide.position}: ${shown.slide.heading}`}
+              onClick={() => setZoomed(shown.url)}
+              className="aspect-square w-full cursor-zoom-in object-cover"
+            />
+          ) : (
+            <div className="flex aspect-square w-full items-center justify-center">
+              <span className="text-xs text-slate-400">
+                {shown?.status === 'error' ? 'Failed to draw' : 'Drawing…'}
+              </span>
+            </div>
+          )}
+          <span className="absolute right-2 top-2 rounded bg-slate-900/70 px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-slate-100">
+            {current + 1}/{total}
+          </span>
+          <span className="absolute bottom-2 left-1/2 flex -translate-x-1/2 gap-1 rounded-full bg-slate-900/70 px-2 py-1">
+            {slides.map((s, i) => (
+              <span
+                key={s.position}
+                className={`h-1.5 w-1.5 rounded-full ${i === current ? 'bg-emerald-400' : 'bg-slate-100/40'}`}
+              />
+            ))}
+          </span>
+        </div>
+
+        <div className="flex border-t border-slate-200 text-xs text-slate-400">
+          <span className="flex-1 py-2 text-center">Like</span>
+          <span className="flex-1 py-2 text-center">Comment</span>
+          <span className="flex-1 py-2 text-center">Repost</span>
+          <span className="flex-1 py-2 text-center">Send</span>
+        </div>
+      </div>
+
+      {/* ---- moving between slides ---- */}
+      <div className="mt-3 flex items-center justify-center gap-3">
+        <button
+          onClick={() => setCurrent((i) => Math.max(0, i - 1))}
+          disabled={current === 0}
+          className="rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+        >
+          ‹ Previous
+        </button>
+        <span className="min-w-[5rem] text-center text-sm tabular-nums text-slate-500">
+          {String(current + 1).padStart(2, '0')} / {String(total).padStart(2, '0')}
+        </span>
+        <button
+          onClick={() => setCurrent((i) => Math.min(total - 1, i + 1))}
+          disabled={current >= total - 1}
+          className="rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+        >
+          Next ›
+        </button>
+      </div>
+
+      <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+        {states.map((s, i) => (
+          <button
+            key={s.slide.position}
+            onClick={() => setCurrent(i)}
+            aria-current={i === current}
+            title={`Slide ${s.slide.position}`}
+            className={`relative flex-none rounded-md border p-0 leading-none ${
+              i === current ? 'border-emerald-500 ring-2 ring-emerald-100' : 'border-slate-200'
+            }`}
+          >
+            {s.url ? (
+              <img src={s.url} alt="" className="h-16 w-16 rounded-[3px]" />
+            ) : (
+              <span className="flex h-16 w-16 items-center justify-center rounded-[3px] bg-slate-900 text-[10px] text-slate-400">
+                {s.slide.position}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* ================= the files ================= */}
+      <fieldset className="mt-4">
         <legend className="text-xs font-medium text-slate-600">Background</legend>
         <div className="mt-1.5 flex flex-wrap gap-x-6 gap-y-2">
           <label className="flex cursor-pointer items-start gap-2">
@@ -306,9 +423,7 @@ export function SlideDownload({ carousel }: { carousel: CarouselOutput }) {
             />
             <span className="text-sm text-slate-700">
               AI background image
-              <span className="block text-xs text-slate-500">
-                One generated picture per slide.
-              </span>
+              <span className="block text-xs text-slate-500">One generated picture per slide.</span>
             </span>
           </label>
         </div>
@@ -323,8 +438,10 @@ export function SlideDownload({ carousel }: { carousel: CarouselOutput }) {
                 <strong>
                   {needsBuying} image{needsBuying === 1 ? '' : 's'}
                 </strong>{' '}
-                and bills for each one. Downloading what you see is free; generating again is
-                not.
+                and bills for each one.{' '}
+                {needsBuying === total
+                  ? 'Until then the slides above show the designed template.'
+                  : 'Slides that already have a picture are shown on it.'}
               </>
             ) : (
               <>
@@ -350,69 +467,6 @@ export function SlideDownload({ carousel }: { carousel: CarouselOutput }) {
         </div>
       )}
 
-      {/* The slides themselves. This grid is where they are looked at, before
-          anything is downloaded and before anything else is paid for. */}
-      <div className="mt-3 grid grid-cols-[repeat(auto-fill,minmax(7rem,1fr))] gap-2">
-        {states.map((s, i) => (
-          <div key={s.slide.position}>
-            <div className="aspect-square overflow-hidden rounded-md border border-slate-200 bg-slate-900">
-              {s.url ? (
-                <img
-                  src={s.url}
-                  alt={`Slide ${s.slide.position}: ${s.slide.heading}`}
-                  onClick={() => setZoomed(s.url)}
-                  className="h-full w-full cursor-zoom-in object-cover"
-                />
-              ) : (
-                <div className="flex h-full w-full items-center justify-center px-1 text-center">
-                  <span className="text-[10px] leading-tight text-slate-400">
-                    {s.status === 'working'
-                      ? 'Generating…'
-                      : s.status === 'error'
-                        ? 'Failed'
-                        : `Slide ${s.slide.position}`}
-                  </span>
-                </div>
-              )}
-            </div>
-            <div className="mt-1 flex items-center justify-between gap-1">
-              <span className="text-[10px] text-slate-500">{s.slide.position}</span>
-              {s.status === 'done' && (
-                <span className="flex gap-1.5">
-                  <button
-                    onClick={() => downloadBlob(slideFilename(s.slide.position), s.blob!)}
-                    disabled={stale}
-                    title={stale ? 'Waiting for your edits to be drawn' : undefined}
-                    className="text-[10px] text-slate-500 underline underline-offset-2 hover:text-slate-900 disabled:no-underline disabled:opacity-40"
-                  >
-                    save
-                  </button>
-                  {variant === 'image' && (
-                    <button
-                      onClick={() => renderSlideAt(i, 'image', { reuseBackground: false })}
-                      disabled={busy || stale}
-                      title="Generates a new picture for this slide only, and bills for it"
-                      className="text-[10px] text-amber-700 underline underline-offset-2 hover:text-amber-900 disabled:opacity-50"
-                    >
-                      redo
-                    </button>
-                  )}
-                </span>
-              )}
-              {s.status === 'error' && (
-                <button
-                  onClick={() => renderSlideAt(i, variant, { reuseBackground: true })}
-                  disabled={busy || stale}
-                  className="text-[10px] text-red-600 underline underline-offset-2 disabled:opacity-50"
-                >
-                  retry
-                </button>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
-
       {failed.length > 0 && (
         <p className="mt-2 text-xs text-red-600">
           {failed.length} slide{failed.length === 1 ? '' : 's'} failed: {failed[0].error}
@@ -420,17 +474,23 @@ export function SlideDownload({ carousel }: { carousel: CarouselOutput }) {
       )}
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        {variant === 'image' && remaining > 0 && (
+        {variant === 'image' && needsBuying > 0 && (
           <button
             onClick={generateAll}
             disabled={busy || stale}
             className="rounded-md bg-slate-900 px-4 py-1.5 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-60"
           >
-            {busy
-              ? 'Generating…'
-              : needsBuying > 0
-                ? `Generate ${needsBuying} image${needsBuying === 1 ? '' : 's'}`
-                : `Redraw ${remaining} slide${remaining === 1 ? '' : 's'} — free`}
+            {busy ? 'Generating…' : `Generate ${needsBuying} image${needsBuying === 1 ? '' : 's'}`}
+          </button>
+        )}
+        {variant === 'image' && shown?.status === 'done' && (
+          <button
+            onClick={() => renderSlideAt(current, 'image', { reuseBackground: false })}
+            disabled={busy || stale}
+            title="Generates a new picture for this slide only, and bills for it"
+            className="rounded-md border border-amber-300 px-3 py-1.5 text-sm text-amber-800 hover:bg-amber-50 disabled:opacity-50"
+          >
+            Redo slide {current + 1}
           </button>
         )}
         <button
@@ -440,11 +500,95 @@ export function SlideDownload({ carousel }: { carousel: CarouselOutput }) {
         >
           Download {doneCount || ''} {doneCount === 1 ? 'slide' : 'slides'}
         </button>
-        <span className="text-xs text-slate-500">
-          {stale
-            ? 'Redrawing for your edits…'
-            : `${doneCount} of ${total} ready${busy ? '…' : ''}`}
-        </span>
+        <span className="text-xs text-slate-500">{statusLine}</span>
+      </div>
+
+      {/* ================= the bench ================= */}
+      <hr className="my-5 border-slate-200" />
+
+      <h4 className="text-sm font-semibold text-slate-700">
+        Slide {current + 1} of {total}
+      </h4>
+      <p className="mt-1 text-xs text-slate-500">
+        Changes here reach the post above as you type.
+      </p>
+
+      {editing && (
+        <div className="mt-3 grid gap-5 md:grid-cols-[1fr_240px]">
+          <div className="space-y-3">
+            <label className="block text-sm">
+              <span className="mb-1 block font-medium text-slate-700">Heading</span>
+              <input
+                value={editing.heading}
+                onChange={(e) => setSlideField(editing.position, { heading: e.target.value })}
+                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+              />
+            </label>
+            <label className="block text-sm">
+              <span className="mb-1 block font-medium text-slate-700">Body</span>
+              <textarea
+                value={editing.body}
+                onChange={(e) => setSlideField(editing.position, { body: e.target.value })}
+                rows={7}
+                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+              />
+            </label>
+          </div>
+
+          {/* The file itself, with no chrome around it to flatter it: the frame
+              above shows how it reads, this shows what gets uploaded. */}
+          <div className="space-y-1">
+            {shown?.url ? (
+              <img
+                src={shown.url}
+                alt=""
+                onClick={() => setZoomed(shown.url)}
+                className="aspect-square w-full cursor-zoom-in rounded-md border border-slate-200"
+              />
+            ) : (
+              <div className="aspect-square w-full rounded-md border border-slate-200 bg-slate-900" />
+            )}
+            <p className="text-[11px] tabular-nums text-slate-400">
+              {slideFilename(editing.position)} · 1080×1080
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* ================= the publication's own text ================= */}
+      <hr className="my-5 border-slate-200" />
+
+      <h4 className="text-sm font-semibold text-slate-700">Publication text</h4>
+      <p className="mt-1 text-xs text-slate-500">
+        The title carried in the footer of every slide, and the words posted alongside the images.
+      </p>
+
+      <div className="mt-3 space-y-3">
+        <label className="block text-sm">
+          <span className="mb-1 block font-medium text-slate-700">Title</span>
+          <input
+            value={carousel.title}
+            onChange={(e) => onChange({ ...carousel, title: e.target.value })}
+            className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+          />
+        </label>
+        <label className="block text-sm">
+          <span className="mb-1 block font-medium text-slate-700">Caption</span>
+          <textarea
+            value={carousel.caption}
+            onChange={(e) => onChange({ ...carousel, caption: e.target.value })}
+            rows={4}
+            className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+          />
+        </label>
+        <label className="block text-sm">
+          <span className="mb-1 block font-medium text-slate-700">CTA</span>
+          <input
+            value={carousel.cta}
+            onChange={(e) => onChange({ ...carousel, cta: e.target.value })}
+            className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+          />
+        </label>
       </div>
 
       {zoomed && (
