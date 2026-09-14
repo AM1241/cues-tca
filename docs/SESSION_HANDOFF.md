@@ -10,12 +10,12 @@ we" pointer between working sessions.
 
 | | |
 | --- | --- |
-| Branch | `phase6-frontend-binding` — session 22 is `30368b2` (markdown), `0202db7` (scoring engine) and `5523b58` (the publication panel), plus the commit carrying this entry |
+| Branch | `phase6-frontend-binding`, clean, **pushed** — `30368b2` (markdown), `0202db7` (scoring engine), `5523b58` (the publication panel) and `316a865` (docs) |
 | Project | `bxaovkzemfyxrxbcqask` (`cues-tca`, eu-west-1) |
 | Migrations applied | through **0028**, unchanged — no SQL since session 20 |
 | Edge Functions | unchanged this session. Session 21 redeployed all seven (the shared `authenticate()` changed, and every one bundles it): `ingest` v10, `score-worker` v11, `anonymize-worker` v12, `cluster` v6, `generate` v6, `discover-brands` v7, `slide-images` v2 |
 | Tests | This session: 16 `stripEmphasis` cases, `npm run build` and `oxlint` clean, and the panel exercised in the running app (navigation, live edit, restore-to-identical). The Deno suites were not re-run — nothing they cover changed; they last passed in session 21 at 81 + 24. |
-| Frontend | **Rebuilt, not yet deployed at the time of writing** — the three commits above are local. Session 21’s bundle `index-CuPwK0Jh.js` is what cues-tca.netlify.app still serves until Netlify rebuilds. |
+| Frontend | **Deployed.** Live bundle on cues-tca.netlify.app is `index-BJ5_C7wK.js`, identical to the local `npm run build`. Verified on the production URL as `demo.editor@f-in.eu`: the panel opens at 228px with a 510px slide, 7 of 7 draw, typing shows the redraw notice and the post above follows the edit, restoring the text returns a byte-identical image, and the Objective screen no longer carries the scoring engine. |
 | Live data | 5 sources, 231 raw posts, 26 generation results, 51 reviews (4 approved), 3 editors. Nothing was altered this session: every live write was a value set to what it already held. |
 
 **The workflow is open to every editor now, not just admins.** `_shared/auth.ts`
