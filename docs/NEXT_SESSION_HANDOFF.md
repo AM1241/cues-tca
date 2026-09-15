@@ -1,121 +1,134 @@
 # Handoff for the next session
 
-**Written:** 2026-09-15 (updated same day, after a second verification session).
+**Written:** 2026-09-15 (third session — A12 deploy + CHK-04 verification).
+**Audience:** whoever continues this next, including a non-Claude agent
+(DeepSeek) picking up the one remaining Track A item. Read this in full
+before touching anything.
 
 `docs/TCA_TRIAL_HANDOFF.md` is still the authoritative task list — read it in
-full, its own status fields are now current. This note is just the pointer:
-where the code actually is, what changed this session, and what's next.
+full, its own status fields are current as of this session. This note is the
+pointer: where the code actually is, what changed this session, and exactly
+what to do next.
 
 ## Where the code is
 
-- Branch `frontend-design-system`, commit `603714a` — **committed, not
-  pushed, not merged into `phase6-frontend-binding`.**
-- Two real code commits landed this session, both on top of `f5deec3`
-  (previous session's tip):
-  - `61fb237` — CAR-02 fix (removed fabricated per-tier image-generation
-    timings from the quality dropdown) + FLD-01 (one-line hints on
-    Title/Caption/CTA explaining what's drawn on images vs. export-only).
-  - `1f1ac54`, `603714a` — doc updates recording the above and the live
-    verification results.
-- `npm run build` (`tsc -b && vite build`) and `npm run lint` (`oxlint`) both
-  pass clean.
-- **Still nothing pushed or merged.** `frontend-design-system` has no remote
-  tracking branch at all — everything here is local-only until someone
-  pushes it.
+- Branches `frontend-design-system` and `phase6-frontend-binding` are now
+  **in sync** (both at commit `04e0449`) and **both pushed to `origin`**.
+  `phase6-frontend-binding` is what Netlify's Git-connected build deploys
+  from.
+- `04e0449` is a doc-only commit on top of `cd2b61f` (the ACC-04 consumption-
+  attribution work from earlier this session, evaluated and committed
+  first — see `docs/TCA_TRIAL_HANDOFF.md`'s own history for that).
+- `npm run build` (`tsc -b && vite build`) passes clean as of `04e0449`.
 
 ## What happened this session
 
-Picked up from the previous handoff's "Start here" list: A9 (CAR-02 review),
-A10 (FLD-01 hints), then closed out CHK-01/02/03 by actually reaching the
-Review editor — the thing every prior session had been blocked on.
+1. **Evaluated uncommitted ACC-04 work** (consumption attribution — a
+   migration plus threading the caller through 6 Edge Functions) that was
+   sitting in the working tree from a prior DeepSeek session. Verified it
+   against the runtime (`supabase db reset` applied clean through the full
+   migration chain) and had a background review check RLS exposure and
+   function-grant history across every prior migration touching the same
+   tables. Held up: correct wiring, exhaustive actor handling, no grant
+   widening, no overload collisions. Committed as `cd2b61f`.
+2. **A12 — deployed.** Merged `frontend-design-system` into
+   `phase6-frontend-binding` (clean fast-forward, no conflicts — the former
+   already contained everything from the latter), pushed both. Netlify's
+   connected build picked it up automatically. Confirmed live:
+   cues-tca.netlify.app now serves bundle `index-7Ix5u0wk.js` (previously
+   `index-BJ5_C7wK.js`), page and both new assets return HTTP 200.
+3. **CHK-04 — verified at the database layer**, since
+   `demo.editor@f-in.eu`'s real password still wasn't available. Instead of
+   waiting on it, created a throwaway `role='editor'` account in the
+   **local** Postgres only, and exercised the five permission checks
+   directly against RLS/triggers/admin functions by impersonating its JWT
+   (`set_config('request.jwt.claims', ...)` + `set local role
+   authenticated` — the same mechanism PostgREST itself uses, so this reads
+   the actual policies, not a proxy for them). All five held: editor can
+   change `lookback_days`/`enabled`; cannot rename/add/delete a source;
+   cannot delete generated copy. All throwaway rows were deleted afterward;
+   production was never touched. Full detail and exact error messages are
+   in `docs/TCA_TRIAL_HANDOFF.md` under CHK-04's own status line — read that,
+   not just this summary, if you need to reproduce or extend it.
+   - This confirms the *mechanism* is intact. It does not confirm the
+     deployed frontend surfaces these refusals cleanly to a real editor
+     (readable error vs. raw exception) — a real UI pass with
+     `demo.editor@f-in.eu` is still worth doing eventually, but no longer
+     blocks anything.
 
-1. **A9 — CAR-02 review.** Read `PublicationPanel.tsx`'s progress states
-   against the requirement. The states themselves ("Redrawing for your
-   edits…", "Drawing N of M…", per-slide "Generating…"/"Failed to draw") were
-   already adequate. Found one real violation: the quality `<select>` showed
-   "low — about 15s a slide" / "medium — about 60s a slide" — numbers that
-   exist nowhere in this repo. The only timing note in `SESSION_HANDOFF.md`
-   (session 20) is an un-tiered "15-60s" design rationale, not a measured
-   per-quality figure. Fixed to relative wording only ("fastest" /
-   `medium` / "slowest").
-2. **A10 — FLD-01.** Added a one-line hint under each of Title/Caption/CTA in
-   the "Post text" section of `PublicationPanel.tsx`, straight from the
-   table FLD-01 had already worked out (drawn on images vs. export-only).
-   Confirmed `CarouselOutputEditor` in `generation.tsx` has zero call sites —
-   no second editor surface needed the same fix.
-3. **Reached the Review editor, against production, without spending on new
-   API calls.** Production already had 28 generation results / 55 reviews
-   sitting there from prior sessions, including one carousel
-   (`55cab6c5-500d-4b69-9f5c-634122590cd1`) that already had a genuine prior
-   edit baked in ("The shared story" → "The shared full story"). Used that
-   instead of fabricating rows or running a live pipeline:
-   - No project `/run` skill existed for this repo; `chromium-cli` wasn't
-     installed. Used the Playwright SDK fallback: `npx playwright install
-     chromium` (matching version, ~300MB, already partly cached from a
-     previous session) + a throwaway driver script per check, `.env.local`
-     already pointed `npm run dev` at production.
-   - Logged in as `hzafeiris@f-in.eu` (admin) — **not**
-     `demo.editor@f-in.eu`, whose password wasn't available this session
-     (one guess was tried and failed). CHK-01/02/03 don't depend on role, so
-     this didn't block them; CHK-04 specifically needs the editor account
-     and was **not** attempted.
-   - **CHK-01:** edited a slide heading live, confirmed Save went
-     disabled→enabled on change, saved, reloaded the page fully, reopened
-     the same result — edit persisted. Reverted the test marker afterward
-     with a second clean edit/save, confirmed via direct SQL read.
-   - **CHK-02:** approved the result via the live Approve button (**stopped
-     and got explicit user confirmation first** — auto-mode correctly
-     flagged this as a shared-production-state change). Downloaded the
-     bundled Markdown and DOCX exports, confirmed both contain the *edited*
-     heading, not the original (grepped the `.md`, unzipped the `.docx` and
-     grepped `word/document.xml`). Then opened Generate → the matching
-     request and confirmed it shows the *original* heading — Generate/Export
-     legitimately differing on the same item is now empirically shown, not
-     just argued from code.
-   - **CHK-03:** Design Template (free) variant, downloaded all 7 slides,
-     confirmed each is exactly 1080×1080 via `file`, visually confirmed
-     slide 1 (no footer, correct — title only appears from slide 2 on) and
-     slide 4 (footer present, correct title), then ran all 7 through
-     `tesseract` OCR grepping for `*` — **zero found on any slide**.
-   - Stopped the local dev server afterward (`lsof -ti:5174 ... kill`).
+## Start here — this is the task for the next session
 
-## Start here, in order
+**D-2 / NAM-06 is the only open item left in Track A.** Everything else —
+A1 through A12 — is implemented, verified, and deployed. A13 (create and
+send TechnoAlimenti's account) is explicitly **Responsible: Χάρης** per
+`docs/TCA_TRIAL_HANDOFF.md` §2.5 ACC-01 — it is not a developer task, and it
+is sequenced after A12 per DOC-01 (code ships → Χάρης tells Theocharis what
+shipped → guide gets adapted → account + guide go out together). **Do not
+attempt A13.**
 
-1. **CHK-04 — plain-user permissions.** The one unclosed item in A11. Needs
-   `demo.editor@f-in.eu`'s real password (ask Χάρης — do not guess further or
-   reset it without asking first, per this session's own back-and-forth).
-   Confirm: whole workflow runs as editor; lookback + enabled switch can be
-   changed; add/rename/delete source refused; deleting generated copy
-   refused. Session 21 verified this once already — this is a
-   no-regression check, not new ground, and nothing touched this session
-   affects permissions/RLS.
-2. **D-2 (NAM-06)** is still the one open naming decision blocking Track A —
-   labels for the review/download step. Ask Χάρης; not blocking anything
-   else in the plan per §7's own ordering.
-3. **A12 — deploy, then tell Theocharis what shipped.** Track A's code
-   (`cc3dab0` naming/UI + `61fb237` CAR-02/FLD-01) is sitting on
-   `frontend-design-system`, committed but **not pushed, not merged into
-   `phase6-frontend-binding`, not deployed**. The live bundle on
-   cues-tca.netlify.app is still whatever `phase6-frontend-binding` built
-   last (hash recorded in §0.1 of `TCA_TRIAL_HANDOFF.md` — re-check it, it
-   may be stale by now). This is a real decision point, not just a git
-   command — confirm with Χάρης before merging/pushing/deploying, since nothing
-   in this branch has been merged upstream yet and Χάρης said he'd been
-   making changes of his own that weren't all reported.
-4. **A13 — create the TechnoAlimenti account and send it with the guide.**
-   Explicitly sequenced *after* A12 per DOC-01: code ships → Χάρης tells
-   Theocharis what's in the release → Theocharis adapts the guide → account +
-   guide go out together. Don't create this account before A12, even though
-   it's tempting to just get it done — jumping this order was asked about
-   directly last session and the answer was: not yet, precisely because of
-   this sequencing.
-5. FLOW-01 stays out of Track A, per the earlier D-5 answer (deferred to
-   Track B).
+D-2/NAM-06 is a wording decision: the tab label and panel heading for the
+review-and-download step, where the user sees and downloads the generated
+carousel/post. Read `docs/TCA_TRIAL_HANDOFF.md` §2.1 NAM-06 (search for
+"NAM-06") and §6 D-2 (search for "| D-2 |") in full before starting — this
+handoff summarizes, that doc is authoritative.
 
-## Still open / TODO
+Key facts already established, don't re-derive:
 
-Everything else in `TCA_TRIAL_HANDOFF.md` §2 not touched this session:
-DOC-01/02/04/05, ACC-01/03/04/05, FLOW-01, CAR-04. See the doc for evidence
-and status per item — nothing should be treated as done from memory, and the
-doc's own §0.2 reconciliation check should be re-run at the start of any new
-session before trusting anything here.
+- The doc gives **"Review and Download" and "Carousel Download" as EXAMPLES
+  ONLY**, explicitly not final labels. Do not treat them as the answer or
+  as a safe default.
+- The underlying interface (CAR-01) is already done — the relevant code is
+  `frontend/src/components/PublicationPanel.tsx` (renamed from
+  `SlideDownload.tsx` in commit `5523b58`) and whichever route renders its
+  tab (check `frontend/src/routes/`). Find the exact current tab label and
+  panel heading strings before proposing alternatives — don't guess what's
+  live.
+- The wording decision belongs to Χάρης, not to whoever implements this.
+  **Do not pick one and ship it.**
+- Keep new labels consistent with this project's already-settled vocabulary
+  register: D-1 settled "Topics" for the clustering step (see NAM-05) —
+  match that same plain-user tone, not jargon.
+
+### What to produce
+
+1. **2–3 concrete label options** (a tab-label + panel-heading pair for
+   each), each with a one-line rationale grounded in the project's own
+   stated vocabulary decisions. Write these into
+   `docs/TCA_TRIAL_HANDOFF.md` under NAM-06/D-2, following the doc's
+   existing status-line style (§0.3: **Implemented** / **Verified** / **In
+   the tester's build** are different things — this item is none of them
+   yet, so its status line should say "options drafted, decision pending,"
+   not jump ahead).
+2. **A ready-to-apply code change per option** — small diffs/patches (or
+   separate throwaway branches/commits, whichever is cleaner to hand off)
+   that swap in each option's exact strings, so whichever Χάρης picks can be
+   applied with zero further engineering judgment. `npm run build` must
+   pass clean for every option's diff, not just the one you'd personally
+   pick.
+3. Do not touch A13/ACC-01, and do not touch `supabase/migrations/` — this
+   is frontend copy only. If a migration starts to seem necessary, stop:
+   that means you've misread the task.
+
+### Before starting
+
+Run the reconciliation check in `docs/TCA_TRIAL_HANDOFF.md` §0.2:
+`git fetch --all`, check every branch (not only
+`phase6-frontend-binding`/`frontend-design-system`) for undocumented work,
+and compare the deployed bundle hash against a local build. Χάρης has said
+before that he sometimes makes changes without reporting them here — verify
+before trusting this handoff's "where things stand" as still accurate.
+
+### Report back
+
+A short summary of the options drafted and exactly where the corresponding
+diffs/commits/branches live, so the next session — or Χάρης directly — can
+pick one and apply it without re-deriving anything. This session will read
+that report and evaluate the work before it's merged, the same way this
+session evaluated the prior ACC-04 work.
+
+## Still open / not this session's job
+
+Everything else in `TCA_TRIAL_HANDOFF.md` §7 Track B and Track C: FLOW-01,
+DOC-04/05, ACC-03, ACC-05, and the deferred ideas in §4. None of it blocks
+Track A and none of it should be picked up instead of D-2/NAM-06 without
+being asked.
