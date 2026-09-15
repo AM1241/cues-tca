@@ -83,7 +83,7 @@ export function Review() {
   return (
     <div>
       <div className="mb-6 flex items-center gap-6">
-        <h1 className="text-xl font-semibold">Review</h1>
+        <h1 className="text-xl font-semibold">Review & Approve</h1>
         <TabSwitch
           value={tab}
           onChange={setTab}

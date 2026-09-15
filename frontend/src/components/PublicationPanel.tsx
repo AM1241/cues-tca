@@ -290,7 +290,7 @@ export function PublicationPanel({
 
   return (
     <div>
-      <h3 className="text-sm font-semibold text-slate-700">Your carousel</h3>
+      <h3 className="text-sm font-semibold text-slate-700">Your carousel, ready to download</h3>
       <p className="mt-1 text-xs text-slate-500">
         {total} slides, 1080×1080, ready to upload. The wording is drawn from the text below
         exactly as it stands — no model rewrites it into the picture.

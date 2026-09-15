@@ -12,7 +12,7 @@ const routes = [
   { to: '/posts', label: 'Rating' },
   { to: '/clusters', label: 'Topics' },
   { to: '/generate', label: 'Generate' },
-  { to: '/review', label: 'Review' },
+  { to: '/review', label: 'Review & Approve' },
   { to: '/export', label: 'Export' },
 ]
 
