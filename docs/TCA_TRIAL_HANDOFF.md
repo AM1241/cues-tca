@@ -27,6 +27,13 @@ is where drift between the product and the Word user guide is recorded.
 `origin/phase6-frontend-binding` was fetched on 2026-09-15 and carried **no
 commits beyond `6ad6ef1`**. Netlify was serving the bundle built from it.
 
+**Update, same day:** Track A's naming/UI work (§7 A3–A8) was implemented on
+`frontend-design-system` — not `phase6-frontend-binding` — as commit `cc3dab0`.
+That branch already contains everything through `162f80f`
+(this file's own commit) merged in. `cc3dab0` is **committed but not pushed**
+and **not yet merged into `phase6-frontend-binding`**. See
+`docs/NEXT_SESSION_HANDOFF.md` for the current pointer.
+
 ### 0.2 Reconciliation check — do this first
 
 Χάρης has stated he has begun implementing changes that have not all been
@@ -96,19 +103,27 @@ who is responsible · completion criteria.
 
 #### NAM-01 — `Objective` becomes `Settings`
 - **Required:** the tab and every in-app reference to it read "Settings".
-- **Status:** TODO. Not implemented — `frontend/src/components/Layout.tsx:10`
-  still reads `label: 'Objective'`. Route `/objective` may stay; only the label
-  is in scope.
+- **Status:** **IMPLEMENTED, not yet verified or deployed.** `Layout.tsx` nav
+  label, the screen's own `<h1>`, the save toast, and every `reaches` badge
+  that named "Objective" now say "Settings" (`cc3dab0`). Route `/objective`
+  was deliberately left as-is, per this task's own scope note.
+  `grep -rn "Objective" frontend/src` now returns only the route path,
+  the component name `Objective()`, and code comments — no user-visible string.
+  Not yet exercised against the running app; not yet on cues-tca.netlify.app.
 - **Evidence:** explicit agreement with Theocharis.
 - **Dependencies:** none. Blocks DOC-01.
 - **Responsible:** developer.
 - **Done when:** nav shows "Settings"; no visible string in the app calls that
   screen "Objective"; `grep -rn "Objective" frontend/src` returns only route
-  paths and file names.
+  paths and file names. *(Grep condition met; verified-in-app and
+  in-tester's-build are still open — see A9–A13.)*
 
 #### NAM-02 — `Posts` becomes `Rating`
 - **Required:** the tab reads "Rating".
-- **Status:** TODO. `Layout.tsx:11` still reads `label: 'Posts'`.
+- **Status:** **IMPLEMENTED, not yet verified or deployed.** `Layout.tsx` nav
+  label, `Posts.tsx`'s own `<h1>`, and the `reaches`/`STAGE_TONES` references
+  on Settings now say "Rating" (`cc3dab0`). Same not-yet-verified caveat as
+  NAM-01.
 - **Evidence:** explicit agreement with Theocharis. **This supersedes an earlier
   recommendation in this project to keep "Posts"** on the grounds that the name
   was incomplete rather than wrong. The explicit agreement wins.
@@ -119,8 +134,10 @@ who is responsible · completion criteria.
 #### NAM-03 — the product title/description says what it makes
 - **Required:** the title or description makes clear the tool produces **posts
   and carousels**.
-- **Status:** TODO. The app header currently reads "CUES / Editorial Cloud"
-  (`Layout.tsx`), which says nothing about the output.
+- **Status:** **IMPLEMENTED, not yet verified or deployed.** The header now
+  carries a one-line description under "Editorial Cloud": "LinkedIn posts and
+  carousels, ready for review" (`Layout.tsx`, `cc3dab0`). No new product name
+  was invented, per the constraint below.
 - **Open:** **no final new product name has been agreed.** Do not invent one.
 - **Dependencies:** none.
 - **Responsible:** developer for the description; Χάρης + Theocharis for any
@@ -136,38 +153,53 @@ who is responsible · completion criteria.
 - **Constraint, stated explicitly:** do **not** replace every occurrence of
   "publication" with "carousel" — the tool also produces posts, and some places
   legitimately mean the whole output of a period.
-- **Status:** TODO. Known occurrences to review: the Clusters screen's
-  "Create the publication" box (`frontend/src/routes/Clusters.tsx`), and
-  `PublicationPanel.tsx`'s heading "Your publication" and section
-  "Publication text". The panel is new (see CAR-01) and its labels were never
-  final.
+- **Status:** **IMPLEMENTED for the interface, not yet verified, deployed, or
+  applied to the guide.** All the occurrences named below were fixed in
+  `cc3dab0`, plus several found by a follow-up review pass (fixed in a second
+  commit same session): the Topics screen's create button now reads exactly
+  "Create the carousel"; its box heading reads "Create a post and carousel";
+  `PublicationPanel.tsx`'s heading is now "Your carousel", its text-editing
+  section is "Post text", and "Untitled publication" is "Untitled carousel";
+  toast copy in Clusters.tsx ("The post and carousel failed to generate.",
+  "Drafted — approve it in Review.") and the "Draft ready" label no longer say
+  "publication". Left alone, deliberately: the `kind: 'publication'` /
+  `'(per_cluster,publication)'` strings are backend API contract values, not
+  user-visible text, and several code comments — matching the "not every
+  occurrence" constraint above.
 - **Evidence:** explicit request.
 - **Dependencies:** NAM-05, NAM-06 — decide names once, then apply.
 - **Responsible:** developer, after the naming decisions.
 - **Done when:** every user-visible "publication" either says post/carousel
   correctly or is deliberately kept and justified in a code comment; the create
-  button reads "Create the carousel"; UI and guide agree.
+  button reads "Create the carousel"; UI and guide agree. *(UI side done; the
+  guide has not been touched — DOC-01/DOC-04 still pending.)*
 
 #### NAM-05 — what the `Clusters` tab should be called
 - **Required:** a decision. The current name is internal jargon.
-- **Status:** **DECISION NEEDED.**
+- **Status:** **DECIDED and IMPLEMENTED, not yet verified or deployed.** Χάρης
+  confirmed `Topics` (2026-09-15). Applied to the nav label, the screen's own
+  `<h1>` (was "Anonymised & Clusters"), every `reaches`/`STAGE_TONES` reference
+  on Settings, and the cross-links from Generate.tsx and Review.tsx that used
+  to say "the Clusters view" (`cc3dab0` + follow-up commit).
 - **Conflict to resolve:** an earlier proposal in this project was
   `Clusters → Publication`. **NAM-04 supersedes it** — "publication" is exactly
   the vague word being removed. A new name is required.
-- **Design proposal (not agreed):** `Topics`. It names what the grouping
-  produces, avoids the word "publication", and does **not** collide with
-  `Themes`, which is already taken by the six scoring themes on the Settings
-  screen. That collision is real and is the source of Theocharis's question
-  "what is the relationship between themes and clusters?" — do not make it worse
-  by calling this screen "Themes".
+- **Design proposal (not agreed):** ~~`Topics`~~ — **agreed, see Status above.**
+  It names what the grouping produces, avoids the word "publication", and does
+  **not** collide with `Themes`, which is already taken by the six scoring
+  themes on the Settings screen. That collision is real and is the source of
+  Theocharis's question "what is the relationship between themes and
+  clusters?" — do not make it worse by calling this screen "Themes".
 - **Responsible:** Χάρης decides.
 - **Done when:** a name is chosen and applied with NAM-04.
 
 #### NAM-06 — labels for the review-and-download step
 - **Required:** the user must easily understand where they *see* and where they
   *download* the result.
-- **Status:** **DECISION NEEDED** on the wording. The underlying interface work
-  is done — see CAR-01.
+- **Status:** **DECISION STILL NEEDED** on the wording. NAM-05 (its
+  dependency, per D-2) is now settled — "Topics" — so this is no longer
+  blocked, but the actual labels were not decided this session. The
+  underlying interface work is done — see CAR-01.
 - **Note:** "Review and Download" and "Carousel Download" were given as
   **examples, not final labels.**
 - **Responsible:** Χάρης decides; developer applies.
@@ -197,38 +229,55 @@ who is responsible · completion criteria.
 #### UI-02 — `Tone` and `Audience` become dropdowns
 - **Required:** replace entirely free text with a small set of appropriate
   options.
-- **Status:** TODO. Both are free-text fields today in
-  `frontend/src/routes/Objective.tsx` (the "Voice" section).
-- **Exact options were not defined.** The following is a **design proposal**,
-  offered so work can start, and must be confirmed before it ships:
+- **Status:** **IMPLEMENTED, not yet verified or deployed.** Χάρης confirmed
+  shipping the proposed lists as-is (2026-09-15). Both fields are now a
+  `SelectField` closed dropdown in `frontend/src/routes/Objective.tsx`
+  (`cc3dab0`). An out-of-list or empty stored value is kept/shown rather than
+  silently swapped — this needed a follow-up fix in the same session: the
+  first version didn't render a blank option for the never-configured (`''`)
+  case, so the select would visually default to the first list item while the
+  real stored value stayed empty. Fixed before commit.
+- **Options shipped, per confirmed proposal:**
   - *Tone:* Informative · Analytical · Practical · Authoritative ·
     Conversational
   - *Audience:* Industry professionals · Policy and regulators ·
     Business decision-makers · General public
-  - Keep the currently stored value visible even if it is not in the list, the
-    way the scoring model dropdown used to (see `git show 0202db7` for the
-    pattern), so an existing configuration is never silently rewritten.
-- **Dependencies:** none technically; needs the option list confirmed.
+- **Dependencies:** none technically; option list confirmed 2026-09-15.
 - **Responsible:** Χάρης/Theocharis confirm the lists; developer implements.
 - **Done when:** both are closed lists, an out-of-list stored value still
-  displays, and saving does not alter the other Voice fields.
+  displays, and saving does not alter the other Voice fields. *(Met in code;
+  not yet exercised against the running app.)*
 
 #### UI-03 — `Save edits` must be easy to see
 - **Required:** the control is visually distinct enough not to be missed.
-- **Status:** TODO. Still a plain bordered button in
-  `frontend/src/routes/Review.tsx`.
+- **Status:** **IMPLEMENTED, not yet verified or deployed.** Both Review.tsx
+  editors (the carousel/post path and the legacy-asset path) now switch the
+  button to `variant="primary"` with a drop shadow when there are unsaved
+  changes (`cc3dab0`). A first attempt also made the button `sticky` to the
+  viewport bottom while dirty; a review pass caught that this had no proper
+  scroll container and could visually overlap the notes field and
+  Approve/Reject buttons scrolling underneath it, so `sticky` was dropped —
+  prominence comes from color/shadow only, not repositioning.
 - **This got more urgent, not less.** The Review screen was restructured in
   CAR-01 and the panel above the button is now long: the user edits at the top
   and the save control is far below. The risk is losing work, not aesthetics.
 - **Dependencies:** none.
 - **Responsible:** developer.
 - **Done when:** the control is visually primary when there are unsaved changes,
-  and an editor who has typed something cannot plausibly miss it.
+  and an editor who has typed something cannot plausibly miss it. *(Color/shadow
+  change is in code; whether it's enough to "not plausibly miss" on the long
+  restructured panel is a judgment call worth confirming against the running
+  app, not just trusting the diff.)*
 
 #### UI-04 — decide the fate of `Review notes`
 - **Required:** either the purpose is explained clearly in the interface, or the
   field is simplified/removed from the flow.
-- **Status:** **DECISION NEEDED.** Investigated on 2026-09-15; the facts are:
+- **Status:** **DECIDED and IMPLEMENTED, not yet verified or deployed.** Χάρης
+  confirmed: keep the field, relabelled (2026-09-15). Both occurrences in
+  `Review.tsx` now read "Why you approved or rejected this (visible here
+  only)" instead of "Review notes" (`cc3dab0`), exactly the wording this
+  document recommended. Investigated on 2026-09-15; the facts behind that
+  recommendation:
   - Written to `cluster_generation_reviews.approval_notes` when a result is
     approved or rejected (`Review.tsx:377`).
   - Read back only into the same screen when that result is reopened
@@ -240,8 +289,8 @@ who is responsible · completion criteria.
     (`frontend/src/lib/exporters.ts:74`), which is a different, older path.
 - **So the honest description today is:** a private note to yourself about why
   you approved or rejected something, visible only on that item.
-- **Recommendation (mine, not agreed):** keep the field and label it for what it
-  is — "Why you approved or rejected this (visible here only)". It costs one
+- **Recommendation, agreed and applied:** keep the field and label it for what
+  it is — "Why you approved or rejected this (visible here only)". It costs one
   line and removes the confusion; removing it would delete an audit trail that
   `0017` deliberately created.
 - **Not requested:** any mechanism that learns from the notes, and any deletion
@@ -571,15 +620,15 @@ Confirm nothing in FLOW-03 was lost: generation, editing, saving, approval.
 Short list. Each needs one answer, from the person named. **None of these blocks
 the rest of the plan** — work around them in the order given in §7.
 
-| # | Decision | Proposal | Who answers |
-| --- | --- | --- | --- |
-| D-1 | Name for the `Clusters` tab (NAM-05) | `Topics` — avoids "publication" and does not collide with the scoring `Themes` | Χάρης |
-| D-2 | Labels for the review/download step (NAM-06) | Apply once D-1 is settled so the vocabulary is consistent | Χάρης |
-| D-3 | Keep or remove `Review notes` (UI-04) | Keep, relabelled to say it is a private note visible only there | Χάρης |
-| D-4 | The `Tone` and `Audience` option lists (UI-02) | The sets proposed in UI-02 | Χάρης / Theocharis |
-| D-5 | Whether `Generate` disappears from the navigation (FLOW-01) | Yes, moving its content to Clusters and Review | Χάρης, after seeing the proposal |
-| D-6 | A new product name (NAM-03) | None proposed — not invented deliberately | Χάρης / Theocharis |
-| D-7 | Trial dates and any consumption limit (ACC-03) | None proposed — organisational | Χάρης |
+| # | Decision | Proposal | Who answers | Answered |
+| --- | --- | --- | --- | --- |
+| D-1 | Name for the `Clusters` tab (NAM-05) | `Topics` — avoids "publication" and does not collide with the scoring `Themes` | Χάρης | **Yes, 2026-09-15 — `Topics`, implemented in `cc3dab0`.** |
+| D-2 | Labels for the review/download step (NAM-06) | Apply once D-1 is settled so the vocabulary is consistent | Χάρης | No — unblocked now that D-1 is settled, but the actual wording is still open. |
+| D-3 | Keep or remove `Review notes` (UI-04) | Keep, relabelled to say it is a private note visible only there | Χάρης | **Yes, 2026-09-15 — keep + relabel, implemented in `cc3dab0`.** |
+| D-4 | The `Tone` and `Audience` option lists (UI-02) | The sets proposed in UI-02 | Χάρης / Theocharis | **Yes, 2026-09-15 (Χάρης) — ship the proposed lists as-is, implemented in `cc3dab0`.** Theocharis has not separately confirmed; revisit if he pushes back during the trial. |
+| D-5 | Whether `Generate` disappears from the navigation (FLOW-01) | Yes, moving its content to Clusters and Review | Χάρης, after seeing the proposal | **Partially — 2026-09-15: defer to Track B, matching this doc's own recommendation. Not shipped to the first tester.** The yes/no on the proposal itself is still open. |
+| D-6 | A new product name (NAM-03) | None proposed — not invented deliberately | Χάρης / Theocharis | No — still open, no name invented (correct per NAM-03). |
+| D-7 | Trial dates and any consumption limit (ACC-03) | None proposed — organisational | Χάρης | No. |
 
 ---
 
@@ -593,21 +642,45 @@ recommendation; everything else follows an explicit agreement.
 The account cannot usefully be sent before the guide, and the guide cannot be
 written before the names settle. That is the critical path.
 
-| Order | Task | Blocked by |
-| --- | --- | --- |
-| A1 | Reconciliation check (§0.2) — **do this first, always** | — |
-| A2 | D-1, D-2 decided | Χάρης |
-| A3 | NAM-01, NAM-02 — the two agreed renames | A2 for consistency of one pass |
-| A4 | NAM-04, NAM-05, NAM-06 — terminology and the create button | A2 |
-| A5 | NAM-03 — description says posts and carousels | — (name itself is D-6) |
-| A6 | UI-03 — `Save edits` visible **[proposed: do early, it risks lost work]** | — |
-| A7 | UI-02 — Tone/Audience dropdowns | D-4 |
-| A8 | UI-04 — Review notes | D-3 |
-| A9 | CAR-02 — progress indication reviewed | — |
-| A10 | FLD-01 — explain the three fields in the interface | A4 vocabulary |
-| A11 | CHK-01…CHK-04 | A3–A10 |
-| A12 | Deploy, then DOC-01 step 2: Χάρης tells Theocharis what the release contains | A11 |
-| A13 | ACC-01 — create the account and send it with the guide | A12 |
+| Order | Task | Blocked by | Status |
+| --- | --- | --- | --- |
+| A1 | Reconciliation check (§0.2) — **do this first, always** | — | **Done, 2026-09-15.** No undocumented work found on any branch; working tree clean. |
+| A2 | D-1, D-2 decided | Χάρης | **D-1 done** (`Topics`). **D-2 still open** — wording not decided. |
+| A3 | NAM-01, NAM-02 — the two agreed renames | A2 for consistency of one pass | **Implemented, `cc3dab0`.** Not yet verified in the running app or deployed. |
+| A4 | NAM-04, NAM-05, NAM-06 — terminology and the create button | A2 | **NAM-04, NAM-05 implemented, `cc3dab0`.** NAM-06 still open (D-2 undecided). Not yet verified or deployed. |
+| A5 | NAM-03 — description says posts and carousels | — (name itself is D-6) | **Implemented, `cc3dab0`.** Not yet verified or deployed. |
+| A6 | UI-03 — `Save edits` visible **[proposed: do early, it risks lost work]** | — | **Implemented, `cc3dab0`.** Not yet verified or deployed. |
+| A7 | UI-02 — Tone/Audience dropdowns | D-4 | **Implemented, `cc3dab0`.** Not yet verified or deployed. |
+| A8 | UI-04 — Review notes | D-3 | **Implemented, `cc3dab0`.** Not yet verified or deployed. |
+| A9 | CAR-02 — progress indication reviewed | — | Not started. |
+| A10 | FLD-01 — explain the three fields in the interface | A4 vocabulary | Not started. |
+| A11 | CHK-01…CHK-04 | A3–A10 | Not started — and A3–A8 are implemented but not yet *verified*, which CHK-01…04 partly exist to do. |
+| A12 | Deploy, then DOC-01 step 2: Χάρης tells Theocharis what the release contains | A11 | Not started. |
+| A13 | ACC-01 — create the account and send it with the guide | A12 | Not started. |
+
+**A2–A8 code is committed (`cc3dab0`, `frontend-design-system`, unpushed) and
+`npm run build` (tsc -b && vite build) passes clean, but per §0.3's own
+distinction: implemented ≠ verified ≠ in the tester's build.** None of A3–A8
+has been exercised against the running local app (Supabase stack was not
+started this session — deferred on request), and none is on
+cues-tca.netlify.app. Do not report A2–A8 as done in the §0.3 sense until
+that happens.
+
+A follow-up code review on the same diff (before commit) caught and fixed two
+real bugs from the first pass, worth knowing about for anyone touching this
+area next:
+- `SelectField` (Objective.tsx, new for UI-02) didn't render a blank option
+  for a never-configured (`''`) Tone/Audience value, so the dropdown would
+  silently *display* the first list item while the real stored value stayed
+  empty — exactly the kind of silent-mismatch bug UI-02's own requirement
+  was written to avoid. Fixed: an explicit "Not set" option now covers the
+  empty case.
+- The first version of UI-03 made the Save-edits button `sticky` while dirty.
+  There was no scroll container for `sticky` to resolve against (the page
+  scrolls, not the Card), so it pinned to the viewport and could visually
+  overlap the notes field and Approve/Reject buttons scrolling underneath it.
+  Dropped `sticky`; the button is now primary-colored + shadowed only, no
+  repositioning.
 
 FLOW-01 is deliberately **not** in Track A. It is the largest change with the
 least settled shape, and shipping a half-decided navigation change to a first
