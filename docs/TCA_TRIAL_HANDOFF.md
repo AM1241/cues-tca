@@ -630,7 +630,10 @@ who is responsible · completion criteria.
   `approved` / `published` / `draft` / `rejected` mean.
 - **Why:** ten of Theocharis's eleven comprehension questions are the same
   question — the relationship between the stages is not explained anywhere.
-- **Status:** TODO.
+- **Status:** **DRAFTED 2026-09-15** — technical content written to
+  `docs/flow-guide-draft.md` (developer half of the task; not committed as of
+  writing). Theocharis's adaptation/translation into the Word guide is still
+  his half, and is still blocked on D-2 for the final nav labels.
 - **Responsible:** developer drafts the technical content; Theocharis writes the
   guide.
 
@@ -904,7 +907,7 @@ external tester is the wrong risk. **[proposed]**
 | Task | Note |
 | --- | --- |
 | FLOW-01 | Proposal → D-5 → implement → CHK-05 |
-| DOC-04 | The flow chapter; feeds the guide's next revision |
+| DOC-04 | The flow chapter; feeds the guide's next revision — draft in `docs/flow-guide-draft.md` |
 | ACC-04 | Investigate what consumption is already recorded, report, then decide |
 | DOC-05 | Stop asking the generator for markdown |
 | ACC-03 | Dates and limits, once agreed |
