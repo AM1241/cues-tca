@@ -240,10 +240,14 @@ who is responsible · completion criteria.
     Χάρης, not a consistency one.
 
 - **Responsible:** Χάρης decides; developer applies the chosen branch.
-- **Done when:** Option B is applied (`b05e9fc`, done). Still open: push
-  `phase6-frontend-binding`, confirm the Netlify deploy picked it up, and
-  delete the two unused option branches (`nam06-option-a-review-download`,
-  `nam06-option-c-preview-download`).
+- **Done when:** Option B applied (`b05e9fc`), pushed to
+  `phase6-frontend-binding`, and confirmed live via Playwright as
+  `hzafeiris@f-in.eu` on `cues-tca.netlify.app`, 2026-09-15: nav tab and
+  page `<h1>` both read "Review & Approve", panel heading on a selected
+  carousel item reads "Your carousel, ready to download", no console/page
+  errors. The two unused option branches
+  (`nam06-option-a-review-download`, `nam06-option-c-preview-download`)
+  have been deleted. **NAM-06 is fully closed.**
 
 ### 2.2 Simplification of the interface
 
@@ -842,9 +846,9 @@ written before the names settle. That is the critical path.
 | Order | Task | Blocked by | Status |
 | --- | --- | --- | --- |
 | A1 | Reconciliation check (§0.2) — **do this first, always** | — | **Done, 2026-09-15.** No undocumented work found on any branch; working tree clean. |
-| A2 | D-1, D-2 decided | Χάρης | **D-1 done** (`Topics`). **D-2 still open** — options drafted, wording not decided. |
+| A2 | D-1, D-2 decided | Χάρης | **D-1 done** (`Topics`). **D-2 done** — Χάρης picked Option B, 2026-09-15. |
 | A3 | NAM-01, NAM-02 — the two agreed renames | A2 for consistency of one pass | **Implemented, `cc3dab0`. Verified in the running app, 2026-09-15.** |
-| A4 | NAM-04, NAM-05, NAM-06 — terminology and the create button | A2 | **NAM-04, NAM-05 implemented, `cc3dab0`.** NAM-05 verified; NAM-04's create-button text not reachable without clustered data (see UI-03 note). NAM-06 options drafted (D-2 pending) — see NAM-06's Status line. |
+| A4 | NAM-04, NAM-05, NAM-06 — terminology and the create button | A2 | **NAM-04, NAM-05 implemented, `cc3dab0`.** NAM-05 verified; NAM-04's create-button text not reachable without clustered data (see UI-03 note). **NAM-06 done and verified live, `b05e9fc`** — see NAM-06's Status line. |
 | A5 | NAM-03 — description says posts and carousels | — (name itself is D-6) | **Implemented, `cc3dab0`. Verified in the running app, 2026-09-15.** |
 | A6 | UI-03 — `Save edits` visible **[proposed: do early, it risks lost work]** | — | **Implemented, `cc3dab0`. Verified against production, 2026-09-15 (second session)** — see CHK-01: button correctly goes disabled → enabled the instant the field changes. |
 | A7 | UI-02 — Tone/Audience dropdowns | D-4 | **Implemented, `cc3dab0`. Verified in the running app, 2026-09-15** — including the specific empty-value fix. |
@@ -853,7 +857,7 @@ written before the names settle. That is the critical path.
 | A10 | FLD-01 — explain the three fields in the interface | A4 vocabulary | **Implemented, `61fb237`. Verified against production, 2026-09-15 (second session)** — all three hints (Title/Caption/CTA) confirmed rendering live in Review's Post text section. |
 | A11 | CHK-01…CHK-04 | A3–A10 | **CHK-01, CHK-02, CHK-03 verified against production, 2026-09-15 (second session).** **CHK-04 verified at the database layer, 2026-09-15 (third session)** — see each check's own Status line in §5. CHK-04 still wants a real UI pass with `demo.editor@f-in.eu` eventually, but the underlying mechanism (RLS + triggers + admin functions) is confirmed intact and is no longer a blocker. |
 | A12 | Deploy, then DOC-01 step 2: Χάρης tells Theocharis what the release contains | A11 | **Deployed, 2026-09-15 (third session).** `frontend-design-system` pushed to `origin`, fast-forward merged into `phase6-frontend-binding` (`162f80f..cd2b61f`, no conflicts), pushed — Netlify's Git-connected build picked it up automatically. `npm run build` verified clean locally before push. Confirmed live: cues-tca.netlify.app now serves bundle `index-7Ix5u0wk.js` (was `index-BJ5_C7wK.js`), page and both new assets return HTTP 200. DOC-01 step 2 (Χάρης tells Theocharis) not done — that is Χάρης's own action, not a developer task. |
-| A13 | ACC-01 — create the account and send it with the guide | A12 | Not started. A12 is now unblocked. |
+| A13 | ACC-01 — create the account and send it with the guide | A12 | Not started. **Responsible: Χάρης** — not a developer task, do not attempt it. |
 
 **A2–A8 code is committed (`cc3dab0`, `frontend-design-system`, unpushed) and
 `npm run build` (tsc -b && vite build) passes clean.** Per §0.3's own
