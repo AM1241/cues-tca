@@ -204,14 +204,44 @@ who is responsible · completion criteria.
 #### NAM-06 — labels for the review-and-download step
 - **Required:** the user must easily understand where they *see* and where they
   *download* the result.
-- **Status:** **DECISION STILL NEEDED** on the wording. NAM-05 (its
-  dependency, per D-2) is now settled — "Topics" — so this is no longer
-  blocked, but the actual labels were not decided this session. The
-  underlying interface work is done — see CAR-01.
+- **Status:** **OPTIONS DRAFTED, DECISION PENDING.** NAM-05 (its dependency,
+  per D-2) is settled — "Topics" — so this is no longer blocked, but the
+  actual labels have not been picked. Three ready-to-apply options are drafted
+  below on throwaway branches; the decision belongs to Χάρης. The underlying
+  interface work is done — see CAR-01.
 - **Note:** "Review and Download" and "Carousel Download" were given as
   **examples, not final labels.**
-- **Responsible:** Χάρης decides; developer applies.
-- **Done when:** the tab label and the panel heading are agreed and applied.
+- **Live strings today** (verified in `frontend/src/`, commit `9a2f7c8`):
+  the nav tab reads **`Review`** (`frontend/src/components/Layout.tsx:15`);
+  the screen `<h1>` reads **`Review`** (`frontend/src/routes/Review.tsx:86`);
+  the panel heading inside the carousel editor reads **`Your carousel`**
+  (`frontend/src/components/PublicationPanel.tsx:293`). The route stays
+  `/review` in every option — this is copy only, no migrations, no A13.
+- **Options** (each is a branch off `9a2f7c8`, one commit each, all `npm run
+  build` clean — apply with a single `git cherry-pick`):
+
+  | Option | Tab label | Panel heading | Branch |
+  | --- | --- | --- | --- |
+  | A | `Review & Download` | `Your carousel` (unchanged) | `nam06-option-a-review-download` (`606f8a3`) |
+  | B | `Review & Approve` | `Your carousel, ready to download` | `nam06-option-b-review-approve` (`008653b`) |
+  | C | `Review & Download` | `Your carousel — download it here` | `nam06-option-c-preview-download` (`1c2e7d4`) |
+
+  Rationale, grounded in this project's own settled vocabulary:
+  - **A** names the two user actions in the doc's own words, keeps the
+    already-shipped "Your carousel" heading, and matches the plain-user tone
+    D-1 settled ("Topics"). No new wording introduced anywhere.
+  - **B** emphasises approval because that is the step's purpose per FLOW-03
+    (approve before export) and puts "download" on the panel itself, right
+    next to the Download button it describes.
+  - **C** is the strongest "where do I download" answer: the heading points
+    at the download control, while the tab stays minimal. Slightly more
+    conversational ("— download it here"), which is a tone decision for
+    Χάρης, not a consistency one.
+
+- **Responsible:** Χάρης decides; developer applies the chosen branch.
+- **Done when:** one option is cherry-picked onto `phase6-frontend-binding`,
+  the other two branches are deleted, and the tab label and panel heading are
+  agreed and applied.
 
 ### 2.2 Simplification of the interface
 
@@ -785,7 +815,7 @@ the rest of the plan** — work around them in the order given in §7.
 | # | Decision | Proposal | Who answers | Answered |
 | --- | --- | --- | --- | --- |
 | D-1 | Name for the `Clusters` tab (NAM-05) | `Topics` — avoids "publication" and does not collide with the scoring `Themes` | Χάρης | **Yes, 2026-09-15 — `Topics`, implemented in `cc3dab0`.** |
-| D-2 | Labels for the review/download step (NAM-06) | Apply once D-1 is settled so the vocabulary is consistent | Χάρης | No — unblocked now that D-1 is settled, but the actual wording is still open. |
+| D-2 | Labels for the review/download step (NAM-06) | Apply once D-1 is settled so the vocabulary is consistent | Χάρης | No — options A/B/C drafted (2026-09-15, branches `nam06-option-a/b/c-*`), decision still pending. |
 | D-3 | Keep or remove `Review notes` (UI-04) | Keep, relabelled to say it is a private note visible only there | Χάρης | **Yes, 2026-09-15 — keep + relabel, implemented in `cc3dab0`.** |
 | D-4 | The `Tone` and `Audience` option lists (UI-02) | The sets proposed in UI-02 | Χάρης / Theocharis | **Yes, 2026-09-15 (Χάρης) — ship the proposed lists as-is, implemented in `cc3dab0`.** Theocharis has not separately confirmed; revisit if he pushes back during the trial. |
 | D-5 | Whether `Generate` disappears from the navigation (FLOW-01) | Yes, moving its content to Clusters and Review | Χάρης, after seeing the proposal | **Partially — 2026-09-15: defer to Track B, matching this doc's own recommendation. Not shipped to the first tester.** The yes/no on the proposal itself is still open. |
@@ -807,9 +837,9 @@ written before the names settle. That is the critical path.
 | Order | Task | Blocked by | Status |
 | --- | --- | --- | --- |
 | A1 | Reconciliation check (§0.2) — **do this first, always** | — | **Done, 2026-09-15.** No undocumented work found on any branch; working tree clean. |
-| A2 | D-1, D-2 decided | Χάρης | **D-1 done** (`Topics`). **D-2 still open** — wording not decided. |
+| A2 | D-1, D-2 decided | Χάρης | **D-1 done** (`Topics`). **D-2 still open** — options drafted, wording not decided. |
 | A3 | NAM-01, NAM-02 — the two agreed renames | A2 for consistency of one pass | **Implemented, `cc3dab0`. Verified in the running app, 2026-09-15.** |
-| A4 | NAM-04, NAM-05, NAM-06 — terminology and the create button | A2 | **NAM-04, NAM-05 implemented, `cc3dab0`.** NAM-05 verified; NAM-04's create-button text not reachable without clustered data (see UI-03 note). NAM-06 still open (D-2 undecided). |
+| A4 | NAM-04, NAM-05, NAM-06 — terminology and the create button | A2 | **NAM-04, NAM-05 implemented, `cc3dab0`.** NAM-05 verified; NAM-04's create-button text not reachable without clustered data (see UI-03 note). NAM-06 options drafted (D-2 pending) — see NAM-06's Status line. |
 | A5 | NAM-03 — description says posts and carousels | — (name itself is D-6) | **Implemented, `cc3dab0`. Verified in the running app, 2026-09-15.** |
 | A6 | UI-03 — `Save edits` visible **[proposed: do early, it risks lost work]** | — | **Implemented, `cc3dab0`. Verified against production, 2026-09-15 (second session)** — see CHK-01: button correctly goes disabled → enabled the instant the field changes. |
 | A7 | UI-02 — Tone/Audience dropdowns | D-4 | **Implemented, `cc3dab0`. Verified in the running app, 2026-09-15** — including the specific empty-value fix. |
