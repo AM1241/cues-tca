@@ -393,19 +393,33 @@ who is responsible · completion criteria.
 - **Required:** the user is clearly informed that image creation/update is in
   progress. The delay was considered acceptable; a faster, more expensive model
   was **not** requested.
-- **Status:** PARTIAL — needs review against this requirement, not assumed done.
-  `PublicationPanel.tsx` already shows "Redrawing for your edits…" while the
-  text is being redrawn, a "Drawing N of M…" line, and per-slide "Generating…"
-  while a paid image is fetched.
+- **Status:** **IMPLEMENTED, not yet verified in the running app, 2026-09-15.**
+  Reviewed `PublicationPanel.tsx` against this requirement. The progress
+  indication itself was already sufficient and needed no change: "Redrawing for
+  your edits…" while text is being redrawn, a "Drawing N of M…" status line, the
+  generate button switching to "Generating…" while busy, and per-slide "Drawing…"
+  / "Failed to draw" states. **Found one real violation of the explicit
+  instruction below:** the quality `<select>` showed "low — about 15s a slide"
+  and "medium — about 60s a slide" — numbers that do not exist anywhere in this
+  repo. The only timing note in `docs/SESSION_HANDOFF.md` (session 20, on
+  `supabase/functions/slide-images/`) says generation takes "15-60s" as a single
+  un-tiered range, given as a design rationale for one-request-per-slide, not as
+  a measured per-quality-tier figure. `quality` is passed straight through to
+  the OpenAI images API server-side with no timing code anywhere. Fixed: the
+  dropdown now reads "low — fastest" / "medium" / "high — slowest" — relative
+  ordering only, no invented numbers.
 - **Explicit instruction:** the "10 seconds" mentioned in conversation is **not
   a measured figure and must not be presented as one.** Any duration shown to a
   user or written in the guide needs a real measurement behind it. The only
   measured figures in this project are session 20's image-generation timings —
   see `docs/SESSION_HANDOFF.md`, session 20 — and they are per-image generation
-  costs and durations, not page-level waits.
+  costs and durations, not page-level waits, and not broken down by quality tier.
 - **Responsible:** developer.
 - **Done when:** a user who triggers image generation or an edit always sees
   that something is happening, and no unmeasured duration is claimed anywhere.
+  *(Both halves are true in code now. Not yet clicked through in a running app —
+  same constraint as UI-03/UI-04: needs a real generated result to reach the
+  panel at all.)*
 
 #### CAR-03 — markdown is not painted into the images
 - **Required:** emphasis markers from the generator must not appear in the PNGs.
@@ -452,8 +466,15 @@ who is responsible · completion criteria.
   them, above the slide, in the post frame.
 - **Conclusion:** all three are used and none is orphaned. The problem is that
   nothing told the user what they were for.
-- **Remaining work:** explain them in the interface and guide. Simplification is
-  **not** recommended on this evidence.
+- **Status:** **IMPLEMENTED for the interface, not yet verified, 2026-09-15.**
+  Added a one-line hint under each of Title/Caption/CTA in
+  `PublicationPanel.tsx`'s "Post text" section, stating plainly whether it's
+  drawn on the images or export/post-only — directly from the table above. No
+  second editor surface exists to also fix: `CarouselOutputEditor` in
+  `generation.tsx` is defined but confirmed unused (grep found zero call sites),
+  matching CAR-01's own note that it was retired from this screen.
+- **Remaining work:** the guide via DOC-01. Simplification is **not**
+  recommended on this evidence.
 - **Responsible:** developer for the interface hints; guide via DOC-01.
 
 ### 2.5 Access for TechnoAlimenti and the trial
@@ -677,8 +698,8 @@ written before the names settle. That is the critical path.
 | A6 | UI-03 — `Save edits` visible **[proposed: do early, it risks lost work]** | — | **Implemented, `cc3dab0`.** Not reachable this session — needs a real generated result to edit (live LLM run). |
 | A7 | UI-02 — Tone/Audience dropdowns | D-4 | **Implemented, `cc3dab0`. Verified in the running app, 2026-09-15** — including the specific empty-value fix. |
 | A8 | UI-04 — Review notes | D-3 | **Implemented, `cc3dab0`.** Not reachable this session — same reason as UI-03. |
-| A9 | CAR-02 — progress indication reviewed | — | Not started. |
-| A10 | FLD-01 — explain the three fields in the interface | A4 vocabulary | Not started. |
+| A9 | CAR-02 — progress indication reviewed | — | **Implemented, `61fb237`.** Found and fixed one real violation (fabricated per-tier timings); progress indication itself was already adequate. Not yet verified live. |
+| A10 | FLD-01 — explain the three fields in the interface | A4 vocabulary | **Implemented, `61fb237`.** One-line hint added per field. Not yet verified live. |
 | A11 | CHK-01…CHK-04 | A3–A10 | **Partially done, 2026-09-15.** Naming/nav (CHK-04's non-permission half) and UI-02 confirmed live. CHK-01 (save an edit), CHK-02 (export matches), CHK-03 (carousel download) still need a real generated result — blocked on a live pipeline run, not on code review. |
 | A12 | Deploy, then DOC-01 step 2: Χάρης tells Theocharis what the release contains | A11 | Not started. |
 | A13 | ACC-01 — create the account and send it with the guide | A12 | Not started. |
