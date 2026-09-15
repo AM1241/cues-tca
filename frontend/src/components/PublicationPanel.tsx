@@ -459,8 +459,8 @@ export function PublicationPanel({
               disabled={busy}
               className="ml-1 rounded border border-amber-300 bg-white px-1.5 py-0.5 text-xs"
             >
-              <option value="low">low — about 15s a slide</option>
-              <option value="medium">medium — about 60s a slide</option>
+              <option value="low">low — fastest</option>
+              <option value="medium">medium</option>
               <option value="high">high — slowest</option>
             </select>
           </label>
@@ -566,6 +566,9 @@ export function PublicationPanel({
       <div className="mt-3 space-y-3">
         <label className="block text-sm">
           <span className="mb-1 block font-medium text-slate-700">Title</span>
+          <span className="mb-1 block text-xs text-slate-500">
+            Drawn on every slide's footer, and the heading in the exported file.
+          </span>
           <input
             value={carousel.title}
             onChange={(e) => onChange({ ...carousel, title: e.target.value })}
@@ -574,6 +577,9 @@ export function PublicationPanel({
         </label>
         <label className="block text-sm">
           <span className="mb-1 block font-medium text-slate-700">Caption</span>
+          <span className="mb-1 block text-xs text-slate-500">
+            Not on the images — the words shown above them when the post is read, and in the export.
+          </span>
           <textarea
             value={carousel.caption}
             onChange={(e) => onChange({ ...carousel, caption: e.target.value })}
@@ -583,6 +589,9 @@ export function PublicationPanel({
         </label>
         <label className="block text-sm">
           <span className="mb-1 block font-medium text-slate-700">CTA</span>
+          <span className="mb-1 block text-xs text-slate-500">
+            Not on the images — the closing line under the caption, and in the export.
+          </span>
           <input
             value={carousel.cta}
             onChange={(e) => onChange({ ...carousel, cta: e.target.value })}
