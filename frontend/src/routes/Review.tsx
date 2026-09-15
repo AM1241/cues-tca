@@ -167,7 +167,7 @@ function GeneratedReview() {
   if (rows.length === 0)
     return (
       <EmptyState>
-        Nothing generated yet — run a generation from the Clusters view.
+        Nothing generated yet — run a generation from the Topics view.
       </EmptyState>
     )
 
@@ -454,22 +454,26 @@ function GeneratedDetail({
 
       <div className="mt-4 flex items-center gap-3">
         <Button
+          variant={dirty ? 'primary' : 'secondary'}
           onClick={() =>
             // PostOutput/CarouselOutput are structurally valid JSON, but a named
             // interface is not assignable to the index-signature `Json` type.
             patch({ edited_output: draft as unknown as Json }, 'Edits saved')
           }
           disabled={busy || !dirty}
+          className={dirty ? 'shadow-lg' : ''}
         >
           Save edits
         </Button>
-        {dirty && <span className="text-xs text-amber-600">unsaved edits</span>}
+        {dirty && <span className="text-xs font-medium text-amber-600">unsaved edits</span>}
       </div>
 
       <hr className="my-5 border-slate-200" />
 
       <label className="block text-sm">
-        <span className="mb-1 block font-medium text-slate-700">Review notes</span>
+        <span className="mb-1 block font-medium text-slate-700">
+          Why you approved or rejected this (visible here only)
+        </span>
         <textarea
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
@@ -886,17 +890,22 @@ function AssetDetail({
       )}
 
       <div className="mt-4 flex items-center gap-3">
-        <Button onClick={saveEdits} disabled={busy || !dirty}>
+        <Button
+          variant={dirty ? 'primary' : 'secondary'}
+          onClick={saveEdits}
+          disabled={busy || !dirty}
+          className={dirty ? 'shadow-lg' : ''}
+        >
           Save edits
         </Button>
-        {dirty && <span className="text-xs text-amber-600">unsaved edits</span>}
+        {dirty && <span className="text-xs font-medium text-amber-600">unsaved edits</span>}
       </div>
 
       <hr className="my-5 border-slate-200" />
 
       <label className="block text-sm">
         <span className="mb-1 block font-medium text-slate-700">
-          Review notes
+          Why you approved or rejected this (visible here only)
         </span>
         <textarea
           value={notes}

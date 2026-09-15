@@ -122,12 +122,12 @@ export function Generate() {
         <h1 className="text-xl font-semibold">Generation history</h1>
         <p className="mt-1 text-sm text-slate-500">
           {requests.length} request{requests.length === 1 ? '' : 's'} — trigger new generations
-          from the Clusters view. Results are read-only; a re-generation is a new request.
+          from the Topics view. Results are read-only; a re-generation is a new request.
         </p>
       </div>
 
       {requests.length === 0 ? (
-        <EmptyState>No generation requests yet. Select clusters on the Clusters view and generate.</EmptyState>
+        <EmptyState>No generation requests yet. Select topics on the Topics view and generate.</EmptyState>
       ) : (
         <div className="grid grid-cols-[1fr_1.6fr] gap-6">
           <div className="max-h-[75vh] space-y-2 overflow-y-auto">

@@ -168,7 +168,7 @@ export function Posts() {
     await loadQueue()
     if (r?.config_rotated) {
       toast.success(
-        `Objective changed — scoring restarted under the new settings. ${r.enqueued} queued.`,
+        `Settings changed since this was last scored — restarted under the new settings. ${r.enqueued} queued.`,
       )
     } else if (!r?.enqueued) {
       toast.success('Nothing to queue — every post already has a score.')
@@ -252,7 +252,7 @@ export function Posts() {
     <div>
       <div className="mb-6 flex items-end justify-between">
         <div>
-          <h1 className="text-xl font-semibold">Posts</h1>
+          <h1 className="text-xl font-semibold">Rating</h1>
           <p className="mt-1 text-sm text-slate-500">
             {filtered.length} of {rows.length} analysed posts
             <span className="text-slate-400">

@@ -429,16 +429,16 @@ export function Clusters() {
     if (error) {
       // A 4xx carries its real message in the body, not in supabase-js's
       // generic "non-2xx status code" — see lib/functionError.ts.
-      toast.error(await functionErrorMessage(error, 'The publication failed to generate.'))
+      toast.error(await functionErrorMessage(error, 'The post and carousel failed to generate.'))
       return
     }
     if (data?.ok === false) {
-      toast.error(data.error ?? 'The publication failed to generate.')
+      toast.error(data.error ?? 'The post and carousel failed to generate.')
       return
     }
 
     setPublication(data.publication as PublicationView)
-    toast.success('Publication drafted — approve it in Review.')
+    toast.success('Drafted — approve it in Review.')
     // loadRuns also refreshes the per-run generated counts in the selector.
     await loadRuns()
   }
@@ -528,7 +528,7 @@ export function Clusters() {
     <div>
       <div className="mb-6 flex items-end justify-between gap-6">
         <div>
-          <h1 className="text-xl font-semibold">Anonymised &amp; Clusters</h1>
+          <h1 className="text-xl font-semibold">Topics</h1>
           <p className="mt-1 text-sm text-slate-500">
             {rows.length} anonymised post{rows.length === 1 ? '' : 's'}
             {failedRows.length > 0 ? ` · ${failedRows.length} not yet anonymised` : ''}
@@ -643,11 +643,11 @@ export function Clusters() {
               : embeddedCount === 1
                 ? 'Exactly 1 post was embedded — clustering needs at least two similar posts to form a group, so a single post can never form one on its own.'
                 : `${embeddedCount} posts were embedded, but none were similar enough to each other to reach the minimum group size.`}
-            {' '}No group means no publication — there is nothing here to approve or reject.
+            {' '}No group means no post or carousel — there is nothing here to approve or reject.
           </p>
           <p className="mt-1 text-slate-500">
             Widen the period, collect from more sources, or lower the similarity
-            threshold on Objective, then run clustering again.
+            threshold on Settings, then run clustering again.
           </p>
         </div>
       )}
@@ -659,7 +659,7 @@ export function Clusters() {
         <div className="mb-6 rounded-lg border border-indigo-200 bg-indigo-50/40 p-4">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <h2 className="text-sm font-semibold text-slate-900">Create the publication</h2>
+              <h2 className="text-sm font-semibold text-slate-900">Create a post and carousel</h2>
               <p className="mt-0.5 text-xs text-slate-600">
                 One LinkedIn post and one carousel covering{' '}
                 <span className="font-medium">
@@ -682,14 +682,14 @@ export function Clusters() {
               disabled={publishing || eligibleClusters.length === 0}
               className="shrink-0 rounded-md bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
             >
-              {publishing ? 'Writing…' : 'Create publication'}
+              {publishing ? 'Writing…' : 'Create the carousel'}
             </button>
           </div>
 
           {publication && (
             <div className="mt-4 rounded-md border border-slate-200 bg-white p-3">
               <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                Published draft — review and approve it in Review
+                Draft ready — review and approve it in Review
               </p>
               <h3 className="mt-1 text-sm font-semibold text-slate-900">{publication.title}</h3>
               <p className="mt-1 text-xs text-slate-500">

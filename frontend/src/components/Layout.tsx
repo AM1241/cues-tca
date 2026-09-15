@@ -8,9 +8,9 @@ import { Button } from './ui'
 // bar now works top-to-bottom through the actual process.
 const routes = [
   { to: '/sources', label: 'Sources' },
-  { to: '/objective', label: 'Objective' },
-  { to: '/posts', label: 'Posts' },
-  { to: '/clusters', label: 'Clusters' },
+  { to: '/objective', label: 'Settings' },
+  { to: '/posts', label: 'Rating' },
+  { to: '/clusters', label: 'Topics' },
   { to: '/generate', label: 'Generate' },
   { to: '/review', label: 'Review' },
   { to: '/export', label: 'Export' },
@@ -26,7 +26,12 @@ export function Layout({ email }: { email: string }) {
               <p className="text-xs font-medium tracking-widest text-slate-500 uppercase">
                 CUES
               </p>
-              <p className="text-sm font-semibold leading-none">Editorial Cloud</p>
+              <p className="text-sm font-semibold leading-none">
+                Editorial Cloud
+              </p>
+              <p className="text-xs text-slate-500 leading-none mt-1">
+                LinkedIn posts and carousels, ready for review
+              </p>
             </div>
             <nav className="flex gap-1">
               {routes.map((r) => (

@@ -290,7 +290,7 @@ export function PublicationPanel({
 
   return (
     <div>
-      <h3 className="text-sm font-semibold text-slate-700">Your publication</h3>
+      <h3 className="text-sm font-semibold text-slate-700">Your carousel</h3>
       <p className="mt-1 text-xs text-slate-500">
         {total} slides, 1080×1080, ready to upload. The wording is drawn from the text below
         exactly as it stands — no model rewrites it into the picture.
@@ -304,7 +304,7 @@ export function PublicationPanel({
           </span>
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold text-slate-800">
-              {carousel.title || 'Untitled publication'}
+              {carousel.title || 'Untitled carousel'}
             </p>
             <p className="text-xs text-slate-500">Carousel · {total} slides</p>
           </div>
@@ -558,7 +558,7 @@ export function PublicationPanel({
       {/* ================= the publication's own text ================= */}
       <hr className="my-5 border-slate-200" />
 
-      <h4 className="text-sm font-semibold text-slate-700">Publication text</h4>
+      <h4 className="text-sm font-semibold text-slate-700">Post text</h4>
       <p className="mt-1 text-xs text-slate-500">
         The title carried in the footer of every slide, and the words posted alongside the images.
       </p>

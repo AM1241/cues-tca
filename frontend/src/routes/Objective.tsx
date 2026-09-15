@@ -34,6 +34,23 @@ type Draft = {
   aliases: { key: string; value: string }[]
 }
 
+// Closed lists for the Voice dropdowns (UI-02). Proposed set, confirmed for
+// the TechnoAlimenti trial — see docs/TCA_TRIAL_HANDOFF.md D-4.
+const TONE_OPTIONS = [
+  'Informative',
+  'Analytical',
+  'Practical',
+  'Authoritative',
+  'Conversational',
+] as const
+
+const AUDIENCE_OPTIONS = [
+  'Industry professionals',
+  'Policy and regulators',
+  'Business decision-makers',
+  'General public',
+] as const
+
 /** Same convention the seeded themes use: "talent development" -> talent_development. */
 function toThemeId(label: string): string {
   return label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/(^_|_$)/g, '')
@@ -140,7 +157,7 @@ export function Objective() {
     if (error) toast.error(error.message)
     else {
       setDirty(false)
-      toast.success('Objective saved')
+      toast.success('Settings saved')
     }
   }
 
@@ -150,7 +167,7 @@ export function Objective() {
   return (
     <div className="max-w-2xl">
       <div className="mb-2 flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Editorial objective</h1>
+        <h1 className="text-xl font-semibold">Settings</h1>
         <div className="flex items-center gap-3">
           {dirty && (
             <span className="text-sm text-amber-600">unsaved changes</span>
@@ -162,7 +179,7 @@ export function Objective() {
       </div>
       <p className="mb-6 text-sm text-slate-500">
         Grouped by which screen a change actually reaches — every group below names it.
-        Nothing here takes effect on its own: Posts still needs Score now, Clusters still
+        Nothing here takes effect on its own: Rating still needs Score now, Topics still
         needs Run clustering, on the settings that were active at the time.
       </p>
 
@@ -170,7 +187,7 @@ export function Objective() {
       <StageHeader
         n={1}
         title="Scope"
-        reaches={['Posts', 'Clusters', 'Generate']}
+        reaches={['Rating', 'Topics', 'Generate']}
         detail="The domain and the themes are read almost everywhere: they shape the scoring rubric, name the clusters, and appear in the final text's brief. Get these right first — everything else narrows within them."
       />
 
@@ -183,13 +200,13 @@ export function Objective() {
         <p className="mt-2 text-sm text-slate-500">
           A post outside this domain scores <strong>0 on every theme</strong>, however
           strongly it matches one in the abstract — an unrelated sector's
-          sustainability story is not a sustainability story for this publication.
+          sustainability story is not a sustainability story for this domain.
         </p>
       </Section>
 
       <Section
         title="Themes"
-        hint="The angles Posts scores each item against, within the domain above."
+        hint="The angles Rating scores each item against, within the domain above."
       >
         <div className="flex flex-wrap gap-2">
           {draft.themes.map((t) => (
@@ -263,8 +280,8 @@ export function Objective() {
       <StageHeader
         n={2}
         title="Deciding what's relevant"
-        reaches={['Posts']}
-        detail="Controls the Posts screen only: which scored items are worth carrying forward at all."
+        reaches={['Rating']}
+        detail="Controls the Rating screen only: which scored items are worth carrying forward at all."
       />
 
       <Section
@@ -289,7 +306,7 @@ export function Objective() {
         </div>
         <p className="mt-2 text-xs text-slate-500">
           A post scoring below this never becomes eligible for Anonymise now on
-          Clusters either — this is the one setting that reaches two screens at once.
+          Topics either — this is the one setting that reaches two screens at once.
         </p>
       </Section>
 
@@ -297,8 +314,8 @@ export function Objective() {
       <StageHeader
         n={3}
         title="Anonymising and grouping"
-        reaches={['Clusters']}
-        detail="Everything here runs on the Clusters screen: what a company name becomes once hidden, which names are hidden at all, and how similar posts are grouped into the themes a publication is built from."
+        reaches={['Topics']}
+        detail="Everything here runs on the Topics screen: what a company name becomes once hidden, which names are hidden at all, and how similar posts are grouped into the themes a post or carousel is built from."
       />
 
       <Section
@@ -397,7 +414,7 @@ export function Objective() {
 
       <Section
         title="Clustering"
-        hint="How anonymised posts are grouped into themes, still on the Clusters screen."
+        hint="How anonymised posts are grouped into themes, still on the Topics screen."
       >
         <div className="space-y-3">
           <label className="block text-sm">
@@ -442,12 +459,12 @@ export function Objective() {
         n={4}
         title="Writing the final text"
         reaches={['Generate']}
-        detail="Read only when a post or publication is actually written on the Clusters screen's Create publication button. Nothing here touches scoring or anonymisation."
+        detail="Read only when a post or carousel is actually written on the Topics screen's Create the carousel button. Nothing here touches scoring or anonymisation."
       />
 
       <Section
         title="Editorial brief"
-        hint="The main instruction: what this publication is trying to say, and why. This is the field that used to be labelled “Style” — it is a direction, not a stylistic descriptor."
+        hint="The main instruction: what this post or carousel is trying to say, and why. This is the field that used to be labelled “Style” — it is a direction, not a stylistic descriptor."
       >
         <label className="block text-sm">
           <textarea
@@ -461,20 +478,22 @@ export function Objective() {
         <p className="mt-2 text-xs text-slate-500">
           Left blank, the generator falls back to a generic sentence built from the
           Domain above — usable, but worth writing your own once you know what this
-          publication is actually for.
+          post or carousel is actually for.
         </p>
       </Section>
 
       <Section title="Voice" hint="Shorter dials on the same text — tone and who it's written for.">
         <div className="space-y-3">
-          <TextField
+          <SelectField
             label="Tone"
             value={draft.voice_tone}
+            options={TONE_OPTIONS}
             onChange={(v) => patch({ voice_tone: v })}
           />
-          <TextField
+          <SelectField
             label="Audience"
             value={draft.voice_audience}
+            options={AUDIENCE_OPTIONS}
             onChange={(v) => patch({ voice_audience: v })}
           />
         </div>
@@ -484,8 +503,8 @@ export function Objective() {
 }
 
 const STAGE_TONES: Record<string, BadgeTone> = {
-  Posts: 'info',
-  Clusters: 'violet',
+  Rating: 'info',
+  Topics: 'violet',
   Generate: 'teal',
 }
 
@@ -493,7 +512,7 @@ const STAGE_TONES: Record<string, BadgeTone> = {
  * One per pipeline stage. Exists because the flat stack of sections this
  * screen used to be gave no indication of where a change actually landed —
  * an operator could not tell "Style" only ever reached Generate, or that
- * Relevance threshold reaches both Posts and Clusters, without reading the
+ * Relevance threshold reaches both Rating and Topics, without reading the
  * source. The `reaches` badges are the same names as the nav bar and the
  * button an operator will actually press next.
  */
@@ -562,6 +581,41 @@ function TextField({
   return (
     <Field label={label}>
       <TextInput value={value} onChange={(e) => onChange(e.target.value)} />
+    </Field>
+  )
+}
+
+/**
+ * A closed list of options, matching TextField's label/value/onChange(v) shape.
+ * The stored value is always kept as an option even when it is not in `options`,
+ * so an existing configuration written before this list existed — or set by hand —
+ * is shown rather than silently swapped for the first option on save.
+ */
+function SelectField({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string
+  value: string
+  options: readonly string[]
+  onChange: (v: string) => void
+}) {
+  const allOptions = !value ? ['', ...options] : options.includes(value) ? options : [value, ...options]
+  return (
+    <Field label={label}>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full rounded-md border border-slate-300 px-3 py-2"
+      >
+        {allOptions.map((o) => (
+          <option key={o || '(blank)'} value={o}>
+            {o || 'Not set'}
+          </option>
+        ))}
+      </select>
     </Field>
   )
 }
