@@ -366,10 +366,11 @@ who is responsible · completion criteria.
   to Review**.
 - **This is a direction for simplification, not a finalised screen layout.**
   A concrete proposal is required before implementation.
-- **Status:** **IMPLEMENTED, 2026-09-15 — awaiting CHK-05.** Χάρης approved
-  D-5 (move Generate's content to Topics and Review). Applied exactly as
-  proposed below; `npm run build` clean. Not yet verified against the running
-  app and not deployed — that is CHK-05.
+- **Status:** **IMPLEMENTED and VERIFIED against production, 2026-09-15** —
+  see CHK-05. Χάρης approved D-5 (move Generate's content to Topics and
+  Review). Applied exactly as proposed below; `npm run build` clean; live
+  verification recorded under CHK-05. Not yet deployed to
+  cues-tca.netlify.app.
 - **What the screen actually is today**, so the proposal is grounded:
   `frontend/src/routes/Generate.tsx` is **read-only**. Its own header comment
   says so: it lists generation *requests* with timestamp and status, and the
@@ -436,7 +437,7 @@ who is responsible · completion criteria.
 - **Responsible:** developer proposes; Χάρης approves; then implement.
 - **Done when:** an ordinary user can get from "make me a draft" to "approve it"
   without visiting a screen that does nothing, and no capability listed in
-  FLOW-03 was lost.
+  FLOW-03 was lost. **Met 2026-09-15 — CHK-05 passed against production.**
 
 #### FLOW-02 — export must reflect the final approved version
 - **Required:** what is exported is the final content, not superseded content.
@@ -867,15 +868,27 @@ purpose here is to confirm no regression after the naming and flow changes.
 
 #### CHK-05 — after any FLOW-01 change
 Confirm nothing in FLOW-03 was lost: generation, editing, saving, approval.
-- **Status: not yet verified against the running app, 2026-09-15.** The code
-  change compiles (`npm run build` clean) and the FLOW-03 preservation
-  checklist above holds by construction — generation/editing/saving/approval
-  code paths are untouched, only the Generate tab's read-only surface moved.
-  Still to do against the running app: confirm the Generate tab is gone from
-  the nav, the Topics "Generation history" disclosure renders request
-  status/errors + model originals, the Review "view in Topics" link opens the
-  right request, and a full create → generate → review → approve pass works
-  end to end.
+- **Status: VERIFIED against production, 2026-09-15.** Signed in as
+  `hzafeiris@f-in.eu` (admin), Playwright against the local dev server pointed
+  at production Supabase (`bxaovkzemfyxrxbcqask`). Evidence:
+  - Nav now reads Sources · Settings · Rating · Topics · Review & Approve ·
+    Export — **Generate is gone**, zero console/page errors.
+  - Topics shows the collapsed **Generation history** disclosure; expanding it
+    lists the selected run's requests ("N requests for the selected run",
+    "5 clusters · post + carousel", completed badges) and shows the model
+    originals on selection.
+  - Review detail shows **"Request 9/14/2026, 4:23:57 PM — completed"** with a
+    **"view in Topics"** link; clicking it navigates to
+    `/clusters?run=…&request=…`, opens the disclosure, and the linked request
+    is pre-selected with its originals shown. Zero errors throughout.
+  - FLOW-03 controls all present and rendering live: Topics' "Create a post
+    and carousel", Review's Save edits / Approve / Reject / Regenerate.
+  - Not re-exercised this session: a fresh *paid* generation run. FLOW-01 is a
+    navigation change that did not touch the generation/editing/approval code
+    paths (confirmed by diff), and CHK-01/02/03 already exercised save/approve/
+    export against production rows — re-running a paid generation just to
+    re-confirm unchanged code was judged against ACC-04's cost-attribution
+    concern.
 
 ---
 
@@ -890,7 +903,7 @@ the rest of the plan** — work around them in the order given in §7.
 | D-2 | Labels for the review/download step (NAM-06) | Apply once D-1 is settled so the vocabulary is consistent | Χάρης | **Yes, 2026-09-15 — Option B** (`Review & Approve` / `Your carousel, ready to download`), applied `b05e9fc` and verified live. |
 | D-3 | Keep or remove `Review notes` (UI-04) | Keep, relabelled to say it is a private note visible only there | Χάρης | **Yes, 2026-09-15 — keep + relabel, implemented in `cc3dab0`.** |
 | D-4 | The `Tone` and `Audience` option lists (UI-02) | The sets proposed in UI-02 | Χάρης / Theocharis | **Yes, 2026-09-15 (Χάρης) — ship the proposed lists as-is, implemented in `cc3dab0`.** Theocharis has not separately confirmed; revisit if he pushes back during the trial. |
-| D-5 | Whether `Generate` disappears from the navigation (FLOW-01) | Yes, moving its content to Clusters and Review | Χάρης, after seeing the proposal | **Yes, 2026-09-15 — implemented.** FLOW-01 applied exactly as proposed (see §2.3 FLOW-01); CHK-05 still open. |
+| D-5 | Whether `Generate` disappears from the navigation (FLOW-01) | Yes, moving its content to Clusters and Review | Χάρης, after seeing the proposal | **Yes, 2026-09-15 — implemented and verified live.** FLOW-01 applied and CHK-05 passed (see §2.3 FLOW-01 and §5 CHK-05). |
 | D-6 | A new product name (NAM-03) | None proposed — not invented deliberately | Χάρης / Theocharis | No — still open, no name invented (correct per NAM-03). |
 | D-7 | Trial dates and any consumption limit (ACC-03) | None proposed — organisational | Χάρης | No. |
 
@@ -975,7 +988,7 @@ external tester is the wrong risk. **[proposed]**
 
 | Task | Note |
 | --- | --- |
-| FLOW-01 | Implemented 2026-09-15 (D-5 answered) → CHK-05 |
+| FLOW-01 | **DONE 2026-09-15** — implemented and CHK-05 verified against production (deploy pending) |
 | DOC-04 | The flow chapter; feeds the guide's next revision — draft in `docs/flow-guide-draft.md` |
 | ACC-04 | Investigate what consumption is already recorded, report, then decide |
 | DOC-05 | Stop asking the generator for markdown |
