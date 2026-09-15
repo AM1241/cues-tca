@@ -535,7 +535,20 @@ who is responsible · completion criteria.
 - **Required:** the guide makes the difference understandable: AI image
   generation is based on the slide text and **is charged**; Design Template is
   immediate, uses no AI and carries no such charge.
-- **Status:** TODO (documentation).
+- **Status:** **claims confirmed against code, 2026-09-15.** The guide text is
+  still Χάρης/Theocharis's half. Technical confirmation:
+  - *"Based on the slide text"* — `slide-images/prompt.ts:73` builds the image
+    subject from `slide.heading` + `slide.body` (`subjectFrom`, capped at 320
+    chars) and hands it to `gpt-image-2-2026-04-21` (pinned, `IMAGE_MODEL`).
+  - *"Is charged"* — the AI variant is one paid `gpt-image` call per slide
+    (`slide-images/index.ts` → `callOpenAiImage`), and each call writes a
+    `slide_image_requests` attribution row; the renderer buys one per slide and
+    reuses it on text edits (`slideExport.ts` header).
+  - *"Design Template is immediate, uses no AI, no charge"* — the `'flat'`
+    variant is drawn entirely by `lib/slides.ts` ("Free, instant, offline" in
+    `slideExport.ts`), no network call. The UI already states this:
+    "Designed template — Free and instant." vs "AI background image — One
+    generated picture per slide." (`PublicationPanel.tsx` background fieldset).
 - **Responsible:** Χάρης/Theocharis for the guide text; developer confirms the
   technical claims against `frontend/src/lib/slideExport.ts` and
   `supabase/functions/slide-images/`.
