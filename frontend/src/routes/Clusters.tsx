@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useToast } from '../components/toast-context'
-import { Spinner, EmptyState, ErrorNotice } from '../components/ui'
+import { Spinner, EmptyState, ErrorNotice, Button, Badge, Card } from '../components/ui'
 import {
   GenerationResultCard,
   GenerationErrorList,
@@ -570,28 +570,19 @@ export function Clusters() {
               className="w-16 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
             />
           </label>
-          <button
-            onClick={anonymiseNow}
-            disabled={anonymising || running}
-            className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-          >
+          <Button onClick={anonymiseNow} disabled={anonymising || running}>
             {anonymising ? 'Anonymising…' : 'Anonymise now'}
-          </button>
-          <button
+          </Button>
+          <Button
             onClick={requeueAnonymisation}
             disabled={anonymising || running}
             title="Mark everything already anonymised for a fresh pass — use after accepting new brand names"
-            className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
           >
             Redo all
-          </button>
-          <button
-            onClick={runClustering}
-            disabled={running || anonymising}
-            className="rounded-md bg-slate-900 px-4 py-1.5 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
-          >
+          </Button>
+          <Button variant="primary" onClick={runClustering} disabled={running || anonymising}>
             {running ? 'Running…' : 'Run clustering'}
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -613,7 +604,7 @@ export function Clusters() {
           {(() => {
             const run = runs.find((r) => r.id === selectedRunId)
             return run?.status === 'failed' && run.error_message ? (
-              <span className="rounded bg-red-50 px-2 py-1 text-xs text-red-700">{run.error_message}</span>
+              <Badge tone="danger">{run.error_message}</Badge>
             ) : null
           })()}
         </div>
@@ -788,15 +779,16 @@ export function Clusters() {
                     ? `${genResults.length} result${genResults.length === 1 ? '' : 's'}`
                     : 'No results'}
                 </h3>
-                <button
+                <Button
+                  variant="ghost"
+                  className="text-xs hover:underline"
                   onClick={() => {
                     setGenResults(null)
                     setGenErrors([])
                   }}
-                  className="text-xs text-slate-500 hover:underline"
                 >
                   Dismiss
-                </button>
+                </Button>
               </div>
               <GenerationErrorList
                 errors={genErrors}
@@ -840,21 +832,13 @@ export function Clusters() {
                   </span>
                 </div>
                 <div className="mt-1.5 flex flex-wrap gap-1.5">
-                  <span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600">
-                    {r.generalized_source_name}
-                  </span>
+                  <Badge>{r.generalized_source_name}</Badge>
                   {cluster ? (
-                    <span
-                      className={`rounded px-1.5 py-0.5 text-xs font-medium ${
-                        cluster.label_failed ? 'bg-amber-50 text-amber-700' : 'bg-indigo-50 text-indigo-700'
-                      }`}
-                    >
-                      {cluster.label}
-                    </span>
+                    <Badge tone={cluster.label_failed ? 'warning' : 'info'}>{cluster.label}</Badge>
                   ) : selectedRunId ? (
-                    <span className="rounded bg-slate-50 px-1.5 py-0.5 text-xs text-slate-400">
+                    <Badge tone="neutral" className="text-slate-400">
                       unclustered
-                    </span>
+                    </Badge>
                   ) : null}
                 </div>
               </button>
@@ -885,15 +869,9 @@ export function Clusters() {
                     </span>
                   </div>
                   <div className="mt-1.5 flex flex-wrap gap-1.5">
-                    <span
-                      className={`rounded px-1.5 py-0.5 text-xs font-medium ${
-                        r.status === 'dead_letter'
-                          ? 'bg-red-100 text-red-700'
-                          : 'bg-amber-100 text-amber-700'
-                      }`}
-                    >
+                    <Badge tone={r.status === 'dead_letter' ? 'danger' : 'warning'}>
                       {r.status === 'dead_letter' ? 'failed' : r.status === 'processing' ? 'retrying' : 'pending'}
-                    </span>
+                    </Badge>
                     {r.failure_count > 0 && (
                       <span className="text-xs text-slate-400">{r.failure_count} attempt(s)</span>
                     )}
@@ -920,7 +898,7 @@ export function Clusters() {
 
 function PostDetail({ post }: { post: AnonymisedRow }) {
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-5">
+    <Card>
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-slate-700">Original</h3>
         {post.raw_posts?.source_url && (
@@ -950,13 +928,11 @@ function PostDetail({ post }: { post: AnonymisedRow }) {
         <ul className="mt-2 space-y-1.5">
           {post.replacements.map((rep, i) => (
             <li key={i} className="flex items-center gap-2 text-sm">
-              <span className="rounded bg-red-50 px-1.5 py-0.5 text-xs text-red-700 line-through">
+              <Badge tone="danger" className="line-through">
                 {rep.original}
-              </span>
+              </Badge>
               <span className="text-slate-400">→</span>
-              <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-xs text-emerald-700">
-                {rep.replacement}
-              </span>
+              <Badge tone="success">{rep.replacement}</Badge>
               <span className="text-xs text-slate-400">({rep.source})</span>
             </li>
           ))}
@@ -971,14 +947,14 @@ function PostDetail({ post }: { post: AnonymisedRow }) {
           <span>Published: {new Date(post.raw_posts.published_at).toISOString().slice(0, 10)}</span>
         )}
       </div>
-    </div>
+    </Card>
   )
 }
 
 function FailedPostDetail({ post }: { post: FailedAnonymiseRow }) {
   const isDeadLetter = post.status === 'dead_letter'
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-5">
+    <Card>
       <div
         className={`mb-4 rounded-md px-3 py-2 text-sm ${
           isDeadLetter ? 'bg-red-50 text-red-800' : 'bg-amber-50 text-amber-800'
@@ -1029,6 +1005,6 @@ function FailedPostDetail({ post }: { post: FailedAnonymiseRow }) {
           </div>
         )}
       </dl>
-    </div>
+    </Card>
   )
 }
