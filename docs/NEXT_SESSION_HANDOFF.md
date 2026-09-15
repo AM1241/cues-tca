@@ -1,6 +1,6 @@
 # Handoff for the next session
 
-**Written:** 2026-09-15 (updated same day, after a verification session).
+**Written:** 2026-09-15 (updated same day, after a second verification session).
 
 `docs/TCA_TRIAL_HANDOFF.md` is still the authoritative task list — read it in
 full, its own status fields are now current. This note is just the pointer:
@@ -8,86 +8,114 @@ where the code actually is, what changed this session, and what's next.
 
 ## Where the code is
 
-- Branch `frontend-design-system`, commit `f5deec3` — **committed, not
-  pushed, not merged into `phase6-frontend-binding`.** No new commits this
-  session (verification only, no code changes).
-- `npm run build` (`tsc -b && vite build`) passes clean.
+- Branch `frontend-design-system`, commit `603714a` — **committed, not
+  pushed, not merged into `phase6-frontend-binding`.**
+- Two real code commits landed this session, both on top of `f5deec3`
+  (previous session's tip):
+  - `61fb237` — CAR-02 fix (removed fabricated per-tier image-generation
+    timings from the quality dropdown) + FLD-01 (one-line hints on
+    Title/Caption/CTA explaining what's drawn on images vs. export-only).
+  - `1f1ac54`, `603714a` — doc updates recording the above and the live
+    verification results.
+- `npm run build` (`tsc -b && vite build`) and `npm run lint` (`oxlint`) both
+  pass clean.
+- **Still nothing pushed or merged.** `frontend-design-system` has no remote
+  tracking branch at all — everything here is local-only until someone
+  pushes it.
 
 ## What happened this session
 
-This session did the thing the previous handoff asked for first: verified
-A3–A8 against a running app instead of trusting the diff.
+Picked up from the previous handoff's "Start here" list: A9 (CAR-02 review),
+A10 (FLD-01 hints), then closed out CHK-01/02/03 by actually reaching the
+Review editor — the thing every prior session had been blocked on.
 
-1. Started cues's own local Supabase stack. Hit a port conflict with another
-   local project (`protero`'s `supabase-local`, squatting the same default
-   54321-54324 ports) — stopped that one (data preserved in its Docker
-   volume) to free the ports, on request.
-2. Local DB's migration history was stuck at 0016 (Docker volume drift, not a
-   code issue) — `cluster_generation_reviews` and everything from 0017 on was
-   missing, producing schema-cache errors on Review. Fixed with
-   `supabase db reset`, which reapplied all 28 migrations cleanly.
-3. Created a throwaway local `editor`-role account and a seeded `configurations`
-   row (with `voice_tone`/`voice_audience` both null, deliberately, to test
-   UI-02's specific empty-value fix) and ran `npm run dev` against the local
-   stack.
-4. Drove the app with a headless-Chromium Playwright script (no project
-   `/run` skill existed for this repo, no `chromium-cli` available, so used
-   the SDK-fallback pattern) and confirmed, live, with screenshots:
-   - Nav bar: Settings / Rating / Topics all correct, no leftover Objective /
-     Posts / Clusters strings.
-   - Settings `<h1>` = "Settings"; header description = "LinkedIn posts and
-     carousels, ready for review".
-   - Rating `<h1>` = "Rating". Topics `<h1>` = "Topics" (route still
-     `/clusters`, as designed).
-   - Tone/Audience dropdowns: both show the full confirmed option lists, and
-     with the seeded never-configured (null) value, both correctly show/select
-     "Not set" — the specific bug the code-reviewer pass caught last session
-     does not reproduce.
-   - Zero console errors across Sources, Settings, Rating, Topics, Generate,
-     Review (all in their empty states except Sources, which had 1 dummy
-     source and 7 raw posts left over from a previous session).
-5. **Could not reach:** UI-03 (Save-edits button), UI-04 (relabelled Review
-   notes text), NAM-04's exact "Create the carousel" button, CAR-01/CAR-02.
-   All of these live behind a real generated result, which needs an actual
-   score → anonymize → cluster → generate run — i.e. live OpenAI/RapidAPI
-   calls. No API keys were configured locally, and running paid calls just to
-   click through UI wasn't judged worth it for a naming/UI verification pass
-   (also relevant to ACC-04 — keeping trial consumption attributable/clean).
-6. Restored `frontend/.env.local` to production and stopped the local dev
-   server afterward, on request, so nothing is left pointed at a stale local
-   env by accident. **cues's local Supabase stack itself is still running**
-   (left up on request, in case the next session wants to continue from here
-   without redoing setup) — `protero`'s `supabase-local` stack is stopped;
-   restart it with `supabase start --project-id supabase-local` from that
-   project's directory if needed.
+1. **A9 — CAR-02 review.** Read `PublicationPanel.tsx`'s progress states
+   against the requirement. The states themselves ("Redrawing for your
+   edits…", "Drawing N of M…", per-slide "Generating…"/"Failed to draw") were
+   already adequate. Found one real violation: the quality `<select>` showed
+   "low — about 15s a slide" / "medium — about 60s a slide" — numbers that
+   exist nowhere in this repo. The only timing note in `SESSION_HANDOFF.md`
+   (session 20) is an un-tiered "15-60s" design rationale, not a measured
+   per-quality figure. Fixed to relative wording only ("fastest" /
+   `medium` / "slowest").
+2. **A10 — FLD-01.** Added a one-line hint under each of Title/Caption/CTA in
+   the "Post text" section of `PublicationPanel.tsx`, straight from the
+   table FLD-01 had already worked out (drawn on images vs. export-only).
+   Confirmed `CarouselOutputEditor` in `generation.tsx` has zero call sites —
+   no second editor surface needed the same fix.
+3. **Reached the Review editor, against production, without spending on new
+   API calls.** Production already had 28 generation results / 55 reviews
+   sitting there from prior sessions, including one carousel
+   (`55cab6c5-500d-4b69-9f5c-634122590cd1`) that already had a genuine prior
+   edit baked in ("The shared story" → "The shared full story"). Used that
+   instead of fabricating rows or running a live pipeline:
+   - No project `/run` skill existed for this repo; `chromium-cli` wasn't
+     installed. Used the Playwright SDK fallback: `npx playwright install
+     chromium` (matching version, ~300MB, already partly cached from a
+     previous session) + a throwaway driver script per check, `.env.local`
+     already pointed `npm run dev` at production.
+   - Logged in as `hzafeiris@f-in.eu` (admin) — **not**
+     `demo.editor@f-in.eu`, whose password wasn't available this session
+     (one guess was tried and failed). CHK-01/02/03 don't depend on role, so
+     this didn't block them; CHK-04 specifically needs the editor account
+     and was **not** attempted.
+   - **CHK-01:** edited a slide heading live, confirmed Save went
+     disabled→enabled on change, saved, reloaded the page fully, reopened
+     the same result — edit persisted. Reverted the test marker afterward
+     with a second clean edit/save, confirmed via direct SQL read.
+   - **CHK-02:** approved the result via the live Approve button (**stopped
+     and got explicit user confirmation first** — auto-mode correctly
+     flagged this as a shared-production-state change). Downloaded the
+     bundled Markdown and DOCX exports, confirmed both contain the *edited*
+     heading, not the original (grepped the `.md`, unzipped the `.docx` and
+     grepped `word/document.xml`). Then opened Generate → the matching
+     request and confirmed it shows the *original* heading — Generate/Export
+     legitimately differing on the same item is now empirically shown, not
+     just argued from code.
+   - **CHK-03:** Design Template (free) variant, downloaded all 7 slides,
+     confirmed each is exactly 1080×1080 via `file`, visually confirmed
+     slide 1 (no footer, correct — title only appears from slide 2 on) and
+     slide 4 (footer present, correct title), then ran all 7 through
+     `tesseract` OCR grepping for `*` — **zero found on any slide**.
+   - Stopped the local dev server afterward (`lsof -ti:5174 ... kill`).
 
 ## Start here, in order
 
-1. **Reach the Review editor to finish CHK-01/02/03 and verify UI-03/UI-04.**
-   Two ways to do this without spending on real API calls, if that's still a
-   goal:
-   - Manually insert rows through `clustering_runs` → `clusters` →
-     `cluster_generation_requests` → `cluster_generation_results` (all their
-     NOT NULL columns are in `supabase/migrations/0015_clustering.sql` and
-     `0016_generation.sql`) with fabricated `post_output`/`carousel_output`
-     JSON, matching the shapes `PublicationPanel.tsx` and
-     `frontend/src/lib/exporters.ts` expect. This session judged that
-     fiddly enough, for an accuracy/effort tradeoff, to leave to whoever
-     does it next with more budget for it.
-   - Or set `OPENAI_API_KEY`/`RAPIDAPI_KEY` as local Edge Function secrets
-     and run one real (cheap) generation. Costs real money — small amount,
-     but real — and should be a deliberate call, not a default.
-2. **D-2 (NAM-06)** is still the one open decision blocking Track A — labels
-   for the review/download step.
-3. Once D-2 is answered and UI-03/UI-04/NAM-04's button/CAR-01/CAR-02 are
-   verified: **A9** (CAR-02 progress indication review) and **A10** (FLD-01,
-   explain the three fields) are still not started.
-4. Then **A12** (deploy, tell Theocharis what shipped) → **A13** (create the
-   TechnoAlimenti account).
-5. FLOW-01 stays out of Track A, per the prior session's D-5 answer.
+1. **CHK-04 — plain-user permissions.** The one unclosed item in A11. Needs
+   `demo.editor@f-in.eu`'s real password (ask Χάρης — do not guess further or
+   reset it without asking first, per this session's own back-and-forth).
+   Confirm: whole workflow runs as editor; lookback + enabled switch can be
+   changed; add/rename/delete source refused; deleting generated copy
+   refused. Session 21 verified this once already — this is a
+   no-regression check, not new ground, and nothing touched this session
+   affects permissions/RLS.
+2. **D-2 (NAM-06)** is still the one open naming decision blocking Track A —
+   labels for the review/download step. Ask Χάρης; not blocking anything
+   else in the plan per §7's own ordering.
+3. **A12 — deploy, then tell Theocharis what shipped.** Track A's code
+   (`cc3dab0` naming/UI + `61fb237` CAR-02/FLD-01) is sitting on
+   `frontend-design-system`, committed but **not pushed, not merged into
+   `phase6-frontend-binding`, not deployed**. The live bundle on
+   cues-tca.netlify.app is still whatever `phase6-frontend-binding` built
+   last (hash recorded in §0.1 of `TCA_TRIAL_HANDOFF.md` — re-check it, it
+   may be stale by now). This is a real decision point, not just a git
+   command — confirm with Χάρης before merging/pushing/deploying, since nothing
+   in this branch has been merged upstream yet and Χάρης said he'd been
+   making changes of his own that weren't all reported.
+4. **A13 — create the TechnoAlimenti account and send it with the guide.**
+   Explicitly sequenced *after* A12 per DOC-01: code ships → Χάρης tells
+   Theocharis what's in the release → Theocharis adapts the guide → account +
+   guide go out together. Don't create this account before A12, even though
+   it's tempting to just get it done — jumping this order was asked about
+   directly last session and the answer was: not yet, precisely because of
+   this sequencing.
+5. FLOW-01 stays out of Track A, per the earlier D-5 answer (deferred to
+   Track B).
 
 ## Still open / TODO
 
-Everything else in `TCA_TRIAL_HANDOFF.md` §2 not touched this session — CAR-02,
-FLD-01, DOC-01/04/05, ACC-01/03/04/05, FLOW-01. See the doc for evidence and
-status per item; nothing should be treated as done from memory.
+Everything else in `TCA_TRIAL_HANDOFF.md` §2 not touched this session:
+DOC-01/02/04/05, ACC-01/03/04/05, FLOW-01, CAR-04. See the doc for evidence
+and status per item — nothing should be treated as done from memory, and the
+doc's own §0.2 reconciliation check should be re-run at the start of any new
+session before trusting anything here.
