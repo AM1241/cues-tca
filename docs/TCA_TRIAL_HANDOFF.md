@@ -737,12 +737,40 @@ Signed in as an `editor` account, confirm: the whole workflow runs; lookback and
 the enabled switch can be changed; adding, renaming and deleting a source are
 refused; deleting generated copy is refused. Session 21 verified this live — the
 purpose here is to confirm no regression after the naming and flow changes.
-- **Status: NOT attempted this session** — `demo.editor@f-in.eu`'s real
-  password wasn't available; CHK-01/02/03 were done as `hzafeiris@f-in.eu`
-  (admin) instead, which doesn't exercise the editor-role restriction this
-  check is actually about. No code touched this session affects permissions
-  or RLS, so there's no specific regression risk from `61fb237`, but this
-  line item is still open — needs the editor account's real credentials.
+- **Status: verified at the database layer, 2026-09-15 (third session)** —
+  `demo.editor@f-in.eu`'s real password still isn't available, so this
+  wasn't driven through the live UI as that named account. Instead, a
+  throwaway `role='editor'` account was created in the **local** Postgres
+  (not production) and the five restrictions were exercised directly against
+  RLS/triggers/functions by impersonating its JWT (`set_config
+  ('request.jwt.claims', ...)`, `set local role authenticated` — the same
+  mechanism PostgREST uses, so this is what the policies actually see, not a
+  proxy for it):
+  - Editor **can** update `sources.lookback_days` and `.enabled` — succeeded.
+  - Editor **cannot** rename a source (`sources.name`/`.url`/etc.) — blocked
+    by the `enforce_source_edit_scope` trigger (0025): `only an admin may
+    change name, type, url, company_name, rapidapi_identifier or
+    collection_frequency`.
+  - Editor **cannot** add a source — blocked by RLS
+    (`sources_insert_for_admins`, 0025): `new row violates row-level
+    security policy`.
+  - Editor **cannot** delete a source at all (admin included) — there is no
+    delete policy or grant on `sources` for any authenticated role, by
+    design (0002).
+  - Editor **cannot** delete generated copy — `admin_delete_generation_result`
+    (0027) raises `only an admin may delete generated copy` before it even
+    looks up the row.
+  - Control: `is_editor()` true, `is_admin()` false, and ordinary reads
+    (`sources` select) still work for the editor — confirming the block is
+    specific to the five restricted actions, not a broken session.
+  All throwaway rows (auth user, editor, seeded source/post) were deleted
+  after the test; nothing persisted, and production was not touched. This
+  confirms the *mechanism* CHK-04 cares about is intact after this session's
+  changes (none of which touched RLS/triggers/admin functions). It does not
+  confirm the deployed frontend surfaces these refusals cleanly to a real
+  editor (e.g. as a readable error rather than a raw exception) — that part
+  still wants a real UI pass with `demo.editor@f-in.eu` at some point, but is
+  no longer a blocker for anything in Track A.
 
 #### CHK-05 — after any FLOW-01 change
 Confirm nothing in FLOW-03 was lost: generation, editing, saving, approval.
@@ -788,9 +816,9 @@ written before the names settle. That is the critical path.
 | A8 | UI-04 — Review notes | D-3 | **Implemented, `cc3dab0`. Verified against production, 2026-09-15 (second session)** — "Why you approved or rejected this (visible here only)" confirmed rendering live in Review. |
 | A9 | CAR-02 — progress indication reviewed | — | **Implemented, `61fb237`.** Found and fixed one real violation (fabricated per-tier timings); progress indication itself was already adequate. Not yet re-verified live post-fix (the "N of M" / "Redrawing…" states were exercised implicitly during CHK-01/03, no console errors, but the quality-dropdown wording itself wasn't re-screenshotted). |
 | A10 | FLD-01 — explain the three fields in the interface | A4 vocabulary | **Implemented, `61fb237`. Verified against production, 2026-09-15 (second session)** — all three hints (Title/Caption/CTA) confirmed rendering live in Review's Post text section. |
-| A11 | CHK-01…CHK-04 | A3–A10 | **CHK-01, CHK-02, CHK-03 verified against production, 2026-09-15 (second session)** — see each check's own Status line in §5 for what was actually driven and confirmed (edit persistence, export content incl. DOCX, 7×1080×1080 PNGs with zero OCR-detected `**`). **CHK-04 not attempted** — needs `demo.editor@f-in.eu`'s real password, which wasn't available this session; the admin account used for CHK-01–03 doesn't exercise the editor-role restriction. |
-| A12 | Deploy, then DOC-01 step 2: Χάρης tells Theocharis what the release contains | A11 | Not started. CHK-04 is the only remaining gap in A11; not a blocker for A12 unless Χάρης wants it closed first. |
-| A13 | ACC-01 — create the account and send it with the guide | A12 | Not started. |
+| A11 | CHK-01…CHK-04 | A3–A10 | **CHK-01, CHK-02, CHK-03 verified against production, 2026-09-15 (second session).** **CHK-04 verified at the database layer, 2026-09-15 (third session)** — see each check's own Status line in §5. CHK-04 still wants a real UI pass with `demo.editor@f-in.eu` eventually, but the underlying mechanism (RLS + triggers + admin functions) is confirmed intact and is no longer a blocker. |
+| A12 | Deploy, then DOC-01 step 2: Χάρης tells Theocharis what the release contains | A11 | **Deployed, 2026-09-15 (third session).** `frontend-design-system` pushed to `origin`, fast-forward merged into `phase6-frontend-binding` (`162f80f..cd2b61f`, no conflicts), pushed — Netlify's Git-connected build picked it up automatically. `npm run build` verified clean locally before push. Confirmed live: cues-tca.netlify.app now serves bundle `index-7Ix5u0wk.js` (was `index-BJ5_C7wK.js`), page and both new assets return HTTP 200. DOC-01 step 2 (Χάρης tells Theocharis) not done — that is Χάρης's own action, not a developer task. |
+| A13 | ACC-01 — create the account and send it with the guide | A12 | Not started. A12 is now unblocked. |
 
 **A2–A8 code is committed (`cc3dab0`, `frontend-design-system`, unpushed) and
 `npm run build` (tsc -b && vite build) passes clean.** Per §0.3's own
