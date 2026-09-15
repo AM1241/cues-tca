@@ -83,6 +83,7 @@ export async function completeJob(
   args: {
     jobId: string; msgId: number; rawPostId: string; requestId: string; processingToken: string | null;
     themeScores: Record<string, number>; reason: string; providerResponse?: unknown;
+    triggeredBy?: string | null; triggeredByEmail?: string | null;
   },
 ): Promise<"inserted" | "duplicate" | "superseded"> {
   const { data, error } = await db.rpc("complete_and_promote_scoring_job", {
@@ -94,6 +95,8 @@ export async function completeJob(
     p_reason: args.reason,
     p_provider_response: args.providerResponse ?? null,
     p_processing_token: args.processingToken,
+    p_triggered_by: args.triggeredBy ?? null,
+    p_triggered_by_email: args.triggeredByEmail ?? null,
   });
   if (error) throw new Error(`complete_and_promote_scoring_job failed: ${error.message}`);
   return data as "inserted" | "duplicate" | "superseded";

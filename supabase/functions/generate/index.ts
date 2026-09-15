@@ -230,6 +230,7 @@ async function generatePublication(args: {
   periodStart: string;
   periodEnd: string;
   feedback: string | null;
+  createdBy: string | null;
   previous: { id: string; post_output: unknown; carousel_output: unknown } | null;
   config: Awaited<ReturnType<typeof getConfig>>;
   configSnapshot: Record<string, unknown>;
@@ -281,6 +282,7 @@ async function generatePublication(args: {
     kind: "publication",
     periodStart: args.periodStart,
     periodEnd: args.periodEnd,
+    createdBy: args.createdBy,
   });
 
   const revision: RevisionContext | undefined = previous
@@ -419,7 +421,8 @@ export async function handleGenerate(req: Request, deps: GenerateDeps = {}): Pro
 
     // Dual auth like cluster: an admin editor from the frontend, or the
     // internal secret for programmatic triggering.
-    await authenticate(req, body as Record<string, unknown>);
+    const actor = await authenticate(req, body as Record<string, unknown>);
+    const createdBy = actor.kind === "editor" ? actor.userId : null;
 
     const {
       clustering_run_id,
@@ -522,6 +525,7 @@ export async function handleGenerate(req: Request, deps: GenerateDeps = {}): Pro
         periodStart: period_start!,
         periodEnd: period_end!,
         feedback,
+        createdBy,
         previous: prev,
         config,
         configSnapshot,
@@ -539,6 +543,7 @@ export async function handleGenerate(req: Request, deps: GenerateDeps = {}): Pro
       outputTypes: effectiveOutputTypes,
       feedback,
       regeneratesResultId: regenerates_result_id,
+      createdBy,
     });
 
     const results: {

@@ -181,6 +181,8 @@ export async function createGenerationRequest(
     /** Required for a publication, rejected by the DB for a per-cluster request. */
     periodStart?: string | null;
     periodEnd?: string | null;
+    /** The editor who triggered the generation, for ACC-04 attribution. */
+    createdBy?: string | null;
   },
 ): Promise<string> {
   const { data, error } = await db.rpc("create_cluster_generation_request", {
@@ -192,6 +194,7 @@ export async function createGenerationRequest(
     p_kind: args.kind ?? "per_cluster",
     p_period_start: args.periodStart ?? null,
     p_period_end: args.periodEnd ?? null,
+    p_created_by: args.createdBy ?? null,
   });
   if (error) throw new Error(`create_cluster_generation_request failed: ${error.message}`);
   return data as string;

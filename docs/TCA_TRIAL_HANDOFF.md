@@ -513,15 +513,55 @@ who is responsible · completion criteria.
   TechnoAlimenti's, and to document it.
 - **Explicitly not required:** a billing dashboard or a payments system. Do not
   turn this into one.
-- **Status:** TODO — investigation first. What already exists and may be enough:
-  `ingest_runs` records `triggered_by_email` and provider request counts, and
-  generation requests are attributed to the caller. Establish what is recorded
-  today for each paid path — LinkedIn collection, scoring, anonymisation,
-  clustering, generation, and slide images — before building anything.
+- **Status:** **INVESTIGATED 2026-09-15 — the per-operation audit is written;
+  the gap is named; implementation follows.** What the investigation found
+  (verified against `supabase/migrations/*.sql` and the six functions' code,
+  not the doc's own earlier claims):
+  - **LinkedIn collection** — attributed. `ingest_runs` has
+    `triggered_by`/`triggered_by_email` (`0003_ingest.sql`), populated by
+    `ingest/runs.ts` from the resolved actor; `provider_requests` is a volume
+    proxy.
+  - **Scoring** — recorded but **not** attributable. `scoring_requests`,
+    `scoring_job_state`, `scoring_results` (`0005`) have no attribution
+    column; `score-worker/index.ts` resolves `authenticate()` into an `actor`
+    used only for the batch cap, never persisted. `scoring_results.
+    provider_response` carries the raw OpenAI response (token usage) per row,
+    but with no caller column it cannot be summed per user.
+  - **Anonymisation** — recorded but **not** attributable. Same shape as
+    scoring: `anonymize_results`/`anonymize_job_state` (`0014`) have no
+    attribution column, and `anonymize-worker/index.ts` discards the actor.
+  - **Clustering** — `clustering_runs.created_by` exists (`0015`) and is
+    populated via `(select auth.uid())` inside `create_clustering_run()`, but
+    it is **always NULL in practice**: `cluster/index.ts` calls
+    `authenticate()` and discards the result, then writes through the
+    service-role client, under which `auth.uid()` is null.
+  - **Generation** — same bug as clustering. `cluster_generation_requests.
+    created_by` (`0016`) is schema-ready but always NULL, because
+    `generate/index.ts` discards the actor and uses the service-role client.
+    The doc's earlier statement "generation requests are attributed to the
+    caller" is **false as currently wired**.
+  - **Slide images** — **nothing recorded.** `slide-images/index.ts` is
+    deliberately stateless (its own header: "WHY NOTHING IS STORED"); the
+    only trace is Supabase platform logs.
+  - **FINT vs TechnoAlimenti** — `public.editors` (`0002`) has
+    `user_id, email, full_name, role` and **no org/domain column**, so even
+    where a caller is captured (ingest), attributing to an organisation
+    requires manual email-domain reading.
+- **Minimal fix, implemented (migration `0029` + function threading):**
+  `editors.org` column; `scoring_requests.created_by` + `scoring_results.
+  triggered_by`/`triggered_by_email`; `anonymize_results.triggered_by`/
+  `triggered_by_email`; threading the already-resolved `actor` into
+  `create_clustering_run`/`create_cluster_generation_request` (explicit
+  `p_created_by` argument, not `auth.uid()` under a service-role session);
+  and a new `slide_image_requests` log table written by `slide-images`. No
+  UI, no dashboard — every paid path becomes attributable to a caller, and
+  callers to an org via `editors.org`.
 - **Responsible:** developer investigates and reports; Χάρης decides what, if
   anything, to build.
 - **Done when:** a short written answer exists saying, per paid operation, what
   is recorded and by whom it can be attributed — and any gap is named.
+  *(The answer above is that written record; the gap-filling migration and
+  function changes are the implementation of it.)*
 
 #### ACC-05 — after the trial
 - Feedback is gathered and what can be incorporated is incorporated. A separate

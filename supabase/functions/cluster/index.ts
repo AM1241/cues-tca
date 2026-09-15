@@ -117,7 +117,7 @@ export async function handleCluster(req: Request, deps: ClusterDeps = {}): Promi
 
     // Dual auth like ingest: an admin editor from the frontend, or the
     // internal secret for programmatic triggering. No restriction to one kind.
-    await authenticate(req, body as Record<string, unknown>);
+    const actor = await authenticate(req, body as Record<string, unknown>);
 
     const { period_start, period_end } = parseBody(body as Record<string, unknown>);
 
@@ -159,6 +159,7 @@ export async function handleCluster(req: Request, deps: ClusterDeps = {}): Promi
       clusterSimilarityThreshold: Number(config.cluster_similarity_threshold),
       minClusterSize: config.min_cluster_size,
       embeddingModel: embedModel,
+      createdBy: actor.kind === "editor" ? actor.userId : null,
     });
 
     // Record the exact input set — (raw_post_id, anonymize_result_id) pairs —

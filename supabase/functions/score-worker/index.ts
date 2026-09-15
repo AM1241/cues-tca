@@ -103,6 +103,7 @@ async function processJob(
   requestCache: Map<string, ScoringRequestRow>,
   apiKey: string,
   deps: ScoreWorkerDeps,
+  actor: Actor,
   closedRequestIds: Set<string>,
 ): Promise<JobOutcome> {
   const { job_id: jobId, raw_post_id: rawPostId, scoring_request_id: requestId } = msg.message;
@@ -184,6 +185,8 @@ async function processJob(
     const outcome = await completeJob(db, {
       jobId, msgId: msg.msg_id, rawPostId, requestId, processingToken: token,
       themeScores, reason, providerResponse: result.raw,
+      triggeredBy: actor.kind === "editor" ? actor.userId : null,
+      triggeredByEmail: actor.kind === "editor" ? actor.email : null,
     });
     const status = outcome === "inserted" ? "scored" : outcome; // "duplicate" | "superseded"
     return { job_id: jobId, raw_post_id: rawPostId, status };
@@ -240,7 +243,7 @@ export async function handleScoreWorker(req: Request, deps: ScoreWorkerDeps = {}
     const closedRequestIds = new Set<string>();
     const results: JobOutcome[] = [];
     for (const msg of messages) {
-      results.push(await processJob(db, msg, requestCache, apiKey, deps, closedRequestIds));
+      results.push(await processJob(db, msg, requestCache, apiKey, deps, actor, closedRequestIds));
     }
 
     const totals = {

@@ -122,6 +122,7 @@ export async function createClusteringRun(
   args: {
     periodStart: string; periodEnd: string; minRelevanceScore: number;
     clusterSimilarityThreshold: number; minClusterSize: number; embeddingModel: string;
+    createdBy?: string | null;
   },
 ): Promise<string> {
   const { data, error } = await db.rpc("create_clustering_run", {
@@ -131,6 +132,7 @@ export async function createClusteringRun(
     p_cluster_similarity_threshold: args.clusterSimilarityThreshold,
     p_min_cluster_size: args.minClusterSize,
     p_embedding_model: args.embeddingModel,
+    p_created_by: args.createdBy ?? null,
   });
   if (error) throw new Error(`create_clustering_run failed: ${error.message}`);
   return data as string;

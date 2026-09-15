@@ -80,6 +80,7 @@ export async function completeJob(
     jobId: string; msgId: number; rawPostId: string; processingToken: string | null;
     anonymizedText: string; replacements: Replacement[]; generalizedSourceName: string;
     configSnapshot: Record<string, unknown>; providerResponse?: unknown;
+    triggeredBy?: string | null; triggeredByEmail?: string | null;
   },
 ): Promise<"inserted" | "duplicate" | "superseded"> {
   const { data, error } = await db.rpc("complete_anonymize_job", {
@@ -93,6 +94,8 @@ export async function completeJob(
     p_config_snapshot: args.configSnapshot,
     p_provider_response: args.providerResponse ?? null,
     p_processing_token: args.processingToken,
+    p_triggered_by: args.triggeredBy ?? null,
+    p_triggered_by_email: args.triggeredByEmail ?? null,
   });
   if (error) throw new Error(`complete_anonymize_job failed: ${error.message}`);
   return data as "inserted" | "duplicate" | "superseded";

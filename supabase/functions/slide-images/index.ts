@@ -118,7 +118,7 @@ export async function handleSlideImages(
       throw new RequestError(400, "Body must be JSON.");
     }
 
-    await authenticate(req, body);
+    const actor = await authenticate(req, body);
 
     const { slide, quality } = parseSlideRequest(body);
 
@@ -129,6 +129,28 @@ export async function handleSlideImages(
     // it is the same editorial scope every other stage reads, and letting a
     // caller pass it would let the picture drift from the copy's own subject.
     const db = deps.db ?? serviceClient();
+
+    // Attribution is bookkeeping, not the paid artefact: a log write that
+    // fails must not turn a good image into a 500, nor a failed image into a
+    // different error than the one the operator needs to see. Best-effort.
+    const recordAttempt = async (outcome: { status: "succeeded" | "failed"; errorType?: string; errorMessage?: string }) => {
+      try {
+        const { error } = await db.from("slide_image_requests").insert({
+          position: slide.position,
+          quality,
+          model: IMAGE_MODEL,
+          triggered_by: actor.kind === "editor" ? actor.userId : null,
+          triggered_by_email: actor.kind === "editor" ? actor.email : null,
+          status: outcome.status,
+          error_type: outcome.errorType ?? null,
+          error_message: outcome.errorMessage?.slice(0, 500) ?? null,
+        });
+        if (error) console.error("slide-images: could not record attribution:", error.message);
+      } catch (e) {
+        console.error("slide-images: could not record attribution:", (e as Error).message);
+      }
+    };
+
     const { data: config, error: configErr } = await db
       .from("configurations")
       .select("editorial_domain")
@@ -154,6 +176,11 @@ export async function handleSlideImages(
       } satisfies CallOpenAiImageOptions);
     } catch (e) {
       const oe = e instanceof OpenAiError ? e : null;
+      await recordAttempt({
+        status: "failed",
+        errorType: oe?.failureType ?? "unknown",
+        errorMessage: oe?.message ?? (e as Error).message,
+      });
       // Surfaced rather than dead-lettered: this is an interactive, operator-
       // initiated action with a person watching, and the slide it belongs to
       // is still on their screen to retry.
@@ -162,6 +189,8 @@ export async function handleSlideImages(
         `Slide ${slide.position} image failed: ${oe?.message ?? (e as Error).message}`,
       );
     }
+
+    await recordAttempt({ status: "succeeded" });
 
     return jsonResponse(
       {

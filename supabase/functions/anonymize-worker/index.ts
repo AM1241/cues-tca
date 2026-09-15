@@ -26,7 +26,7 @@
  */
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2.110.8";
 import { handlePreflight, jsonResponse } from "../_shared/cors.ts";
-import { authenticate } from "../_shared/auth.ts";
+import { authenticate, type Actor } from "../_shared/auth.ts";
 import { serviceClient } from "../_shared/db.ts";
 import { RequestError } from "../_shared/errors.ts";
 import { callOpenAi, OpenAiError, type CallOpenAiOptions } from "../_shared/openai.ts";
@@ -80,6 +80,7 @@ async function processJob(
   config: ConfigRow,
   apiKey: string,
   deps: AnonymizeWorkerDeps,
+  actor: Actor,
 ): Promise<JobOutcome> {
   const { job_id: jobId, raw_post_id: rawPostId } = msg.message;
   const token = msg.processing_token;
@@ -164,6 +165,8 @@ async function processJob(
         domain_generic_entity_alt: config.domain_generic_entity_alt,
       },
       providerResponse: rawResponse,
+      triggeredBy: actor.kind === "editor" ? actor.userId : null,
+      triggeredByEmail: actor.kind === "editor" ? actor.email : null,
     });
     const status = outcome === "inserted" ? "anonymized" : outcome; // "duplicate" | "superseded"
     return { job_id: jobId, raw_post_id: rawPostId, status };
@@ -196,7 +199,7 @@ export async function handleAnonymizeWorker(req: Request, deps: AnonymizeWorkerD
 
     // Dual auth, same as score-worker: the internal secret (an operator's
     // backfill call) or an admin editor draining the queue from the UI.
-    await authenticate(req, body as Record<string, unknown>);
+    const actor = await authenticate(req, body as Record<string, unknown>);
 
     const batchSize = parseBatchSize(body as Record<string, unknown>);
 
@@ -219,7 +222,7 @@ export async function handleAnonymizeWorker(req: Request, deps: AnonymizeWorkerD
     if (messages.length > 0) {
       const config = await getConfig(db);
       for (const msg of messages) {
-        results.push(await processJob(db, msg, config, apiKey, deps));
+        results.push(await processJob(db, msg, config, apiKey, deps, actor));
       }
     }
 
