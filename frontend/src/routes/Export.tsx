@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useToast } from '../components/toast-context'
-import { Spinner, ErrorNotice } from '../components/ui'
+import { Spinner, ErrorNotice, Button, TabSwitch } from '../components/ui'
 import type { Database } from '../lib/database.types'
 import type { PostOutput, CarouselOutput } from '../components/generation'
 import {
@@ -45,26 +45,14 @@ export function Export() {
       <div className="mb-6 flex items-end justify-between gap-6">
         <div className="flex items-center gap-6">
           <h1 className="text-xl font-semibold">Export</h1>
-          <div className="inline-flex overflow-hidden rounded-md border border-slate-300 text-sm">
-            {(
-              [
-                ['generated', 'Generated'],
-                ['legacy', 'Legacy'],
-              ] as const
-            ).map(([key, label]) => (
-              <button
-                key={key}
-                onClick={() => setTab(key)}
-                className={`px-3 py-1.5 font-medium ${
-                  tab === key
-                    ? 'bg-slate-900 text-white'
-                    : 'bg-white text-slate-600 hover:bg-slate-100'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+          <TabSwitch
+            value={tab}
+            onChange={setTab}
+            options={[
+              ['generated', 'Generated'],
+              ['legacy', 'Legacy'],
+            ]}
+          />
         </div>
         <div className="flex items-end gap-4">
           <label className="text-sm">
@@ -81,21 +69,11 @@ export function Export() {
               ))}
             </select>
           </label>
-          <div className="inline-flex overflow-hidden rounded-md border border-slate-300 text-sm">
-            {(['md', 'json', 'docx'] as const).map((f) => (
-              <button
-                key={f}
-                onClick={() => setFormat(f)}
-                className={`px-3 py-1.5 font-medium ${
-                  format === f
-                    ? 'bg-slate-900 text-white'
-                    : 'bg-white text-slate-600 hover:bg-slate-100'
-                }`}
-              >
-                {f.toUpperCase()}
-              </button>
-            ))}
-          </div>
+          <TabSwitch
+            value={format}
+            onChange={setFormat}
+            options={(['md', 'json', 'docx'] as const).map((f) => [f, f.toUpperCase()])}
+          />
         </div>
       </div>
 
@@ -284,13 +262,9 @@ function GeneratedExport({
         <p className="text-sm text-slate-500">
           {filtered.length} output{filtered.length === 1 ? '' : 's'} · {format.toUpperCase()}
         </p>
-        <button
-          onClick={downloadAll}
-          disabled={filtered.length === 0 || building}
-          className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50"
-        >
+        <Button onClick={downloadAll} disabled={filtered.length === 0 || building}>
           {building ? 'Building…' : 'Download all'}
-        </button>
+        </Button>
       </div>
 
       <div className="grid grid-cols-[1fr_1.6fr] gap-6">
@@ -494,13 +468,9 @@ function LegacyExport({
         <p className="text-sm text-slate-500">
           {filtered.length} asset{filtered.length === 1 ? '' : 's'} · {format.toUpperCase()}
         </p>
-        <button
-          onClick={downloadAll}
-          disabled={filtered.length === 0 || building}
-          className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50"
-        >
+        <Button onClick={downloadAll} disabled={filtered.length === 0 || building}>
           {building ? 'Building…' : 'Download all'}
-        </button>
+        </Button>
       </div>
 
       <div className="grid grid-cols-[1fr_1.6fr] gap-6">
@@ -595,19 +565,17 @@ function PreviewPane({
       <div className="flex items-center justify-between border-b border-slate-200 px-4 py-2">
         <span className="text-sm font-medium text-slate-700">{filename}</span>
         <div className="flex gap-2">
-          <button
-            onClick={onCopy}
-            className="rounded-md px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100"
-          >
+          <Button variant="ghost" className="px-2.5 py-1" onClick={onCopy}>
             {copied ? 'Copied' : 'Copy'}
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="primary"
+            className="px-2.5 py-1 text-xs"
             onClick={onDownload}
             disabled={busy}
-            className="rounded-md bg-slate-900 px-2.5 py-1 text-xs font-medium text-white hover:bg-slate-800 disabled:opacity-60"
           >
             {busy ? 'Building…' : 'Download'}
-          </button>
+          </Button>
         </div>
       </div>
       {note && (

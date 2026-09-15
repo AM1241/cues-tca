@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useToast } from '../components/toast-context'
-import { Spinner, EmptyState, ErrorNotice } from '../components/ui'
+import { Spinner, EmptyState, ErrorNotice, Badge, type BadgeTone } from '../components/ui'
 import {
   GenerationResultCard,
   GenerationErrorList,
@@ -40,10 +40,10 @@ function fmtDateTime(iso: string) {
 
 // `pending` should never be user-visible (the function is synchronous), so a
 // row stuck there means the function died mid-request — display as failed.
-const STATUS_STYLES: Record<string, string> = {
-  completed: 'bg-emerald-100 text-emerald-700',
-  failed: 'bg-red-100 text-red-700',
-  pending: 'bg-red-100 text-red-700',
+const STATUS_TONES: Record<string, BadgeTone> = {
+  completed: 'success',
+  failed: 'danger',
+  pending: 'danger',
 }
 
 export function Generate() {
@@ -145,13 +145,9 @@ export function Generate() {
                   <span className="text-sm font-medium text-slate-900">
                     {fmtDateTime(r.created_at)}
                   </span>
-                  <span
-                    className={`rounded px-1.5 py-0.5 text-xs font-medium ${
-                      STATUS_STYLES[r.status] ?? 'bg-slate-100 text-slate-600'
-                    }`}
-                  >
+                  <Badge tone={STATUS_TONES[r.status] ?? 'neutral'}>
                     {r.status === 'pending' ? 'failed (crashed)' : r.status}
-                  </span>
+                  </Badge>
                 </div>
                 <div className="mt-1.5 flex flex-wrap gap-1.5 text-xs text-slate-500">
                   <span>
