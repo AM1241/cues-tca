@@ -22,7 +22,7 @@ is where drift between the product and the Word user guide is recorded.
 | Supabase project | `bxaovkzemfyxrxbcqask` (`cues-tca`, eu-west-1) |
 | Production frontend | cues-tca.netlify.app, bundle `index-DFrWsv4w.js` (FLOW-01 deployed 2026-09-15) |
 | Migrations | applied through `0028` |
-| Edge Functions | `ingest` v10, `score-worker` v11, `anonymize-worker` v12, `cluster` v6, `generate` v6, `discover-brands` v7, `slide-images` v2 |
+| Edge Functions | `ingest` v10, `score-worker` v11, `anonymize-worker` v12, `cluster` v6, `generate` v7 (DOC-05 deployed 2026-09-15), `discover-brands` v7, `slide-images` v2 |
 
 `origin/phase6-frontend-binding` was fetched on 2026-09-15 and carried **no
 commits beyond `6ad6ef1`**. Netlify was serving the bundle built from it.
@@ -715,9 +715,10 @@ who is responsible · completion criteria.
   traceable in `cluster_generation_results`: `generate_v3` → `generate_v4`,
   `publication_v1` → `publication_v2`. Two new assertions pin the rule in
   `prompt_test.ts` and `publication_prompt_test.ts`; the full generate suite
-  passes (22 passed, 1 ignored). CAR-03's `stripEmphasis` is deliberately kept
-  — it still guards text generated before this prompt change and any emphasis
-  a model emits anyway.
+  passes (22 passed, 1 ignored). Deployed to production — `generate` is now
+  **v7, ACTIVE**. CAR-03's `stripEmphasis` is deliberately kept — it still
+  guards text generated before this prompt change and any emphasis a model
+  emits anyway.
 
 ---
 
