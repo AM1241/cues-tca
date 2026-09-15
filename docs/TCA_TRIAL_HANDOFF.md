@@ -1015,9 +1015,9 @@ external tester is the wrong risk. **[proposed]**
 | Task | Note |
 | --- | --- |
 | FLOW-01 | **DONE 2026-09-15** — implemented, CHK-05 verified against production, and **deployed** (`index-DFrWsv4w.js`) |
-| DOC-04 | The flow chapter; feeds the guide's next revision — draft in `docs/flow-guide-draft.md` |
-| ACC-04 | Investigate what consumption is already recorded, report, then decide |
-| DOC-05 | **DONE 2026-09-15** — both prompts forbid markdown emphasis; versions bumped to `generate_v4` / `publication_v2` |
+| DOC-04 | The flow chapter; feeds the guide's next revision — **draft done** (`docs/flow-guide-draft.md`, committed `005646c`); Theocharis's adaptation/translation is his half |
+| ACC-04 | **DONE 2026-09-15** — investigated, gap named, minimal fix implemented (migration `0029` + function threading, `cd2b61f`); no dashboard |
+| DOC-05 | **DONE 2026-09-15** — both prompts forbid markdown emphasis; versions bumped to `generate_v4` / `publication_v2`; deployed (`generate` v7) |
 | ACC-03 | Dates and limits, once agreed |
 | Collect the trial feedback | Then re-plan |
 
