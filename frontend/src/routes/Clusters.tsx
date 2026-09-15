@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useToast } from '../components/toast-context'
 import { Spinner, EmptyState, ErrorNotice, Button, Badge, Card } from '../components/ui'
@@ -8,6 +9,7 @@ import {
   type GenerationResultView,
   type GenerationErrorView,
 } from '../components/generation'
+import { GenerationHistory } from '../components/GenerationHistory'
 import { PER_CLUSTER_GENERATION } from '../lib/features'
 import { functionErrorMessage } from '../lib/functionError'
 
@@ -102,6 +104,7 @@ function daysAgo(n: number) {
 
 export function Clusters() {
   const toast = useToast()
+  const [searchParams] = useSearchParams()
 
   const [rows, setRows] = useState<AnonymisedRow[] | null>(null)
   const [failedRows, setFailedRows] = useState<FailedAnonymiseRow[]>([])
@@ -109,7 +112,9 @@ export function Clusters() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
 
   const [runs, setRuns] = useState<ClusteringRun[] | null>(null)
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(
+    () => searchParams.get('run'),
+  )
   const [clustersById, setClustersById] = useState<Map<string, ClusterInfo>>(new Map())
   const [assignmentByPost, setAssignmentByPost] = useState<Map<string, string>>(new Map())
   const [failedEmbeddings, setFailedEmbeddings] = useState<FailedEmbeddingRow[]>([])
@@ -892,6 +897,18 @@ export function Clusters() {
           </div>
         )}
       </div>
+
+      <details className="mt-6 rounded-md border border-slate-200 bg-white">
+        <summary className="cursor-pointer px-3 py-2 text-sm font-semibold text-slate-700">
+          Generation history
+        </summary>
+        <div className="border-t border-slate-200 p-3">
+          <GenerationHistory
+            runId={selectedRunId}
+            highlightRequestId={searchParams.get('request')}
+          />
+        </div>
+      </details>
     </div>
   )
 }

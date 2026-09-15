@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/useAuth'
 import { useToast } from '../components/toast-context'
@@ -54,6 +55,9 @@ type ReviewRow = {
     clustering_run_id: string
     // The note that produced THIS draft, if it was itself a regeneration.
     cluster_generation_requests: {
+      id: string
+      status: string
+      created_at: string
       feedback: string | null
       regenerates_result_id: string | null
     } | null
@@ -126,7 +130,7 @@ function GeneratedReview() {
            cluster_label, model, created_at, raw_post_ids, post_output, carousel_output,
            cluster_id, clustering_run_id, kind, source_cluster_ids, period_start, period_end,
            cluster_generation_requests!cluster_generation_results_generation_request_id_fkey (
-             feedback, regenerates_result_id
+             id, status, created_at, feedback, regenerates_result_id
            )
          )`,
       )
@@ -247,6 +251,7 @@ function GeneratedDetail({
 }) {
   const { session, isAdmin } = useAuth()
   const toast = useToast()
+  const navigate = useNavigate()
   // Permanent deletion (0027), admin-only: whether the confirm dialog is open.
   const [confirmingDelete, setConfirmingDelete] = useState(false)
 
@@ -376,6 +381,22 @@ function GeneratedDetail({
               ? new Date(row.cluster_generation_results.created_at).toLocaleString()
               : ''}
           </p>
+          {cameFrom && (
+            <p className="mt-0.5 text-xs text-slate-500">
+              Request {new Date(cameFrom.created_at).toLocaleString()} — {cameFrom.status}{' '}
+              <button
+                type="button"
+                onClick={() =>
+                  navigate(
+                    `/clusters?run=${row.cluster_generation_results?.clustering_run_id ?? ''}&request=${cameFrom.id}`,
+                  )
+                }
+                className="underline underline-offset-2 hover:text-slate-900"
+              >
+                view in Topics
+              </button>
+            </p>
+          )}
         </div>
         {row.edited_output != null && (
           <Button

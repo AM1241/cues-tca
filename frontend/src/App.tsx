@@ -6,7 +6,6 @@ import { Posts } from './routes/Posts'
 import { Sources } from './routes/Sources'
 import { Objective } from './routes/Objective'
 import { Clusters } from './routes/Clusters'
-import { Generate } from './routes/Generate'
 import { Review } from './routes/Review'
 import { Export } from './routes/Export'
 
@@ -70,7 +69,6 @@ function App() {
           <Route path="/objective" element={<Objective />} />
           <Route path="/posts" element={<Posts />} />
           <Route path="/clusters" element={<Clusters />} />
-          <Route path="/generate" element={<Generate />} />
           <Route path="/review" element={<Review />} />
           <Route path="/export" element={<Export />} />
           <Route path="*" element={<Navigate to="/sources" replace />} />

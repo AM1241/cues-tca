@@ -187,7 +187,7 @@ export function Objective() {
       <StageHeader
         n={1}
         title="Scope"
-        reaches={['Rating', 'Topics', 'Generate']}
+        reaches={['Rating', 'Topics']}
         detail="The domain and the themes are read almost everywhere: they shape the scoring rubric, name the clusters, and appear in the final text's brief. Get these right first — everything else narrows within them."
       />
 
@@ -458,7 +458,7 @@ export function Objective() {
       <StageHeader
         n={4}
         title="Writing the final text"
-        reaches={['Generate']}
+        reaches={['Topics']}
         detail="Read only when a post or carousel is actually written on the Topics screen's Create the carousel button. Nothing here touches scoring or anonymisation."
       />
 
@@ -505,7 +505,6 @@ export function Objective() {
 const STAGE_TONES: Record<string, BadgeTone> = {
   Rating: 'info',
   Topics: 'violet',
-  Generate: 'teal',
 }
 
 /**

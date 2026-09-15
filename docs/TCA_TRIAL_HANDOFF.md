@@ -366,19 +366,73 @@ who is responsible · completion criteria.
   to Review**.
 - **This is a direction for simplification, not a finalised screen layout.**
   A concrete proposal is required before implementation.
-- **Status:** TODO — proposal first.
+- **Status:** **IMPLEMENTED, 2026-09-15 — awaiting CHK-05.** Χάρης approved
+  D-5 (move Generate's content to Topics and Review). Applied exactly as
+  proposed below; `npm run build` clean. Not yet verified against the running
+  app and not deployed — that is CHK-05.
 - **What the screen actually is today**, so the proposal is grounded:
   `frontend/src/routes/Generate.tsx` is **read-only**. Its own header comment
   says so: it lists generation *requests* with timestamp and status, and the
   action itself lives on the Clusters screen. It reads `post_output` /
   `carousel_output` — the **model's originals** — and never `edited_output`.
-- **Design proposal (not agreed):** remove the tab from the navigation and
-  surface the same information where it is actually useful — a "generation
-  history" disclosure on the Clusters screen next to the button that creates
-  runs, and a link from a Review item to the request that produced it. Nothing
-  is deleted from the database; this is a navigation change.
-- **Must be preserved regardless of the layout chosen (FLOW-03):** content
-  generation, editing, saving changes, and human approval.
+  Two details worth knowing before judging whether anything is lost: Review's
+  empty state already says "run a generation from the Topics view" (so Review
+  already points at Topics as the home of generation), and the Topics run
+  selector already shows "· N generated" per run (so a count already exists
+  there). The Generate tab's only unique content is the *list of requests
+  with status/errors* and the *model originals read back from the database*.
+- **Design proposal (drafted 2026-09-15 — awaiting approval):** remove the
+  Generate tab from the navigation and move its two jobs — the request list
+  (status/errors) and the model-original results — into a collapsible
+  "Generation history" disclosure on the Topics screen, plus a link from each
+  Review item back to the request that produced it. Nothing is deleted from
+  the database; this is a navigation change. Concrete shape:
+  1. **Nav + routing.** Remove `{ to: '/generate', label: 'Generate' }` from
+     `frontend/src/components/Layout.tsx` (line 14) and the `/generate` route
+     + its import from `frontend/src/App.tsx` (lines 9 and 73). The
+     `frontend/src/routes/Generate.tsx` route component then becomes dead
+     code and is deleted — its shared rendering (`GenerationResultCard`,
+     `GenerationErrorList`) lives in `frontend/src/components/generation.tsx`,
+     which Topics already imports, so nothing rendering-related is lost with
+     the file.
+  2. **Generation history on Topics.** Add a collapsed disclosure at the
+     bottom of `frontend/src/routes/Clusters.tsx` (below the two existing
+     generation blocks) titled "Generation history", rendering the same
+     request list the Generate tab shows today — timestamp, status badge
+     (completed/failed), cluster count, output types, error message — and,
+     per request, the model originals + errors via the already-imported
+     `GenerationResultCard` / `GenerationErrorList`. It is scoped to the
+     **selected run** by default, so the existing run selector doubles as the
+     history filter and no new control is added.
+  3. **Review → request link.** Add a one-line link in the review detail
+     header ("Request {timestamp} — {status}", opening the history entry for
+     the request behind that draft). The join already exists in Review's own
+     query (`cluster_generation_results` → `cluster_generation_requests`); no
+     new data is read.
+  4. **Settings `reaches` badges.** The Settings screen's `StageHeader` badges
+     currently name "Generate" as the screen a change reaches
+     (`frontend/src/routes/Objective.tsx`: stage 1 reaches
+     `['Rating', 'Topics', 'Generate']`, stage 4 reaches `['Generate']`).
+     With the tab gone, stage 1 becomes `['Rating', 'Topics']` and stage 4
+     becomes `['Topics']`, and the `Generate` key is dropped from
+     `STAGE_TONES` — the badge must name a screen on the nav bar, per
+     `StageHeader`'s own comment.
+- **FLOW-03 preservation checklist** — each capability, and where it lives
+  after the change:
+  - *Content generation* — Topics' "Create a post and carousel" and (when
+    `PER_CLUSTER_GENERATION` is re-enabled) "Generate editorial copy". Unchanged.
+  - *Editing* — Review's `PostOutputEditor` / `CarouselOutputEditor` and the
+    image panel. Unchanged.
+  - *Saving changes* — Review's Save-edits control (UI-03) and regenerate. Unchanged.
+  - *Human approval* — Review's Approve/Reject. Unchanged.
+  - *Model originals + request status/errors* — moved verbatim from the
+    Generate tab to the Topics "Generation history" disclosure. Nothing lost.
+- **Files touched at implementation** (so the size of the change is explicit
+  before approval): `Layout.tsx`, `App.tsx`, `routes/Generate.tsx` (deleted),
+  `routes/Clusters.tsx`, `routes/Review.tsx`, `routes/Objective.tsx`. No
+  `supabase/` changes; no migrations.
+- **Open question for Χάρης:** whether the history disclosure shows only the
+  selected run (proposed default) or all runs with its own filter.
 - **Responsible:** developer proposes; Χάρης approves; then implement.
 - **Done when:** an ordinary user can get from "make me a draft" to "approve it"
   without visiting a screen that does nothing, and no capability listed in
@@ -813,6 +867,15 @@ purpose here is to confirm no regression after the naming and flow changes.
 
 #### CHK-05 — after any FLOW-01 change
 Confirm nothing in FLOW-03 was lost: generation, editing, saving, approval.
+- **Status: not yet verified against the running app, 2026-09-15.** The code
+  change compiles (`npm run build` clean) and the FLOW-03 preservation
+  checklist above holds by construction — generation/editing/saving/approval
+  code paths are untouched, only the Generate tab's read-only surface moved.
+  Still to do against the running app: confirm the Generate tab is gone from
+  the nav, the Topics "Generation history" disclosure renders request
+  status/errors + model originals, the Review "view in Topics" link opens the
+  right request, and a full create → generate → review → approve pass works
+  end to end.
 
 ---
 
@@ -824,10 +887,10 @@ the rest of the plan** — work around them in the order given in §7.
 | # | Decision | Proposal | Who answers | Answered |
 | --- | --- | --- | --- | --- |
 | D-1 | Name for the `Clusters` tab (NAM-05) | `Topics` — avoids "publication" and does not collide with the scoring `Themes` | Χάρης | **Yes, 2026-09-15 — `Topics`, implemented in `cc3dab0`.** |
-| D-2 | Labels for the review/download step (NAM-06) | Apply once D-1 is settled so the vocabulary is consistent | Χάρης | No — options A/B/C drafted (2026-09-15, branches `nam06-option-a/b/c-*`), decision still pending. |
+| D-2 | Labels for the review/download step (NAM-06) | Apply once D-1 is settled so the vocabulary is consistent | Χάρης | **Yes, 2026-09-15 — Option B** (`Review & Approve` / `Your carousel, ready to download`), applied `b05e9fc` and verified live. |
 | D-3 | Keep or remove `Review notes` (UI-04) | Keep, relabelled to say it is a private note visible only there | Χάρης | **Yes, 2026-09-15 — keep + relabel, implemented in `cc3dab0`.** |
 | D-4 | The `Tone` and `Audience` option lists (UI-02) | The sets proposed in UI-02 | Χάρης / Theocharis | **Yes, 2026-09-15 (Χάρης) — ship the proposed lists as-is, implemented in `cc3dab0`.** Theocharis has not separately confirmed; revisit if he pushes back during the trial. |
-| D-5 | Whether `Generate` disappears from the navigation (FLOW-01) | Yes, moving its content to Clusters and Review | Χάρης, after seeing the proposal | **Partially — 2026-09-15: defer to Track B, matching this doc's own recommendation. Not shipped to the first tester.** The yes/no on the proposal itself is still open. |
+| D-5 | Whether `Generate` disappears from the navigation (FLOW-01) | Yes, moving its content to Clusters and Review | Χάρης, after seeing the proposal | **Yes, 2026-09-15 — implemented.** FLOW-01 applied exactly as proposed (see §2.3 FLOW-01); CHK-05 still open. |
 | D-6 | A new product name (NAM-03) | None proposed — not invented deliberately | Χάρης / Theocharis | No — still open, no name invented (correct per NAM-03). |
 | D-7 | Trial dates and any consumption limit (ACC-03) | None proposed — organisational | Χάρης | No. |
 
@@ -912,7 +975,7 @@ external tester is the wrong risk. **[proposed]**
 
 | Task | Note |
 | --- | --- |
-| FLOW-01 | Proposal → D-5 → implement → CHK-05 |
+| FLOW-01 | Implemented 2026-09-15 (D-5 answered) → CHK-05 |
 | DOC-04 | The flow chapter; feeds the guide's next revision — draft in `docs/flow-guide-draft.md` |
 | ACC-04 | Investigate what consumption is already recorded, report, then decide |
 | DOC-05 | Stop asking the generator for markdown |

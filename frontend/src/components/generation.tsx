@@ -1,9 +1,10 @@
 import { useState } from 'react'
 
 // Shared rendering for `generate` outputs — used by the Clusters view (the
-// synchronous response, shown immediately) and the Generate view (the same
-// shapes read back from cluster_generation_results). PHASE5_FRONTEND_HANDOFF.md
-// defines the shapes; they are already-structured JSON, no markdown parsing.
+// synchronous response, shown immediately) and the generation-history
+// disclosure (the same shapes read back from cluster_generation_results).
+// PHASE5_FRONTEND_HANDOFF.md defines the shapes; they are already-structured
+// JSON, no markdown parsing.
 
 export type PostOutput = {
   headline: string

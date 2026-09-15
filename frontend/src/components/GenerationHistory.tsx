@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { useToast } from '../components/toast-context'
-import { Spinner, EmptyState, ErrorNotice, Badge, type BadgeTone } from '../components/ui'
+import { useToast } from './toast-context'
+import { Spinner, EmptyState, ErrorNotice, Badge, type BadgeTone } from './ui'
 import {
   GenerationResultCard,
   GenerationErrorList,
@@ -9,12 +9,12 @@ import {
   type GenerationErrorView,
   type PostOutput,
   type CarouselOutput,
-} from '../components/generation'
+} from './generation'
 
-// Read-only generation history (PHASE5_FRONTEND_HANDOFF.md): there is no
-// approve/edit/regenerate workflow in Phase 5 — results are immutable,
-// append-only rows, and a re-generation is a brand-new request. The action
-// itself lives on the Clusters view; this is the audit surface.
+// Read-only generation history, formerly its own Generate tab (FLOW-01). It
+// lists generation requests with timestamp and status and shows the model's
+// originals read back from cluster_generation_results. The action itself lives
+// on the Topics (Clusters) view; this is the audit surface.
 
 type RequestRow = {
   id: string
@@ -46,29 +46,42 @@ const STATUS_TONES: Record<string, BadgeTone> = {
   pending: 'danger',
 }
 
-export function Generate() {
+export function GenerationHistory({
+  runId,
+  highlightRequestId,
+}: {
+  runId?: string | null
+  highlightRequestId?: string | null
+}) {
   const toast = useToast()
 
   const [requests, setRequests] = useState<RequestRow[] | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(highlightRequestId ?? null)
   const [results, setResults] = useState<GenerationResultView[] | null>(null)
   const [errors, setErrors] = useState<GenerationErrorView[]>([])
   const [loadingDetail, setLoadingDetail] = useState(false)
 
   useEffect(() => {
+    let cancelled = false
     async function load() {
-      const { data, error } = await supabase
+      let query = supabase
         .from('cluster_generation_requests')
         .select(
           'id, clustering_run_id, requested_cluster_ids, output_types, status, error_message, created_at, completed_at',
         )
         .order('created_at', { ascending: false })
+      if (runId) query = query.eq('clustering_run_id', runId)
+      const { data, error } = await query
+      if (cancelled) return
       if (error) setError(error.message)
       else setRequests((data ?? []) as RequestRow[])
     }
     load()
-  }, [])
+    return () => {
+      cancelled = true
+    }
+  }, [runId])
 
   useEffect(() => {
     if (!selectedId) {
@@ -118,19 +131,17 @@ export function Generate() {
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-xl font-semibold">Generation history</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          {requests.length} request{requests.length === 1 ? '' : 's'} — trigger new generations
-          from the Topics view. Results are read-only; a re-generation is a new request.
-        </p>
-      </div>
+      <p className="text-sm text-slate-500">
+        {requests.length} request{requests.length === 1 ? '' : 's'}
+        {runId ? ' for the selected run' : ''} — results are read-only; a re-generation is a
+        new request.
+      </p>
 
       {requests.length === 0 ? (
-        <EmptyState>No generation requests yet. Select topics on the Topics view and generate.</EmptyState>
+        <EmptyState>No generation requests yet. Select topics on this view and generate.</EmptyState>
       ) : (
         <div className="grid grid-cols-[1fr_1.6fr] gap-6">
-          <div className="max-h-[75vh] space-y-2 overflow-y-auto">
+          <div className="max-h-[60vh] space-y-2 overflow-y-auto">
             {requests.map((r) => (
               <button
                 key={r.id}
@@ -163,7 +174,7 @@ export function Generate() {
             ))}
           </div>
 
-          <div className="max-h-[75vh] space-y-3 overflow-y-auto">
+          <div className="max-h-[60vh] space-y-3 overflow-y-auto">
             {!selectedId ? (
               <div className="flex items-center">
                 <EmptyState>Select a request to see its results</EmptyState>
