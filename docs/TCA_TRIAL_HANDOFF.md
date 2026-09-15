@@ -204,11 +204,12 @@ who is responsible · completion criteria.
 #### NAM-06 — labels for the review-and-download step
 - **Required:** the user must easily understand where they *see* and where they
   *download* the result.
-- **Status:** **OPTIONS DRAFTED, DECISION PENDING.** NAM-05 (its dependency,
-  per D-2) is settled — "Topics" — so this is no longer blocked, but the
-  actual labels have not been picked. Three ready-to-apply options are drafted
-  below on throwaway branches; the decision belongs to Χάρης. The underlying
-  interface work is done — see CAR-01.
+- **Status:** **DECIDED and APPLIED, 2026-09-15.** Χάρης picked **Option B**
+  (`Review & Approve` / `Your carousel, ready to download`). Cherry-picked
+  from `nam06-option-b-review-approve` (`008653b`) onto
+  `phase6-frontend-binding` as `b05e9fc`. `npm run build` verified clean
+  after applying. Not yet pushed/deployed — see "Done when" below for what's
+  left. The underlying interface work is done — see CAR-01.
 - **Note:** "Review and Download" and "Carousel Download" were given as
   **examples, not final labels.**
 - **Live strings today** (verified in `frontend/src/`, commit `9a2f7c8`):
@@ -239,9 +240,10 @@ who is responsible · completion criteria.
     Χάρης, not a consistency one.
 
 - **Responsible:** Χάρης decides; developer applies the chosen branch.
-- **Done when:** one option is cherry-picked onto `phase6-frontend-binding`,
-  the other two branches are deleted, and the tab label and panel heading are
-  agreed and applied.
+- **Done when:** Option B is applied (`b05e9fc`, done). Still open: push
+  `phase6-frontend-binding`, confirm the Netlify deploy picked it up, and
+  delete the two unused option branches (`nam06-option-a-review-download`,
+  `nam06-option-c-preview-download`).
 
 ### 2.2 Simplification of the interface
 
