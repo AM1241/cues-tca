@@ -1,5 +1,6 @@
 import { NavLink, Outlet } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { Button } from './ui'
 
 // Ordered to match the pipeline itself (CLAUDE.md's "Pipeline order"), not
 // alphabetically or by build date: collect, configure, then everything that
@@ -47,12 +48,7 @@ export function Layout({ email }: { email: string }) {
           </div>
           <div className="flex items-center gap-4">
             <span className="text-sm text-slate-600">{email}</span>
-            <button
-              onClick={() => supabase.auth.signOut()}
-              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100"
-            >
-              Sign out
-            </button>
+            <Button onClick={() => supabase.auth.signOut()}>Sign out</Button>
           </div>
         </div>
       </header>

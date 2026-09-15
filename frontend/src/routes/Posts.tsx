@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { Spinner, ErrorNotice } from '../components/ui'
+import { Spinner, ErrorNotice, Button, Badge, TableShell, THead, Th, TBody } from '../components/ui'
 import { useToast } from '../components/toast-context'
 import { functionErrorMessage } from '../lib/functionError'
 
@@ -259,39 +259,33 @@ export function Posts() {
               {' '}· {showAll ? 'all time' : `published in the last ${lookbackDays} days`}
             </span>
             {queued !== null && queued > 0 && (
-              <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-700">
+              <Badge tone="warning" className="ml-2">
                 {queued} waiting to be scored
-              </span>
+              </Badge>
             )}
           </p>
         </div>
 
         <div className="flex items-end gap-4">
           <div className="flex gap-2">
-            <button
+            <Button
               onClick={() => queue('unscored')}
               disabled={queueing || scoring}
               title="Queue every post that has never been scored"
-              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
             >
               {queueing ? 'Queueing…' : 'Queue unscored'}
-            </button>
-            <button
+            </Button>
+            <Button
               onClick={() => queue('all')}
               disabled={queueing || scoring}
               title="Re-score every post — use after changing the objective"
-              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
             >
               Re-score all
-            </button>
+            </Button>
           </div>
-          <button
-            onClick={scoreNow}
-            disabled={scoring || queueing}
-            className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
-          >
+          <Button variant="primary" onClick={scoreNow} disabled={scoring || queueing}>
             {scoring ? 'Scoring…' : 'Score now'}
-          </button>
+          </Button>
           {/* Period. Sits first because it is the only filter that changes what
               is fetched — the others narrow what is already on screen, and an
               editor who does not notice the difference wonders where their
@@ -378,21 +372,15 @@ export function Posts() {
         </div>
       </div>
 
-      <div
-        className={`overflow-x-auto rounded-lg border border-slate-200 bg-white transition-opacity ${
-          reloading ? 'opacity-50' : ''
-        }`}
-      >
+      <TableShell className={`transition-opacity ${reloading ? 'opacity-50' : ''}`}>
         <table className="w-full text-sm">
-          <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
-            <tr>
-              <th className="px-4 py-3 font-medium">Post</th>
-              <th className="px-4 py-3 font-medium">Source</th>
-              <th className="px-4 py-3 font-medium">Overall</th>
-              <th className="px-4 py-3 font-medium">Per-theme scores</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
+        <THead>
+          <Th>Post</Th>
+          <Th>Source</Th>
+          <Th>Overall</Th>
+          <Th>Per-theme scores</Th>
+        </THead>
+        <TBody>
             {filtered.map((r) => {
               const rp = r.raw_posts
               const title =
@@ -416,9 +404,9 @@ export function Posts() {
                       </p>
                     )}
                     {r.included_in_generation && (
-                      <span className="mt-1 inline-block rounded bg-emerald-50 px-1.5 py-0.5 text-xs font-medium text-emerald-700">
+                      <Badge tone="success" className="mt-1">
                         in generation
-                      </span>
+                      </Badge>
                     )}
                   </td>
                   <td className="px-4 py-3 text-slate-600">
@@ -446,7 +434,7 @@ export function Posts() {
                 </tr>
               )
             })}
-          </tbody>
+        </TBody>
         </table>
 
         {filtered.length === 0 && (
@@ -469,13 +457,9 @@ export function Posts() {
                   They will appear here once scoring runs.
                   {queued !== null && queued > 0 && ` ${queued} job(s) are queued.`}
                 </p>
-                <button
-                  onClick={scoreNow}
-                  disabled={scoring}
-                  className="mt-3 rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
-                >
+                <Button variant="primary" className="mt-3" onClick={scoreNow} disabled={scoring}>
                   {scoring ? 'Scoring…' : 'Score now'}
-                </button>
+                </Button>
               </>
             ) : !showAll && rows.length === 0 && newestPost ? (
               <>
@@ -487,19 +471,16 @@ export function Posts() {
                   {daysSinceNewest !== null && ` — ${daysSinceNewest} days ago`}. Collect
                   from Sources, widen the window, or press All.
                 </p>
-                <button
-                  onClick={() => setShowAll(true)}
-                  className="mt-3 rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100"
-                >
+                <Button className="mt-3" onClick={() => setShowAll(true)}>
                   Show all posts
-                </button>
+                </Button>
               </>
             ) : (
               <p>No posts match the current filters.</p>
             )}
           </div>
         )}
-      </div>
+      </TableShell>
     </div>
   )
 }

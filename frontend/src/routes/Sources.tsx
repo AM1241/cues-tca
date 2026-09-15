@@ -2,7 +2,20 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/useAuth'
 import { useToast } from '../components/toast-context'
-import { Spinner, ErrorNotice } from '../components/ui'
+import {
+  Spinner,
+  ErrorNotice,
+  Button,
+  Toggle,
+  Modal,
+  Card,
+  TableShell,
+  THead,
+  Th,
+  TBody,
+  Field,
+  TextInput,
+} from '../components/ui'
 import type { Database } from '../lib/database.types'
 import { functionErrorMessage } from '../lib/functionError'
 
@@ -222,40 +235,34 @@ export function Sources() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <button
+          <Button
             onClick={() => collect('all')}
             disabled={collecting !== null || sources.every((s) => !s.enabled)}
-            className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
           >
             {collecting === 'all' ? 'Collecting…' : 'Collect all enabled'}
-          </button>
+          </Button>
           {/* Adding a source is admin-only (0025) — the database refuses a
               non-admin's insert regardless, but there is no reason to offer a
               button that always fails. */}
           {isAdmin && (
-            <button
-              onClick={() => setEditing('new')}
-              className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800"
-            >
+            <Button variant="primary" onClick={() => setEditing('new')}>
               Add source
-            </button>
+            </Button>
           )}
         </div>
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+      <TableShell>
         <table className="w-full text-sm">
-          <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
-            <tr>
-              <th className="px-4 py-3 font-medium">Name</th>
-              <th className="px-4 py-3 font-medium">Type</th>
-              <th className="px-4 py-3 font-medium">Lookback</th>
-              <th className="px-4 py-3 font-medium">Last fetched</th>
-              <th className="px-4 py-3 font-medium">Enabled</th>
-              <th className="px-4 py-3" />
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
+        <THead>
+          <Th>Name</Th>
+          <Th>Type</Th>
+          <Th>Lookback</Th>
+          <Th>Last fetched</Th>
+          <Th>Enabled</Th>
+          <Th />
+        </THead>
+        <TBody>
             {sources.map((s) => (
               <tr key={s.id} className={s.enabled ? '' : 'opacity-60'}>
                 <td className="px-4 py-3">
@@ -288,67 +295,56 @@ export function Sources() {
                     : 'never'}
                 </td>
                 <td className="px-4 py-3">
-                  <button
-                    onClick={() => toggleEnabled(s)}
-                    role="switch"
-                    aria-checked={s.enabled}
-                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition ${
-                      s.enabled ? 'bg-emerald-500' : 'bg-slate-300'
-                    }`}
-                  >
-                    <span
-                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition ${
-                        s.enabled ? 'translate-x-4' : 'translate-x-1'
-                      }`}
-                    />
-                  </button>
+                  <Toggle
+                    checked={s.enabled}
+                    onChange={() => toggleEnabled(s)}
+                    ariaLabel={`${s.enabled ? 'Disable' : 'Enable'} ${s.name}`}
+                  />
                 </td>
                 <td className="px-4 py-3 text-right">
                   <div className="flex items-center justify-end gap-3">
-                    <button
+                    <Button
+                      variant="ghost"
                       onClick={() => collect(s)}
                       disabled={collecting !== null || !s.enabled}
                       title={s.enabled ? 'Collect posts now' : 'Enable the source to collect'}
-                      className="text-sm font-medium text-slate-500 hover:text-slate-900 disabled:opacity-40"
                     >
                       {collecting === s.id ? 'Collecting…' : 'Collect'}
-                    </button>
-                    <button
+                    </Button>
+                    <Button
+                      variant="ghost"
                       onClick={() => discover(s)}
                       disabled={discovering !== null}
                       title="Read this source's posts and propose the brand names that identify it"
-                      className="text-sm font-medium text-slate-500 hover:text-slate-900 disabled:opacity-40"
                     >
                       {discovering === s.id ? 'Reading…' : 'Find names'}
-                    </button>
-                    <button
-                      onClick={() => setEditing(s)}
-                      className="text-sm font-medium text-slate-500 hover:text-slate-900"
-                    >
+                    </Button>
+                    <Button variant="ghost" onClick={() => setEditing(s)}>
                       {isAdmin ? 'Edit' : 'Change lookback'}
-                    </button>
+                    </Button>
                     {/* Permanent deletion (0026) is admin-only, same as
                         creating a source — the RPC enforces this regardless,
                         but there is no reason to offer a button that always
                         fails. */}
                     {isAdmin && (
-                      <button
+                      <Button
+                        variant="ghost"
                         onClick={() => setDeleting(s)}
-                        className="text-sm font-medium text-red-600 hover:text-red-800"
+                        className="text-red-600 hover:text-red-800"
                       >
                         Delete
-                      </button>
+                      </Button>
                     )}
                   </div>
                 </td>
               </tr>
             ))}
-          </tbody>
+          </TBody>
         </table>
-      </div>
+      </TableShell>
 
       {reviewingSource && suggestions && (
-        <div className="mt-6 rounded-lg border border-slate-200 bg-white p-5">
+        <Card className="mt-6">
           <div className="flex items-start justify-between gap-4">
             <div>
               <h2 className="font-semibold">
@@ -359,15 +355,16 @@ export function Sources() {
                 hashtags. Rejecting keeps it from being proposed again.
               </p>
             </div>
-            <button
+            <Button
+              variant="ghost"
+              className="shrink-0"
               onClick={() => {
                 setReviewingSource(null)
                 setSuggestions(null)
               }}
-              className="shrink-0 text-sm font-medium text-slate-500 hover:text-slate-900"
             >
               Close
-            </button>
+            </Button>
           </div>
 
           {suggestions.length === 0 ? (
@@ -388,18 +385,16 @@ export function Sources() {
                     )}
                   </div>
                   <div className="flex shrink-0 gap-2">
-                    <button
+                    <Button
+                      size="sm"
+                      className="bg-emerald-600 text-white hover:bg-emerald-700"
                       onClick={() => decide(s, true)}
-                      className="rounded-md bg-emerald-600 px-3 py-1 text-sm font-medium text-white hover:bg-emerald-700"
                     >
                       Accept
-                    </button>
-                    <button
-                      onClick={() => decide(s, false)}
-                      className="rounded-md border border-slate-300 px-3 py-1 text-sm font-medium text-slate-600 hover:bg-slate-100"
-                    >
+                    </Button>
+                    <Button size="sm" onClick={() => decide(s, false)}>
                       Reject
-                    </button>
+                    </Button>
                   </div>
                 </li>
               ))}
@@ -411,7 +406,7 @@ export function Sources() {
             what is sold, not who sells it, and anonymising one would strip the
             meaning out of every post that mentions it.
           </p>
-        </div>
+        </Card>
       )}
 
       {editing && (
@@ -475,51 +470,34 @@ function DeleteSourceDialog({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-10 flex items-center justify-center bg-slate-900/40 px-6"
-      onClick={onClose}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-lg rounded-lg bg-white p-6 shadow-xl"
-      >
-        <h2 className="text-lg font-semibold text-red-700">Delete "{source.name}"?</h2>
-        <p className="mt-3 text-sm text-slate-600">
-          This permanently removes every post collected from this source, and
-          everything derived from them — scores, anonymised text, embeddings,
-          cluster assignments. <span className="font-medium">This cannot be undone.</span>
-        </p>
-        <p className="mt-3 text-sm text-slate-600">
-          To only stop collecting from it while keeping its history, use the
-          enabled switch instead — Cancel below and toggle it in the list.
-        </p>
+    <Modal onClose={onClose}>
+      <h2 className="text-lg font-semibold text-red-700">Delete "{source.name}"?</h2>
+      <p className="mt-3 text-sm text-slate-600">
+        This permanently removes every post collected from this source, and
+        everything derived from them — scores, anonymised text, embeddings,
+        cluster assignments. <span className="font-medium">This cannot be undone.</span>
+      </p>
+      <p className="mt-3 text-sm text-slate-600">
+        To only stop collecting from it while keeping its history, use the
+        enabled switch instead — Cancel below and toggle it in the list.
+      </p>
 
-        {blocked && (
-          <div className="mt-4 max-h-64 overflow-y-auto rounded-md bg-red-50 p-3 text-xs text-red-800">
-            <p className="mb-1 font-medium">Can't delete — some of its posts are already in generated copy:</p>
-            <pre className="whitespace-pre-wrap break-words font-mono">{blocked}</pre>
-          </div>
-        )}
-
-        <div className="mt-6 flex justify-end gap-3">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-md px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={confirmDelete}
-            disabled={purging}
-            className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-60"
-          >
-            {purging ? 'Deleting…' : 'Delete permanently'}
-          </button>
+      {blocked && (
+        <div className="mt-4 max-h-64 overflow-y-auto rounded-md bg-red-50 p-3 text-xs text-red-800">
+          <p className="mb-1 font-medium">Can't delete — some of its posts are already in generated copy:</p>
+          <pre className="whitespace-pre-wrap break-words font-mono">{blocked}</pre>
         </div>
+      )}
+
+      <div className="mt-6 flex justify-end gap-3">
+        <Button variant="ghost" className="px-4 py-2" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button variant="danger" size="md" onClick={confirmDelete} disabled={purging}>
+          {purging ? 'Deleting…' : 'Delete permanently'}
+        </Button>
       </div>
-    </div>
+    </Modal>
   )
 }
 
@@ -614,33 +592,30 @@ function SourceForm({
               still adjust how far back it looks.
             </p>
             <Field label="Lookback (days)">
-              <input
+              <TextInput
                 type="number"
                 min={1}
                 max={365}
                 value={form.lookback_days}
                 onChange={(e) => set('lookback_days', Number(e.target.value))}
-                className="w-full rounded-md border border-slate-300 px-3 py-2"
               />
             </Field>
           </div>
         ) : (
           <div className="mt-4 space-y-4">
             <Field label="Name">
-              <input
+              <TextInput
                 required
                 value={form.name}
                 onChange={(e) => set('name', e.target.value)}
-                className="w-full rounded-md border border-slate-300 px-3 py-2"
               />
             </Field>
             <Field label="URL">
-              <input
+              <TextInput
                 required
                 type="url"
                 value={form.url}
                 onChange={(e) => set('url', e.target.value)}
-                className="w-full rounded-md border border-slate-300 px-3 py-2"
               />
               <p className="mt-1 text-xs text-slate-500">
                 This is also the address posts are collected from, unless you set
@@ -658,32 +633,29 @@ function SourceForm({
                 </select>
               </Field>
               <Field label="Lookback (days)">
-                <input
+                <TextInput
                   type="number"
                   min={1}
                   max={365}
                   value={form.lookback_days}
                   onChange={(e) => set('lookback_days', Number(e.target.value))}
-                  className="w-full rounded-md border border-slate-300 px-3 py-2"
                 />
               </Field>
             </div>
             <Field label="Company name (optional)">
-              <input
+              <TextInput
                 value={form.company_name}
                 onChange={(e) => set('company_name', e.target.value)}
-                className="w-full rounded-md border border-slate-300 px-3 py-2"
               />
             </Field>
 
             {showAdvanced ? (
               <Field label="Collect from a different address (rare)">
-                <input
+                <TextInput
                   type="url"
                   placeholder={form.url || 'Same as URL above'}
                   value={form.collectionAddress}
                   onChange={(e) => set('collectionAddress', e.target.value)}
-                  className="w-full rounded-md border border-slate-300 px-3 py-2"
                 />
                 <p className="mt-1 text-xs text-slate-500">
                   Only needed when the page above isn't the exact address posts
@@ -692,13 +664,13 @@ function SourceForm({
                 </p>
               </Field>
             ) : (
-              <button
+              <Button
                 type="button"
+                variant="ghost"
                 onClick={() => setShowAdvanced(true)}
-                className="text-sm font-medium text-slate-500 hover:text-slate-900"
               >
                 Collect from a different address…
-              </button>
+              </Button>
             )}
           </div>
         )}
@@ -706,37 +678,14 @@ function SourceForm({
         {err && <p className="mt-4 text-sm text-red-600">{err}</p>}
 
         <div className="mt-6 flex justify-end gap-3">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-md px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
-          >
+          <Button type="button" variant="ghost" className="px-4 py-2" onClick={onClose}>
             Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={saving}
-            className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-60"
-          >
+          </Button>
+          <Button type="submit" variant="primary" size="md" disabled={saving}>
             {saving ? 'Saving…' : 'Save'}
-          </button>
+          </Button>
         </div>
       </form>
     </div>
-  )
-}
-
-function Field({
-  label,
-  children,
-}: {
-  label: string
-  children: React.ReactNode
-}) {
-  return (
-    <label className="block text-sm">
-      <span className="mb-1 block font-medium text-slate-700">{label}</span>
-      {children}
-    </label>
   )
 }

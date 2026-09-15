@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useToast } from '../components/toast-context'
-import { Spinner, ErrorNotice } from '../components/ui'
+import { Spinner, ErrorNotice, Button, Badge, Card, Toggle, Field, TextInput, type BadgeTone } from '../components/ui'
 import type { Database } from '../lib/database.types'
 
 type Config = Database['public']['Tables']['configurations']['Row']
@@ -155,13 +155,9 @@ export function Objective() {
           {dirty && (
             <span className="text-sm text-amber-600">unsaved changes</span>
           )}
-          <button
-            onClick={save}
-            disabled={saving || !dirty}
-            className="rounded-md bg-slate-900 px-4 py-1.5 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-60"
-          >
+          <Button variant="primary" onClick={save} disabled={saving || !dirty}>
             {saving ? 'Saving…' : 'Save'}
-          </button>
+          </Button>
         </div>
       </div>
       <p className="mb-6 text-sm text-slate-500">
@@ -202,7 +198,8 @@ export function Objective() {
               className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 py-1 pl-3 pr-2 text-sm"
             >
               {t.label}
-              <button
+              <Button
+                variant="ghost"
                 onClick={() =>
                   patch({
                     themes: draft.themes.filter((x) => x.theme_id !== t.theme_id),
@@ -212,12 +209,12 @@ export function Objective() {
                 aria-label={`Remove ${t.label}`}
               >
                 ×
-              </button>
+              </Button>
             </span>
           ))}
         </div>
         <div className="mt-3 flex gap-2">
-          <input
+          <TextInput
             value={newTheme}
             onChange={(e) => setNewTheme(e.target.value)}
             onKeyDown={(e) => {
@@ -230,7 +227,7 @@ export function Objective() {
               setNewTheme('')
             }}
             placeholder="Add a theme and press Enter"
-            className="flex-1 rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+            className="flex-1 py-1.5 text-sm"
           />
         </div>
         <p className="mt-2 text-xs text-slate-400">
@@ -355,7 +352,7 @@ export function Objective() {
         <div className="space-y-2">
           {draft.aliases.map((a, i) => (
             <div key={i} className="flex gap-2">
-              <input
+              <TextInput
                 value={a.key}
                 onChange={(e) => {
                   const next = [...draft.aliases]
@@ -363,9 +360,9 @@ export function Objective() {
                   patch({ aliases: next })
                 }}
                 placeholder="name in the text"
-                className="flex-1 rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+                className="flex-1 py-1.5 text-sm"
               />
-              <input
+              <TextInput
                 value={a.value}
                 onChange={(e) => {
                   const next = [...draft.aliases]
@@ -373,9 +370,10 @@ export function Objective() {
                   patch({ aliases: next })
                 }}
                 placeholder="replace with"
-                className="flex-1 rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+                className="flex-1 py-1.5 text-sm"
               />
-              <button
+              <Button
+                variant="ghost"
                 onClick={() =>
                   patch({ aliases: draft.aliases.filter((_, j) => j !== i) })
                 }
@@ -383,17 +381,17 @@ export function Objective() {
                 aria-label="Remove alias"
               >
                 ×
-              </button>
+              </Button>
             </div>
           ))}
-          <button
+          <Button
+            variant="ghost"
             onClick={() =>
               patch({ aliases: [...draft.aliases, { key: '', value: '' }] })
             }
-            className="text-sm font-medium text-slate-500 hover:text-slate-900"
           >
             + Add alias
-          </button>
+          </Button>
         </div>
       </Section>
 
@@ -485,10 +483,10 @@ export function Objective() {
   )
 }
 
-const STAGE_COLORS: Record<string, string> = {
-  Posts: 'bg-blue-100 text-blue-700',
-  Clusters: 'bg-violet-100 text-violet-700',
-  Generate: 'bg-teal-100 text-teal-700',
+const STAGE_TONES: Record<string, BadgeTone> = {
+  Posts: 'info',
+  Clusters: 'violet',
+  Generate: 'teal',
 }
 
 /**
@@ -520,12 +518,9 @@ function StageHeader({
         <span className="text-slate-300">·</span>
         <div className="flex gap-1.5">
           {reaches.map((r) => (
-            <span
-              key={r}
-              className={`rounded px-1.5 py-0.5 text-xs font-medium ${STAGE_COLORS[r] ?? 'bg-slate-100 text-slate-600'}`}
-            >
+            <Badge key={r} tone={STAGE_TONES[r] ?? 'neutral'}>
               → {r}
-            </span>
+            </Badge>
           ))}
         </div>
       </div>
@@ -534,6 +529,7 @@ function StageHeader({
   )
 }
 
+/** Objective's grouped-setting panel: a title, an optional hint, and content — built on the shared Card. */
 function Section({
   title,
   hint,
@@ -544,15 +540,16 @@ function Section({
   children: React.ReactNode
 }) {
   return (
-    <section className="mb-6 rounded-lg border border-slate-200 bg-white p-5">
+    <Card className="mb-6">
       <h2 className="font-semibold">{title}</h2>
       {hint && <p className="mt-0.5 mb-3 text-sm text-slate-500">{hint}</p>}
       {!hint && <div className="mb-3" />}
       {children}
-    </section>
+    </Card>
   )
 }
 
+/** Thin wrapper over the shared Field+TextInput matching this screen's plain label/value/onChange(v) call sites. */
 function TextField({
   label,
   value,
@@ -563,44 +560,8 @@ function TextField({
   onChange: (v: string) => void
 }) {
   return (
-    <label className="block text-sm">
-      <span className="mb-1 block font-medium text-slate-700">{label}</span>
-      <input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-md border border-slate-300 px-3 py-2"
-      />
-    </label>
-  )
-}
-
-function Toggle({
-  label,
-  checked,
-  onChange,
-}: {
-  label: string
-  checked: boolean
-  onChange: (v: boolean) => void
-}) {
-  return (
-    <label className="flex cursor-pointer items-center gap-3 text-sm text-slate-700">
-      <button
-        type="button"
-        role="switch"
-        aria-checked={checked}
-        onClick={() => onChange(!checked)}
-        className={`relative inline-flex h-5 w-9 items-center rounded-full transition ${
-          checked ? 'bg-emerald-500' : 'bg-slate-300'
-        }`}
-      >
-        <span
-          className={`inline-block h-4 w-4 transform rounded-full bg-white transition ${
-            checked ? 'translate-x-4' : 'translate-x-1'
-          }`}
-        />
-      </button>
-      {label}
-    </label>
+    <Field label={label}>
+      <TextInput value={value} onChange={(e) => onChange(e.target.value)} />
+    </Field>
   )
 }
