@@ -3,8 +3,16 @@
 Last updated: 2026-09-14 (session 22 — the carousel stops being a by-product:
 Review now opens with the finished post, and making the slides big enough to
 read revealed markdown asterisks that were being published).
-Read this first, then `MIGRATION_PLAN.md`. This file is the single "where are
-we" pointer between working sessions.
+
+**If you are here to pick up work, read `docs/TCA_TRIAL_HANDOFF.md` instead.**
+That file is the authoritative, self-contained task list for the TechnoAlimenti
+trial: consolidated requirements with stable IDs, status and evidence, the
+implementation plan, the verification checks and the open decisions. It does not
+require reading any of the history below.
+
+This file stays what it has always been: the narrative record of how the system
+got here and why particular decisions were made. Read it when a task points at
+it. Then `MIGRATION_PLAN.md`.
 
 ## Verified state at the end of session 22 (checked 2026-09-14)
 
