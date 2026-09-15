@@ -110,6 +110,12 @@ Deno.test("a publication revision carries the previous draft and the note", () =
   assertStringIncludes(prompt, "published its supply-chain audit");
 });
 
+Deno.test("the publication prompt forbids markdown emphasis too", () => {
+  const prompt = buildPublicationPrompt(themes, config, period);
+  assertStringIncludes(prompt, "no markdown emphasis");
+  assertStringIncludes(prompt, "drawn verbatim and cannot render those markers");
+});
+
 Deno.test("the validator accepts exactly opening + themes + closing", () => {
   const parsed = validatePublicationOutput(output(4), 4);
   assertEquals(parsed.carousel.slides.length, 4);

@@ -13,7 +13,7 @@
 import type { JsonSchemaFormat } from "../_shared/openai.ts";
 import type { GenerationConfigRow } from "./data.ts";
 
-export const PROMPT_VERSION = "generate_v3";
+export const PROMPT_VERSION = "generate_v4";
 
 /**
  * Fallback brief, derived from the operator's editorial_domain rather than
@@ -147,7 +147,10 @@ Rules:
 - Use short paragraphs, a clear structure, and a publication-ready tone.
 - Keep the editorial voice strong, purposeful, and insight-driven; connect the cluster's posts
   into one coherent narrative rather than listing them.
-- The post's hashtags must be relevant to the cluster's theme, without any identifying names.`;
+- The post's hashtags must be relevant to the cluster's theme, without any identifying names.
+- Use plain text only — no markdown emphasis (double-asterisk bold, single-asterisk italic,
+  or underscore). The post and slide text is drawn verbatim and cannot render those markers;
+  convey emphasis with word choice and structure instead.`;
 }
 
 // =============================================================================
@@ -163,7 +166,7 @@ Rules:
 // the evidence can say "these five things are the same story", which is the
 // editorial judgement the tool exists to make.
 
-export const PUBLICATION_PROMPT_VERSION = "publication_v1";
+export const PUBLICATION_PROMPT_VERSION = "publication_v2";
 
 /**
  * Carousel length is 2 + themes, so the theme count is what bounds it. Eight
@@ -252,7 +255,10 @@ Rules:
 - Avoid simplistic oppositions (e.g. "traditional good, industrial bad"); the sector's real
   efforts are the subject.
 - Use short paragraphs and a publication-ready tone.
-- The post's hashtags must suit the publication as a whole, without any identifying names.`;
+- The post's hashtags must suit the publication as a whole, without any identifying names.
+- Use plain text only — no markdown emphasis (double-asterisk bold, single-asterisk italic,
+  or underscore). The post and slide text is drawn verbatim and cannot render those markers;
+  convey emphasis with word choice and structure instead.`;
 }
 
 /** Same shape as a per-cluster result, but the slide count follows the theme count. */

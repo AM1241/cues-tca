@@ -103,3 +103,11 @@ Deno.test("the previous draft does not displace the evidence", () => {
   assertStringIncludes(prompt, "a food-sector organization cut water use.");
   assertEquals(prompt.includes("Anonymised source posts for this cluster"), true);
 });
+
+Deno.test("the prompt forbids markdown emphasis the renderer cannot draw", () => {
+  // CAR-03 strips emphasis at render time because canvas cannot draw `**bold**`.
+  // DOC-05 closes the loop by asking the model not to produce it in the first place.
+  const prompt = buildGenerationPrompt("water use", posts, config);
+  assertStringIncludes(prompt, "no markdown emphasis");
+  assertStringIncludes(prompt, "drawn verbatim and cannot render those markers");
+});

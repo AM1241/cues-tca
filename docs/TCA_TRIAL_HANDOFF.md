@@ -527,8 +527,9 @@ who is responsible · completion criteria.
   real publication. And there is deliberately **no sweep for leftover unpaired
   markers**, because the one that was tried deleted the trailing asterisks of a
   partly-masked name, which is a word rather than notation.
-- **Related, still TODO:** the generator is still *asked* for markdown. See
-  DOC-05.
+- **Related:** the generator used to be *asked* for markdown; **done 2026-09-15**
+  — see DOC-05. `stripEmphasis` is kept regardless, as the guard for
+  pre-change output and any emphasis a model emits anyway.
 
 #### CAR-04 — explain Design Template versus AI images
 - **Required:** the guide makes the difference understandable: AI image
@@ -707,8 +708,16 @@ who is responsible · completion criteria.
   CAR-03 strips it at render time, which fixes every publication that already
   exists — which is why it was done there first — but the prompt could stop
   producing it.
-- **Status:** TODO, low priority. Stripping already covers the user-visible
-  problem.
+- **Status:** **DONE 2026-09-15.** Both prompts (`buildGenerationPrompt` and
+  `buildPublicationPrompt`) now end their Rules with an explicit plain-text
+  rule: no markdown emphasis — the post and slide text is drawn verbatim and
+  cannot render those markers. Provenance versions bumped so the change is
+  traceable in `cluster_generation_results`: `generate_v3` → `generate_v4`,
+  `publication_v1` → `publication_v2`. Two new assertions pin the rule in
+  `prompt_test.ts` and `publication_prompt_test.ts`; the full generate suite
+  passes (22 passed, 1 ignored). CAR-03's `stripEmphasis` is deliberately kept
+  — it still guards text generated before this prompt change and any emphasis
+  a model emits anyway.
 
 ---
 
@@ -994,7 +1003,7 @@ external tester is the wrong risk. **[proposed]**
 | FLOW-01 | **DONE 2026-09-15** — implemented, CHK-05 verified against production, and **deployed** (`index-DFrWsv4w.js`) |
 | DOC-04 | The flow chapter; feeds the guide's next revision — draft in `docs/flow-guide-draft.md` |
 | ACC-04 | Investigate what consumption is already recorded, report, then decide |
-| DOC-05 | Stop asking the generator for markdown |
+| DOC-05 | **DONE 2026-09-15** — both prompts forbid markdown emphasis; versions bumped to `generate_v4` / `publication_v2` |
 | ACC-03 | Dates and limits, once agreed |
 | Collect the trial feedback | Then re-plan |
 
