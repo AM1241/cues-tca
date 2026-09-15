@@ -103,27 +103,31 @@ who is responsible · completion criteria.
 
 #### NAM-01 — `Objective` becomes `Settings`
 - **Required:** the tab and every in-app reference to it read "Settings".
-- **Status:** **IMPLEMENTED, not yet verified or deployed.** `Layout.tsx` nav
+- **Status:** **VERIFIED in the running app, 2026-09-15.** `Layout.tsx` nav
   label, the screen's own `<h1>`, the save toast, and every `reaches` badge
   that named "Objective" now say "Settings" (`cc3dab0`). Route `/objective`
   was deliberately left as-is, per this task's own scope note.
   `grep -rn "Objective" frontend/src` now returns only the route path,
   the component name `Objective()`, and code comments — no user-visible string.
-  Not yet exercised against the running app; not yet on cues-tca.netlify.app.
+  Exercised against a fresh local Supabase stack (`supabase db reset`, all 28
+  migrations) + `npm run dev`, signed in as a throwaway `editor`-role account:
+  nav shows "Settings", the Settings `<h1>` reads "Settings", zero console
+  errors. Screenshot evidence in session scratchpad. **Not yet on
+  cues-tca.netlify.app** — deploy is still A12.
 - **Evidence:** explicit agreement with Theocharis.
 - **Dependencies:** none. Blocks DOC-01.
 - **Responsible:** developer.
 - **Done when:** nav shows "Settings"; no visible string in the app calls that
   screen "Objective"; `grep -rn "Objective" frontend/src` returns only route
-  paths and file names. *(Grep condition met; verified-in-app and
-  in-tester's-build are still open — see A9–A13.)*
+  paths and file names. *(Grep condition met; verified-in-app is now done. Only
+  in-tester's-build remains — see A12/A13.)*
 
 #### NAM-02 — `Posts` becomes `Rating`
 - **Required:** the tab reads "Rating".
-- **Status:** **IMPLEMENTED, not yet verified or deployed.** `Layout.tsx` nav
+- **Status:** **VERIFIED in the running app, 2026-09-15.** `Layout.tsx` nav
   label, `Posts.tsx`'s own `<h1>`, and the `reaches`/`STAGE_TONES` references
-  on Settings now say "Rating" (`cc3dab0`). Same not-yet-verified caveat as
-  NAM-01.
+  on Settings now say "Rating" (`cc3dab0`). Confirmed same session as NAM-01:
+  nav and screen `<h1>` both read "Rating", not deployed yet.
 - **Evidence:** explicit agreement with Theocharis. **This supersedes an earlier
   recommendation in this project to keep "Posts"** on the grounds that the name
   was incomplete rather than wrong. The explicit agreement wins.
@@ -134,10 +138,11 @@ who is responsible · completion criteria.
 #### NAM-03 — the product title/description says what it makes
 - **Required:** the title or description makes clear the tool produces **posts
   and carousels**.
-- **Status:** **IMPLEMENTED, not yet verified or deployed.** The header now
+- **Status:** **VERIFIED in the running app, 2026-09-15.** The header now
   carries a one-line description under "Editorial Cloud": "LinkedIn posts and
   carousels, ready for review" (`Layout.tsx`, `cc3dab0`). No new product name
-  was invented, per the constraint below.
+  was invented, per the constraint below. Visible on every screen in the
+  running app (it's in the shared header), not deployed yet.
 - **Open:** **no final new product name has been agreed.** Do not invent one.
 - **Dependencies:** none.
 - **Responsible:** developer for the description; Χάρης + Theocharis for any
@@ -145,7 +150,7 @@ who is responsible · completion criteria.
 - **Done when:** a user landing on the app can tell from the header or a one-line
   description that it produces LinkedIn posts and carousels.
 
-#### NAM-04 — remove vague "publication" / «έκδοση»
+#### NAM-04 — remove vague "publication" / «έκδοση» *(create-carousel button text: NOT reachable this session — see A11 note below)*
 - **Required:** where the interface or guide says "publication" ambiguously, say
   **post** or **carousel** according to what is actually meant at that point.
   Specifically requested: the creation step must read **"Create the carousel"**,
@@ -176,11 +181,14 @@ who is responsible · completion criteria.
 
 #### NAM-05 — what the `Clusters` tab should be called
 - **Required:** a decision. The current name is internal jargon.
-- **Status:** **DECIDED and IMPLEMENTED, not yet verified or deployed.** Χάρης
-  confirmed `Topics` (2026-09-15). Applied to the nav label, the screen's own
-  `<h1>` (was "Anonymised & Clusters"), every `reaches`/`STAGE_TONES` reference
-  on Settings, and the cross-links from Generate.tsx and Review.tsx that used
-  to say "the Clusters view" (`cc3dab0` + follow-up commit).
+- **Status:** **DECIDED, IMPLEMENTED and VERIFIED in the running app,
+  2026-09-15.** Χάρης confirmed `Topics` (2026-09-15). Applied to the nav
+  label, the screen's own `<h1>` (was "Anonymised & Clusters"), every
+  `reaches`/`STAGE_TONES` reference on Settings, and the cross-links from
+  Generate.tsx and Review.tsx that used to say "the Clusters view" (`cc3dab0`
+  + follow-up commit). Confirmed live: nav label "Topics", screen `<h1>`
+  "Topics" (route stays `/clusters`, as designed), Review's empty-state text
+  correctly says "run a generation from the Topics view". Not deployed yet.
 - **Conflict to resolve:** an earlier proposal in this project was
   `Clusters → Publication`. **NAM-04 supersedes it** — "publication" is exactly
   the vague word being removed. A new name is required.
@@ -229,14 +237,19 @@ who is responsible · completion criteria.
 #### UI-02 — `Tone` and `Audience` become dropdowns
 - **Required:** replace entirely free text with a small set of appropriate
   options.
-- **Status:** **IMPLEMENTED, not yet verified or deployed.** Χάρης confirmed
-  shipping the proposed lists as-is (2026-09-15). Both fields are now a
-  `SelectField` closed dropdown in `frontend/src/routes/Objective.tsx`
+- **Status:** **IMPLEMENTED and VERIFIED in the running app, 2026-09-15.**
+  Χάρης confirmed shipping the proposed lists as-is (2026-09-15). Both fields
+  are now a `SelectField` closed dropdown in `frontend/src/routes/Objective.tsx`
   (`cc3dab0`). An out-of-list or empty stored value is kept/shown rather than
   silently swapped — this needed a follow-up fix in the same session: the
   first version didn't render a blank option for the never-configured (`''`)
   case, so the select would visually default to the first list item while the
-  real stored value stayed empty. Fixed before commit.
+  real stored value stayed empty. Fixed before commit. **The specific fix was
+  re-verified live this session**, against a `configurations` row seeded with
+  `voice_tone`/`voice_audience` both NULL (the never-configured case the bug
+  was about): both selects correctly show and have selected "Not set" — the
+  bug does not reproduce. Full option lists confirmed present and in order for
+  both fields.
 - **Options shipped, per confirmed proposal:**
   - *Tone:* Informative · Analytical · Practical · Authoritative ·
     Conversational
@@ -250,7 +263,16 @@ who is responsible · completion criteria.
 
 #### UI-03 — `Save edits` must be easy to see
 - **Required:** the control is visually distinct enough not to be missed.
-- **Status:** **IMPLEMENTED, not yet verified or deployed.** Both Review.tsx
+- **Status:** **IMPLEMENTED, still not verified in the running app.** Reaching
+  this control needs an actual generated result to edit (a row in
+  `cluster_generation_results`/`_reviews`), which needs a real run through
+  score → anonymize → cluster → generate — i.e. live OpenAI/RapidAPI calls.
+  That was out of scope for this session's verification pass (no API keys
+  configured locally, and running paid calls just to click through a save
+  button wasn't judged worth the cost — see ACC-04 on keeping trial
+  consumption attributable). Review's *empty* state was confirmed correct
+  (correct heading, correct "Topics view" cross-link, no console errors); the
+  editor and its Save button were not reached. Both Review.tsx
   editors (the carousel/post path and the legacy-asset path) now switch the
   button to `variant="primary"` with a drop shadow when there are unsaved
   changes (`cc3dab0`). A first attempt also made the button `sticky` to the
@@ -272,7 +294,10 @@ who is responsible · completion criteria.
 #### UI-04 — decide the fate of `Review notes`
 - **Required:** either the purpose is explained clearly in the interface, or the
   field is simplified/removed from the flow.
-- **Status:** **DECIDED and IMPLEMENTED, not yet verified or deployed.** Χάρης
+- **Status:** **DECIDED and IMPLEMENTED, not verified in the running app —
+  same reason as UI-03.** The relabelled text lives inside the Review editor,
+  which needs a real generated result to reach; not clicked through this
+  session. Χάρης
   confirmed: keep the field, relabelled (2026-09-15). Both occurrences in
   `Review.tsx` now read "Why you approved or rejected this (visible here
   only)" instead of "Review notes" (`cc3dab0`), exactly the wording this
@@ -646,25 +671,46 @@ written before the names settle. That is the critical path.
 | --- | --- | --- | --- |
 | A1 | Reconciliation check (§0.2) — **do this first, always** | — | **Done, 2026-09-15.** No undocumented work found on any branch; working tree clean. |
 | A2 | D-1, D-2 decided | Χάρης | **D-1 done** (`Topics`). **D-2 still open** — wording not decided. |
-| A3 | NAM-01, NAM-02 — the two agreed renames | A2 for consistency of one pass | **Implemented, `cc3dab0`.** Not yet verified in the running app or deployed. |
-| A4 | NAM-04, NAM-05, NAM-06 — terminology and the create button | A2 | **NAM-04, NAM-05 implemented, `cc3dab0`.** NAM-06 still open (D-2 undecided). Not yet verified or deployed. |
-| A5 | NAM-03 — description says posts and carousels | — (name itself is D-6) | **Implemented, `cc3dab0`.** Not yet verified or deployed. |
-| A6 | UI-03 — `Save edits` visible **[proposed: do early, it risks lost work]** | — | **Implemented, `cc3dab0`.** Not yet verified or deployed. |
-| A7 | UI-02 — Tone/Audience dropdowns | D-4 | **Implemented, `cc3dab0`.** Not yet verified or deployed. |
-| A8 | UI-04 — Review notes | D-3 | **Implemented, `cc3dab0`.** Not yet verified or deployed. |
+| A3 | NAM-01, NAM-02 — the two agreed renames | A2 for consistency of one pass | **Implemented, `cc3dab0`. Verified in the running app, 2026-09-15.** |
+| A4 | NAM-04, NAM-05, NAM-06 — terminology and the create button | A2 | **NAM-04, NAM-05 implemented, `cc3dab0`.** NAM-05 verified; NAM-04's create-button text not reachable without clustered data (see UI-03 note). NAM-06 still open (D-2 undecided). |
+| A5 | NAM-03 — description says posts and carousels | — (name itself is D-6) | **Implemented, `cc3dab0`. Verified in the running app, 2026-09-15.** |
+| A6 | UI-03 — `Save edits` visible **[proposed: do early, it risks lost work]** | — | **Implemented, `cc3dab0`.** Not reachable this session — needs a real generated result to edit (live LLM run). |
+| A7 | UI-02 — Tone/Audience dropdowns | D-4 | **Implemented, `cc3dab0`. Verified in the running app, 2026-09-15** — including the specific empty-value fix. |
+| A8 | UI-04 — Review notes | D-3 | **Implemented, `cc3dab0`.** Not reachable this session — same reason as UI-03. |
 | A9 | CAR-02 — progress indication reviewed | — | Not started. |
 | A10 | FLD-01 — explain the three fields in the interface | A4 vocabulary | Not started. |
-| A11 | CHK-01…CHK-04 | A3–A10 | Not started — and A3–A8 are implemented but not yet *verified*, which CHK-01…04 partly exist to do. |
+| A11 | CHK-01…CHK-04 | A3–A10 | **Partially done, 2026-09-15.** Naming/nav (CHK-04's non-permission half) and UI-02 confirmed live. CHK-01 (save an edit), CHK-02 (export matches), CHK-03 (carousel download) still need a real generated result — blocked on a live pipeline run, not on code review. |
 | A12 | Deploy, then DOC-01 step 2: Χάρης tells Theocharis what the release contains | A11 | Not started. |
 | A13 | ACC-01 — create the account and send it with the guide | A12 | Not started. |
 
 **A2–A8 code is committed (`cc3dab0`, `frontend-design-system`, unpushed) and
-`npm run build` (tsc -b && vite build) passes clean, but per §0.3's own
-distinction: implemented ≠ verified ≠ in the tester's build.** None of A3–A8
-has been exercised against the running local app (Supabase stack was not
-started this session — deferred on request), and none is on
-cues-tca.netlify.app. Do not report A2–A8 as done in the §0.3 sense until
-that happens.
+`npm run build` (tsc -b && vite build) passes clean.** Per §0.3's own
+distinction — **update, 2026-09-15, second session:** NAM-01, NAM-02, NAM-03,
+NAM-05, and UI-02 are now **verified** against a running local app (see each
+task's own Status line above for what was actually clicked through). UI-03 and
+UI-04 remain implemented-but-unverified — their controls live inside the
+Review editor, which needs a real generated result (a live score → anonymize →
+cluster → generate run) to reach; that wasn't done this session, see the note
+under UI-03. NAM-04's exact "Create the carousel" button text is in the same
+boat — it only renders once Topics has clustered data. **None of this is on
+cues-tca.netlify.app yet** — deploy is still A12.
+
+**Local dev environment note for whoever runs this next:** this session found
+the local Supabase stack's migration history was stuck at 0016 — the tables
+from 0017 onward (`cluster_generation_reviews` among them) were missing,
+producing "Could not find the table ... in the schema cache" errors on Review.
+This was **local Docker-volume drift, not a code bug** — `supabase migration
+list --local` showed 0017–0028 applied to neither local nor remote in its
+tracking table, even though the doc's own §0.1 says production is at 0028.
+Fixed with `supabase db reset` (reapplies all 28 migrations from scratch,
+confirmed clean). If you hit the same schema-cache error, reset first before
+assuming it's a regression from this branch's changes. Note also: the ports
+Supabase CLI defaults to (54321-54324) are shared with at least one other
+local project on this machine (`protero`'s `supabase-local` stack) — `supabase
+start` will fail with "port already allocated" if that one is up. This session
+stopped protero's stack to free the ports (data preserved in its Docker
+volume, `supabase stop --project-id supabase-local`, not destroyed) and left
+cues's own stack running afterward, on request.
 
 A follow-up code review on the same diff (before commit) caught and fixed two
 real bugs from the first pass, worth knowing about for anyone touching this
