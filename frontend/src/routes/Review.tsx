@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/useAuth'
 import { useToast } from '../components/toast-context'
-import { Spinner, EmptyState, ErrorNotice } from '../components/ui'
+import { Spinner, EmptyState, ErrorNotice, Button, Badge, Card, Modal, TabSwitch, type BadgeTone } from '../components/ui'
 import type { Database, Json } from '../lib/database.types'
 import { PER_CLUSTER_GENERATION } from '../lib/features'
 import {
@@ -60,12 +60,12 @@ type ReviewRow = {
   } | null
 }
 
-const STATUS_STYLES: Record<string, string> = {
-  draft: 'bg-slate-100 text-slate-600',
-  approved: 'bg-emerald-100 text-emerald-700',
-  rejected: 'bg-red-100 text-red-700',
-  published: 'bg-blue-100 text-blue-700',
-  superseded: 'bg-slate-200 text-slate-500',
+const STATUS_TONES: Record<string, BadgeTone> = {
+  draft: 'neutral',
+  approved: 'success',
+  rejected: 'danger',
+  published: 'info',
+  superseded: 'neutral',
 }
 
 /** The output actually in force: the editor's version if there is one. */
@@ -84,26 +84,14 @@ export function Review() {
     <div>
       <div className="mb-6 flex items-center gap-6">
         <h1 className="text-xl font-semibold">Review</h1>
-        <div className="inline-flex overflow-hidden rounded-md border border-slate-300 text-sm">
-          {(
-            [
-              ['generated', 'Generated'],
-              ['legacy', 'Legacy'],
-            ] as const
-          ).map(([key, label]) => (
-            <button
-              key={key}
-              onClick={() => setTab(key)}
-              className={`px-3 py-1.5 font-medium ${
-                tab === key
-                  ? 'bg-slate-900 text-white'
-                  : 'bg-white text-slate-600 hover:bg-slate-100'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        <TabSwitch
+          value={tab}
+          onChange={setTab}
+          options={[
+            ['generated', 'Generated'],
+            ['legacy', 'Legacy'],
+          ]}
+        />
       </div>
 
       {tab === 'generated' ? <GeneratedReview /> : <LegacyReview />}
@@ -213,17 +201,13 @@ function GeneratedReview() {
                 <span className="font-medium text-slate-900">
                   {r.cluster_generation_results?.cluster_label ?? '(cluster)'}
                 </span>
-                <span
-                  className={`shrink-0 rounded px-1.5 py-0.5 text-xs font-medium ${
-                    STATUS_STYLES[r.status] ?? 'bg-slate-100 text-slate-600'
-                  }`}
-                >
+                <Badge tone={STATUS_TONES[r.status] ?? 'neutral'} className="shrink-0">
                   {r.status}
-                </span>
+                </Badge>
               </div>
               <div className="mt-1.5 flex flex-wrap gap-1.5">
                 <Badge>{r.output_type}</Badge>
-                {r.edited_output != null && <Badge tone="amber">edited</Badge>}
+                {r.edited_output != null && <Badge tone="warning">edited</Badge>}
                 {r.cluster_generation_results && (
                   <Badge>{r.cluster_generation_results.model}</Badge>
                 )}
@@ -380,7 +364,7 @@ function GeneratedDetail({
     )
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-5">
+    <Card>
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="font-semibold text-slate-900">
@@ -394,13 +378,14 @@ function GeneratedDetail({
           </p>
         </div>
         {row.edited_output != null && (
-          <button
+          <Button
+            size="sm"
+            className="shrink-0"
             onClick={() => patch({ edited_output: null }, 'Reverted to the generated original')}
             disabled={busy}
-            className="shrink-0 rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-50"
           >
             Revert to original
-          </button>
+          </Button>
         )}
       </div>
 
@@ -411,12 +396,13 @@ function GeneratedDetail({
               ? 'A newer draft has answered this one.'
               : 'A newer draft exists. This version keeps its ' + row.status + ' status.'}
           </span>
-          <button
+          <Button
+            size="sm"
+            className="shrink-0 bg-white"
             onClick={() => onOpenResult(row.superseded_by_result_id!)}
-            className="shrink-0 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
           >
             Open newer draft
-          </button>
+          </Button>
         </div>
       )}
 
@@ -430,12 +416,13 @@ function GeneratedDetail({
           ) : (
             'Regenerated from an earlier draft, with no note — a different take on the same evidence.'
           )}{' '}
-          <button
+          <Button
+            variant="ghost"
+            className="underline underline-offset-2 hover:text-slate-900"
             onClick={() => onOpenResult(cameFrom.regenerates_result_id!)}
-            className="font-medium underline underline-offset-2 hover:text-slate-900"
           >
             Open the earlier draft
-          </button>
+          </Button>
         </div>
       )}
 
@@ -466,17 +453,16 @@ function GeneratedDetail({
       </div>
 
       <div className="mt-4 flex items-center gap-3">
-        <button
+        <Button
           onClick={() =>
             // PostOutput/CarouselOutput are structurally valid JSON, but a named
             // interface is not assignable to the index-signature `Json` type.
             patch({ edited_output: draft as unknown as Json }, 'Edits saved')
           }
           disabled={busy || !dirty}
-          className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50"
         >
           Save edits
-        </button>
+        </Button>
         {dirty && <span className="text-xs text-amber-600">unsaved edits</span>}
       </div>
 
@@ -493,20 +479,17 @@ function GeneratedDetail({
       </label>
 
       <div className="mt-3 flex gap-3">
-        <button
+        <Button
+          size="md"
+          className="bg-emerald-600 text-white hover:bg-emerald-700"
           onClick={() => decide('approved')}
           disabled={busy}
-          className="rounded-md bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
         >
           Approve
-        </button>
-        <button
-          onClick={() => decide('rejected')}
-          disabled={busy}
-          className="rounded-md bg-red-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-60"
-        >
+        </Button>
+        <Button variant="danger" size="md" onClick={() => decide('rejected')} disabled={busy}>
           Reject
-        </button>
+        </Button>
         <span className="self-center text-sm text-slate-500">
           Current: <span className="font-medium">{row.status}</span>
         </span>
@@ -528,13 +511,15 @@ function GeneratedDetail({
         placeholder="e.g. too corporate — lead with the policy angle and cut the closing question"
         className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
       />
-      <button
+      <Button
+        variant="primary"
+        size="md"
+        className="mt-2"
         onClick={regenerate}
         disabled={regenerating || busy}
-        className="mt-2 rounded-md bg-slate-900 px-4 py-1.5 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-60"
       >
         {regenerating ? 'Generating…' : 'Regenerate'}
-      </button>
+      </Button>
       {dirty && (
         <p className="mt-2 text-xs text-amber-600">
           You have unsaved edits. Regenerating produces a separate draft and leaves them here,
@@ -595,12 +580,12 @@ function GeneratedDetail({
             carousel output, whichever exist, and their reviews. This works
             even on an approved result; nothing else on this screen does.
           </p>
-          <button
+          <Button
+            className="mt-2 border-red-300 text-red-700 hover:bg-red-50"
             onClick={() => setConfirmingDelete(true)}
-            className="mt-2 rounded-md border border-red-300 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50"
           >
             Delete permanently…
-          </button>
+          </Button>
         </>
       )}
 
@@ -615,7 +600,7 @@ function GeneratedDetail({
           }}
         />
       )}
-    </div>
+    </Card>
   )
 }
 
@@ -656,47 +641,30 @@ function DeleteResultDialog({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-10 flex items-center justify-center bg-slate-900/40 px-6"
-      onClick={onClose}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-lg rounded-lg bg-white p-6 shadow-xl"
-      >
-        <h2 className="text-lg font-semibold text-red-700">Delete this result?</h2>
-        <p className="mt-3 text-sm text-slate-600">
-          Permanently removes "{g?.cluster_label}" — its {outputs || 'output'} and both
-          reviews. <span className="font-medium">This cannot be undone.</span>
+    <Modal onClose={onClose}>
+      <h2 className="text-lg font-semibold text-red-700">Delete this result?</h2>
+      <p className="mt-3 text-sm text-slate-600">
+        Permanently removes "{g?.cluster_label}" — its {outputs || 'output'} and both
+        reviews. <span className="font-medium">This cannot be undone.</span>
+      </p>
+      {row.status === 'approved' && (
+        <p className="mt-2 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          This is currently <span className="font-medium">approved</span>. Deleting it
+          removes it from Export too.
         </p>
-        {row.status === 'approved' && (
-          <p className="mt-2 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">
-            This is currently <span className="font-medium">approved</span>. Deleting it
-            removes it from Export too.
-          </p>
-        )}
-        {err && (
-          <div className="mt-4 rounded-md bg-red-50 p-3 text-xs text-red-800">{err}</div>
-        )}
-        <div className="mt-6 flex justify-end gap-3">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-md px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={confirmDelete}
-            disabled={busy}
-            className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-60"
-          >
-            {busy ? 'Deleting…' : 'Delete permanently'}
-          </button>
-        </div>
+      )}
+      {err && (
+        <div className="mt-4 rounded-md bg-red-50 p-3 text-xs text-red-800">{err}</div>
+      )}
+      <div className="mt-6 flex justify-end gap-3">
+        <Button variant="ghost" className="px-4 py-2" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button variant="danger" size="md" onClick={confirmDelete} disabled={busy}>
+          {busy ? 'Deleting…' : 'Delete permanently'}
+        </Button>
       </div>
-    </div>
+    </Modal>
   )
 }
 
@@ -751,19 +719,15 @@ function LegacyReview() {
                 <span className="font-medium text-slate-900">
                   {a.title || '(untitled)'}
                 </span>
-                <span
-                  className={`shrink-0 rounded px-1.5 py-0.5 text-xs font-medium ${
-                    STATUS_STYLES[a.status] ?? 'bg-slate-100 text-slate-600'
-                  }`}
-                >
+                <Badge tone={STATUS_TONES[a.status] ?? 'neutral'} className="shrink-0">
                   {a.status}
-                </span>
+                </Badge>
               </div>
               <div className="mt-1.5 flex flex-wrap gap-1.5">
                 <Badge>{a.asset_type}</Badge>
-                {a.is_legacy && <Badge tone="amber">legacy</Badge>}
+                {a.is_legacy && <Badge tone="warning">legacy</Badge>}
                 {a.llm_used === false && (
-                  <Badge tone="red">no LLM ({a.provenance})</Badge>
+                  <Badge tone="danger">no LLM ({a.provenance})</Badge>
                 )}
               </div>
             </button>
@@ -869,7 +833,7 @@ function AssetDetail({
   const hashtags = (asset.hashtags as string[] | null) ?? []
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-5">
+    <Card>
       {(asset.is_legacy || asset.llm_used === false) && (
         <div className="mb-4 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">
           {asset.llm_used === false
@@ -922,13 +886,9 @@ function AssetDetail({
       )}
 
       <div className="mt-4 flex items-center gap-3">
-        <button
-          onClick={saveEdits}
-          disabled={busy || !dirty}
-          className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50"
-        >
+        <Button onClick={saveEdits} disabled={busy || !dirty}>
           Save edits
-        </button>
+        </Button>
         {dirty && <span className="text-xs text-amber-600">unsaved edits</span>}
       </div>
 
@@ -947,20 +907,17 @@ function AssetDetail({
       </label>
 
       <div className="mt-3 flex gap-3">
-        <button
+        <Button
+          size="md"
+          className="bg-emerald-600 text-white hover:bg-emerald-700"
           onClick={approve}
           disabled={busy}
-          className="rounded-md bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
         >
           Approve
-        </button>
-        <button
-          onClick={reject}
-          disabled={busy}
-          className="rounded-md bg-red-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-60"
-        >
+        </Button>
+        <Button variant="danger" size="md" onClick={reject} disabled={busy}>
           Reject
-        </button>
+        </Button>
         <span className="self-center text-sm text-slate-500">
           Current: <span className="font-medium">{asset.status}</span>
         </span>
@@ -1006,25 +963,6 @@ function AssetDetail({
           ))}
         </ul>
       )}
-    </div>
-  )
-}
-
-function Badge({
-  children,
-  tone = 'slate',
-}: {
-  children: React.ReactNode
-  tone?: 'slate' | 'amber' | 'red'
-}) {
-  const styles = {
-    slate: 'bg-slate-100 text-slate-600',
-    amber: 'bg-amber-100 text-amber-700',
-    red: 'bg-red-100 text-red-700',
-  }[tone]
-  return (
-    <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${styles}`}>
-      {children}
-    </span>
+    </Card>
   )
 }
