@@ -20,7 +20,7 @@ is where drift between the product and the Word user guide is recorded.
 | Branch | `phase6-frontend-binding` — **all current work is here, not on `main`** |
 | Last commit at time of writing | `6ad6ef1` |
 | Supabase project | `bxaovkzemfyxrxbcqask` (`cues-tca`, eu-west-1) |
-| Production frontend | cues-tca.netlify.app, bundle `index-BJ5_C7wK.js` |
+| Production frontend | cues-tca.netlify.app, bundle `index-DFrWsv4w.js` (FLOW-01 deployed 2026-09-15) |
 | Migrations | applied through `0028` |
 | Edge Functions | `ingest` v10, `score-worker` v11, `anonymize-worker` v12, `cluster` v6, `generate` v6, `discover-brands` v7, `slide-images` v2 |
 
@@ -369,8 +369,11 @@ who is responsible · completion criteria.
 - **Status:** **IMPLEMENTED and VERIFIED against production, 2026-09-15** —
   see CHK-05. Χάρης approved D-5 (move Generate's content to Topics and
   Review). Applied exactly as proposed below; `npm run build` clean; live
-  verification recorded under CHK-05. Not yet deployed to
-  cues-tca.netlify.app.
+  verification recorded under CHK-05. **Deployed to cues-tca.netlify.app
+  2026-09-15** — pushed `phase6-frontend-binding` (`8e03c9e..78975cd`);
+  Netlify's Git-connected build picked it up, now serving bundle
+  `index-DFrWsv4w.js` (hash matches local `npm run build`), Generate nav
+  gone, "view in Topics" present in the live bundle.
 - **What the screen actually is today**, so the proposal is grounded:
   `frontend/src/routes/Generate.tsx` is **read-only**. Its own header comment
   says so: it lists generation *requests* with timestamp and status, and the
@@ -988,7 +991,7 @@ external tester is the wrong risk. **[proposed]**
 
 | Task | Note |
 | --- | --- |
-| FLOW-01 | **DONE 2026-09-15** — implemented and CHK-05 verified against production (deploy pending) |
+| FLOW-01 | **DONE 2026-09-15** — implemented, CHK-05 verified against production, and **deployed** (`index-DFrWsv4w.js`) |
 | DOC-04 | The flow chapter; feeds the guide's next revision — draft in `docs/flow-guide-draft.md` |
 | ACC-04 | Investigate what consumption is already recorded, report, then decide |
 | DOC-05 | Stop asking the generator for markdown |
