@@ -637,6 +637,20 @@ tests fail confusingly without them).
 Edit a slide heading and a body, press Save, reload the page, reopen the same
 result. The edit must still be there and the item must be marked as edited.
 Then check the model's original is still shown separately.
+- **Status: VERIFIED against production, 2026-09-15**, signed in as
+  `hzafeiris@f-in.eu` (admin — `demo.editor@f-in.eu`'s password was not
+  available this session; CHK-01/02/03 don't depend on role, only CHK-04
+  does). Result `55cab6c5-500d-4b69-9f5c-634122590cd1` (carousel, already had
+  a genuine prior edit — "The shared story" → "The shared full story"). Drove
+  the browser with Playwright against the local dev server pointed at
+  production Supabase. Appended a marker to the Heading field, confirmed
+  "Save edits" went from disabled to enabled the moment the field changed,
+  clicked Save, reloaded the page from scratch, reopened the same result: the
+  marker was still there. Cleaned the marker back out afterward with a second
+  edit/save cycle, confirmed by direct SQL read of `edited_output`. Zero
+  console errors throughout. The model's original stayed visibly separate and
+  unaltered ("Generated original" panel at the bottom of Review) — see CHK-02
+  for the same fact confirmed from the Generate screen's side.
 
 #### CHK-02 — export matches the final approved content
 Take an approved carousel that has been edited. Export it as Markdown and as
@@ -644,17 +658,51 @@ Word. Both must contain the **edited** heading and body, the `title` as the
 first heading, and the `caption` and `cta` at the end. Confirm the Generate
 screen still shows the model's original for the same item — that difference is
 expected and must not be "fixed".
+- **Status: VERIFIED against production, 2026-09-15.** Same result as CHK-01.
+  Approved it via the live Approve button (user confirmed this explicitly,
+  since it changes shared production state — attribution recorded via
+  `approved_by`/`approval_timestamp` in `cluster_generation_reviews`).
+  Downloaded the bundled "Download all" Markdown and DOCX exports from the
+  Export screen (default filter is already `approved`, confirming FLOW-02's
+  claim). Both files contain the **edited** heading ("The shared full
+  story…"), not the original — confirmed by grepping the raw `.md` and by
+  unzipping the `.docx` and grepping `word/document.xml`. Content order in the
+  Markdown matches the doc: `title` as `# H1` first, slide headings as `##`,
+  caption and CTA at the end (CTA rendered bold — that's the exporter's own
+  emphasis, not a CAR-03 regression; CAR-03 only concerns text painted into
+  images, not the Markdown/DOCX text exports, which are supposed to carry
+  Markdown syntax). Then opened Generate → the same request (`2026-09-03
+  23:03`, matching the result's `created_at`) → confirmed it shows "The
+  shared story: trust…" — the **original**, not the edit. Generate and Export
+  differing on the same item is now empirically confirmed, not just argued
+  from reading `Export.tsx:210`.
 
 #### CHK-03 — carousel download
 With the Design Template variant, download all slides. Confirm one PNG per
 slide, 1080×1080, in reading order, and that the words on the images match the
 approved text exactly — including that no `**` markers appear (CAR-03).
+- **Status: VERIFIED against production, 2026-09-15.** Same result, Design
+  Template variant (the default, free — no provider call). "Download 7
+  slides" produced 7 files, `slide-01.png`…`slide-07.png`, each confirmed
+  1080×1080 PNG via `file`. Slide 1 visually confirmed to show the edited
+  heading exactly ("The shared full story: trust is built…"), no title/footer
+  (correct — title is only in the footer of every slide *except* the first,
+  per FLD-01's table). Slide 4 confirmed the footer does carry the title
+  ("A system view of trust: logistics + controls + safety + talent"). Ran all
+  7 PNGs through `tesseract` OCR and grepped for `*` — **zero asterisks found
+  on any slide**, confirming CAR-03 holds for this carousel.
 
 #### CHK-04 — plain-user permissions
 Signed in as an `editor` account, confirm: the whole workflow runs; lookback and
 the enabled switch can be changed; adding, renaming and deleting a source are
 refused; deleting generated copy is refused. Session 21 verified this live — the
 purpose here is to confirm no regression after the naming and flow changes.
+- **Status: NOT attempted this session** — `demo.editor@f-in.eu`'s real
+  password wasn't available; CHK-01/02/03 were done as `hzafeiris@f-in.eu`
+  (admin) instead, which doesn't exercise the editor-role restriction this
+  check is actually about. No code touched this session affects permissions
+  or RLS, so there's no specific regression risk from `61fb237`, but this
+  line item is still open — needs the editor account's real credentials.
 
 #### CHK-05 — after any FLOW-01 change
 Confirm nothing in FLOW-03 was lost: generation, editing, saving, approval.
@@ -695,13 +743,13 @@ written before the names settle. That is the critical path.
 | A3 | NAM-01, NAM-02 — the two agreed renames | A2 for consistency of one pass | **Implemented, `cc3dab0`. Verified in the running app, 2026-09-15.** |
 | A4 | NAM-04, NAM-05, NAM-06 — terminology and the create button | A2 | **NAM-04, NAM-05 implemented, `cc3dab0`.** NAM-05 verified; NAM-04's create-button text not reachable without clustered data (see UI-03 note). NAM-06 still open (D-2 undecided). |
 | A5 | NAM-03 — description says posts and carousels | — (name itself is D-6) | **Implemented, `cc3dab0`. Verified in the running app, 2026-09-15.** |
-| A6 | UI-03 — `Save edits` visible **[proposed: do early, it risks lost work]** | — | **Implemented, `cc3dab0`.** Not reachable this session — needs a real generated result to edit (live LLM run). |
+| A6 | UI-03 — `Save edits` visible **[proposed: do early, it risks lost work]** | — | **Implemented, `cc3dab0`. Verified against production, 2026-09-15 (second session)** — see CHK-01: button correctly goes disabled → enabled the instant the field changes. |
 | A7 | UI-02 — Tone/Audience dropdowns | D-4 | **Implemented, `cc3dab0`. Verified in the running app, 2026-09-15** — including the specific empty-value fix. |
-| A8 | UI-04 — Review notes | D-3 | **Implemented, `cc3dab0`.** Not reachable this session — same reason as UI-03. |
-| A9 | CAR-02 — progress indication reviewed | — | **Implemented, `61fb237`.** Found and fixed one real violation (fabricated per-tier timings); progress indication itself was already adequate. Not yet verified live. |
-| A10 | FLD-01 — explain the three fields in the interface | A4 vocabulary | **Implemented, `61fb237`.** One-line hint added per field. Not yet verified live. |
-| A11 | CHK-01…CHK-04 | A3–A10 | **Partially done, 2026-09-15.** Naming/nav (CHK-04's non-permission half) and UI-02 confirmed live. CHK-01 (save an edit), CHK-02 (export matches), CHK-03 (carousel download) still need a real generated result — blocked on a live pipeline run, not on code review. |
-| A12 | Deploy, then DOC-01 step 2: Χάρης tells Theocharis what the release contains | A11 | Not started. |
+| A8 | UI-04 — Review notes | D-3 | **Implemented, `cc3dab0`. Verified against production, 2026-09-15 (second session)** — "Why you approved or rejected this (visible here only)" confirmed rendering live in Review. |
+| A9 | CAR-02 — progress indication reviewed | — | **Implemented, `61fb237`.** Found and fixed one real violation (fabricated per-tier timings); progress indication itself was already adequate. Not yet re-verified live post-fix (the "N of M" / "Redrawing…" states were exercised implicitly during CHK-01/03, no console errors, but the quality-dropdown wording itself wasn't re-screenshotted). |
+| A10 | FLD-01 — explain the three fields in the interface | A4 vocabulary | **Implemented, `61fb237`. Verified against production, 2026-09-15 (second session)** — all three hints (Title/Caption/CTA) confirmed rendering live in Review's Post text section. |
+| A11 | CHK-01…CHK-04 | A3–A10 | **CHK-01, CHK-02, CHK-03 verified against production, 2026-09-15 (second session)** — see each check's own Status line in §5 for what was actually driven and confirmed (edit persistence, export content incl. DOCX, 7×1080×1080 PNGs with zero OCR-detected `**`). **CHK-04 not attempted** — needs `demo.editor@f-in.eu`'s real password, which wasn't available this session; the admin account used for CHK-01–03 doesn't exercise the editor-role restriction. |
+| A12 | Deploy, then DOC-01 step 2: Χάρης tells Theocharis what the release contains | A11 | Not started. CHK-04 is the only remaining gap in A11; not a blocker for A12 unless Χάρης wants it closed first. |
 | A13 | ACC-01 — create the account and send it with the guide | A12 | Not started. |
 
 **A2–A8 code is committed (`cc3dab0`, `frontend-design-system`, unpushed) and
