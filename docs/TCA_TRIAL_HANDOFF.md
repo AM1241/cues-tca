@@ -590,8 +590,17 @@ who is responsible · completion criteria.
 #### ACC-01 — a plain user account on the FINT instance
 - **Required:** give TechnoAlimenti a simple user account soon, **without admin
   rights** for the initial trial.
-- **Status:** TO CONFIRM — the account for TechnoAlimenti has not been created as
-  far as this document knows. What exists today: three accounts
+- **Status:** **DONE 2026-09-16.** `g.rivoltella@tecnoalimenti.com` created at
+  Theocharis's request, role `editor`, `org = 'Tecnoalimenti'`, email
+  pre-confirmed. **The password is deliberately not recorded here** — it was
+  handed to the operator to pass on, like the demo accounts before it. There is
+  therefore no self-service reset: use the Auth admin API or the dashboard.
+  Verified live on the production URL as that account: signs in; the whole
+  navigation is present; `ingest`, `cluster`, `generate` and `slide-images` all
+  reach input validation (400, i.e. allowed); adding a source is refused (403);
+  the Sources rows offer only Collect / Find names / Change lookback, with no
+  Edit or Delete; Review offers Approve with no Danger zone.
+  *(Earlier status, for the record: not created as of 2026-09-15.)* What exists today: three accounts
   (`hzafeiris@f-in.eu` admin, `demo.admin@f-in.eu` admin, `demo.editor@f-in.eu`
   editor). The `editor` role can run the whole workflow as of session 21.
 - **Dependencies:** none technical.
@@ -664,6 +673,16 @@ who is responsible · completion criteria.
   and a new `slide_image_requests` log table written by `slide-images`. No
   UI, no dashboard — every paid path becomes attributable to a caller, and
   callers to an org via `editors.org`.
+- **Applied and proven, 2026-09-16.** Migration `0029` was applied to production
+  and all five affected functions redeployed (`score-worker` v12,
+  `anonymize-worker` v13, `cluster` v7, `slide-images` v3, `generate` already
+  v7). `editors.org` is now populated for every account: `FINT` for the three
+  `@f-in.eu` accounts, `Tecnoalimenti` for the new one — without which
+  attribution reaches a person but not an organisation, which was the point.
+  Proven end to end on live data: a real generation is attributed to its caller
+  via `cluster_generation_requests.created_by` (previously always NULL), and six
+  scoring results carry `triggered_by` naming the Tecnoalimenti account (that
+  path previously recorded nothing at all).
 - **Responsible:** developer investigates and reports; Χάρης decides what, if
   anything, to build.
 - **Done when:** a short written answer exists saying, per paid operation, what
