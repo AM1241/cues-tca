@@ -222,7 +222,7 @@ async function build(
   const d = await import('docx')
   const doc = new d.Document({
     title,
-    creator: 'CUES Editorial Cloud',
+    creator: 'CUES Post Generator',
     description: title,
     sections: [{ children: joinWithPageBreaks(d, toBlocks(d)) }],
   })

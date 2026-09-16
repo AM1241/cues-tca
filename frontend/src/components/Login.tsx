@@ -23,8 +23,11 @@ export function Login() {
           CUES
         </p>
         <h1 className="mt-1 text-2xl font-semibold text-slate-900">
-          Editorial Cloud
+          Post Generator
         </h1>
+        <p className="mt-2 text-sm text-slate-500">
+          LinkedIn posts and carousels, ready for review
+        </p>
 
         <form onSubmit={handleSubmit} className="mt-8 space-y-4">
           <div>

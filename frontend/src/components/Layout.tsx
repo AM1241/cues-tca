@@ -26,7 +26,7 @@ export function Layout({ email }: { email: string }) {
                 CUES
               </p>
               <p className="text-sm font-semibold leading-none">
-                Editorial Cloud
+                Post Generator
               </p>
               <p className="text-xs text-slate-500 leading-none mt-1">
                 LinkedIn posts and carousels, ready for review
