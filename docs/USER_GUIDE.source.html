@@ -1,0 +1,579 @@
+<title>Post Generator Handbook</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+
+<style>
+  /* Palette taken from the product itself: #0B1220 and #34D399 are the exact
+     values the slide renderer paints with. */
+  :root {
+    --ground:      #EEF1F6;
+    --surface:     #FFFFFF;
+    --surface-sunk:#E4E9F1;
+    --ink:         #0B1220;
+    --ink-soft:    #55627C;
+    --ink-faint:   #8593AC;
+    --rule:        #D6DDE8;
+    --rule-strong: #B9C4D4;
+    --accent:      #0B6E52;
+    --accent-wash: #DCEFE7;
+    --warn:        #9A4A12;
+    --warn-wash:   #F7E9DC;
+    --stop:        #9B2C2C;
+    --stop-wash:   #F9E4E4;
+    --shadow:      0 1px 2px rgba(11,18,32,.06), 0 10px 30px rgba(11,18,32,.08);
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:#090E18; --surface:#121C2E; --surface-sunk:#0D1524;
+      --ink:#F3F6FB; --ink-soft:#9FAFC6; --ink-faint:#6B7C96;
+      --rule:#24314B; --rule-strong:#33425F;
+      --accent:#34D399; --accent-wash:#0F2C24;
+      --warn:#E8A971; --warn-wash:#2E1E10;
+      --stop:#F0A0A0; --stop-wash:#331717;
+      --shadow:0 1px 2px rgba(0,0,0,.4), 0 12px 34px rgba(0,0,0,.4);
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:#090E18; --surface:#121C2E; --surface-sunk:#0D1524;
+    --ink:#F3F6FB; --ink-soft:#9FAFC6; --ink-faint:#6B7C96;
+    --rule:#24314B; --rule-strong:#33425F;
+    --accent:#34D399; --accent-wash:#0F2C24;
+    --warn:#E8A971; --warn-wash:#2E1E10;
+    --stop:#F0A0A0; --stop-wash:#331717;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 12px 34px rgba(0,0,0,.4);
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--ground); color: var(--ink);
+    font-family: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 1rem; line-height: 1.65; -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 60rem; margin: 0 auto; padding: clamp(2rem,5vw,4rem) clamp(1rem,4vw,2.5rem) 6rem; }
+
+  h1, h2, h3 { font-family: Newsreader, Georgia, serif; font-weight: 500; line-height: 1.15; text-wrap: balance; margin: 0; }
+  h1 { font-size: clamp(2.25rem, 5vw, 3rem); letter-spacing: -.015em; }
+  h2 { font-size: clamp(1.6rem, 3.4vw, 2.1rem); letter-spacing: -.01em; }
+  h3 { font-size: 1.2rem; font-weight: 600; }
+  p { margin: 0 0 1rem; max-width: 65ch; }
+  ul, ol { max-width: 65ch; padding-left: 1.3rem; margin: 0 0 1rem; }
+  li { margin-bottom: .45rem; }
+  a { color: var(--accent); }
+
+  .eyebrow { font-family: "IBM Plex Mono", monospace; font-size: .8125rem; letter-spacing: .11em; text-transform: uppercase; color: var(--accent); display: block; margin-bottom: .6rem; }
+  .lede { font-size: 1.15rem; color: var(--ink-soft); max-width: 60ch; }
+  .ui { font-family: "IBM Plex Mono", monospace; font-size: .9em; background: var(--surface-sunk); padding: .1em .4em; border-radius: 3px; white-space: nowrap; }
+
+  header.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 2rem; margin-bottom: 1rem; }
+  .meta { font-family: "IBM Plex Mono", monospace; font-size: .8125rem; color: var(--ink-faint); margin-top: 1.5rem; }
+
+  section { padding-top: 3.25rem; }
+  section > h2 { margin-bottom: .75rem; }
+
+  .step-no { font-family: "IBM Plex Mono", monospace; font-size: .8125rem; color: var(--accent); letter-spacing: .1em; text-transform: uppercase; display: block; margin-bottom: .4rem; }
+
+  figure { margin: 1.75rem 0; }
+  figure img { width: 100%; display: block; border: 1px solid var(--rule-strong); border-radius: 4px; box-shadow: var(--shadow); background: var(--surface); }
+  figcaption { font-size: .8125rem; color: var(--ink-faint); margin-top: .6rem; font-family: "IBM Plex Mono", monospace; }
+
+  table { width: 100%; border-collapse: collapse; margin: 1.25rem 0; font-size: .9375rem; }
+  th, td { text-align: left; padding: .65rem .8rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { font-size: .75rem; letter-spacing: .07em; text-transform: uppercase; color: var(--ink-faint); font-weight: 600; font-family: "IBM Plex Mono", monospace; }
+  .scroller { overflow-x: auto; }
+
+  .note, .money, .stop {
+    border-left: 3px solid var(--accent); background: var(--accent-wash);
+    padding: 1rem 1.2rem; margin: 1.5rem 0; border-radius: 0 3px 3px 0;
+  }
+  .note p:last-child, .money p:last-child, .stop p:last-child { margin-bottom: 0; }
+  .money { border-left-color: var(--warn); background: var(--warn-wash); }
+  .stop  { border-left-color: var(--stop); background: var(--stop-wash); }
+  .note strong, .money strong, .stop strong { font-weight: 600; }
+
+  .flow { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; margin: 1.5rem 0; font-family: "IBM Plex Mono", monospace; font-size: .8125rem; }
+  .flow span { background: var(--surface); border: 1px solid var(--rule-strong); border-radius: 3px; padding: .35rem .6rem; }
+  .flow i { color: var(--ink-faint); font-style: normal; }
+
+  .toc { background: var(--surface); border: 1px solid var(--rule); border-radius: 4px; padding: 1.2rem 1.5rem; margin-top: 2rem; }
+  .toc ol { margin: 0; max-width: none; columns: 2; column-gap: 2rem; }
+  @media (max-width: 40rem) { .toc ol { columns: 1; } }
+  .toc a { text-decoration: none; color: var(--ink); }
+  .toc a:hover { color: var(--accent); }
+
+  footer { margin-top: 4rem; border-top: 1px solid var(--rule); padding-top: 1.5rem; font-size: .875rem; color: var(--ink-soft); }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+
+<header class="masthead">
+  <span class="eyebrow">CUES &middot; User handbook</span>
+  <h1>Post Generator</h1>
+  <p class="lede">How to turn what food-industry organisations publish on LinkedIn into
+     an editorial post and a carousel you have read, edited and approved yourself.</p>
+  <p class="meta">
+    Written against the live application on 16 September 2026. Every screenshot below is the
+    real product, signed in as an ordinary user &mdash; not a mock-up.
+  </p>
+</header>
+
+<div class="toc">
+  <ol>
+    <li><a href="#what">What it makes</a></li>
+    <li><a href="#signin">Signing in</a></li>
+    <li><a href="#screens">The six screens</a></li>
+    <li><a href="#sources">1. Sources</a></li>
+    <li><a href="#settings">2. Settings</a></li>
+    <li><a href="#rating">3. Rating</a></li>
+    <li><a href="#topics">4. Topics</a></li>
+    <li><a href="#review">5. Review &amp; Approve</a></li>
+    <li><a href="#export">6. Export</a></li>
+    <li><a href="#status">The four status words</a></li>
+    <li><a href="#permissions">What you can change</a></li>
+    <li><a href="#costs">What costs money</a></li>
+    <li><a href="#trouble">If something looks wrong</a></li>
+  </ol>
+</div>
+
+<!-- ===================================================== -->
+<section id="what">
+  <h2>What it makes</h2>
+  <p>Two things, from the same material:</p>
+  <ul>
+    <li>a <strong>post</strong> &mdash; the LinkedIn text: a headline, the body, a closing line and hashtags;</li>
+    <li>a <strong>carousel</strong> &mdash; a set of square 1080&times;1080 images you swipe through, plus the
+        words that accompany them.</li>
+  </ul>
+  <p>They come from the same evidence: recent posts by the organisations you follow, scored for
+     relevance, grouped into topics, and written up.</p>
+
+  <div class="stop">
+    <p><strong>The tool never publishes anything.</strong> It produces files and text; you post them
+      yourself. Nothing leaves the tool without a person pressing <span class="ui">Approve</span>.</p>
+  </div>
+
+  <div class="note">
+    <p><strong>The words on the images are yours, letter for letter.</strong> The text on every slide is
+      drawn by the tool from the text you approved. No model rewrites it into the picture. When the
+      AI option is used, the model produces only the <em>background</em> behind the words.</p>
+  </div>
+</section>
+
+<!-- ===================================================== -->
+<section id="signin">
+  <h2>Signing in</h2>
+  <p>Open the address you were given and enter your email and password. There is no
+     self-registration: an account is created for you.</p>
+  <figure>
+    <img src="{{IMG_G1}}" alt="The sign-in screen, showing the product name and a short description">
+    <figcaption>The sign-in screen.</figcaption>
+  </figure>
+  <p>If you forget your password there is no self-service reset &mdash; ask the person who gave you
+     the account.</p>
+</section>
+
+<!-- ===================================================== -->
+<section id="screens">
+  <h2>The six screens</h2>
+  <p>The navigation bar reads left to right, and that order <em>is</em> the process. Each screen
+     feeds the next, so skipping one leaves the next screen empty.</p>
+
+  <div class="flow">
+    <span>Sources</span><i>&rarr;</i><span>Settings</span><i>&rarr;</i><span>Rating</span><i>&rarr;</i>
+    <span>Topics</span><i>&rarr;</i><span>Review &amp; Approve</span><i>&rarr;</i><span>Export</span>
+  </div>
+
+  <div class="scroller">
+  <table>
+    <thead><tr><th>Screen</th><th>What you do there</th><th>What comes out</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Sources</strong></td><td>Choose which LinkedIn pages are watched, and collect their recent posts</td><td>Collected posts</td></tr>
+      <tr><td><strong>Settings</strong></td><td>Set the editorial direction: themes, the relevance bar, the brief, tone and audience</td><td>The rules everything else follows</td></tr>
+      <tr><td><strong>Rating</strong></td><td>Score the collected posts for relevance and see why each got its score</td><td>Scored posts</td></tr>
+      <tr><td><strong>Topics</strong></td><td>Hide company names, group similar posts into topics, then create the post and carousel</td><td>A draft</td></tr>
+      <tr><td><strong>Review &amp; Approve</strong></td><td>Read it, edit it, approve or reject it, and download the images</td><td>An approved draft and PNG slides</td></tr>
+      <tr><td><strong>Export</strong></td><td>Download the final text as Word, Markdown or JSON</td><td>Files</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="note">
+    <p><strong>Two words that sound alike and are not.</strong> <em>Themes</em> are the five or six
+      subjects you score against, set in Settings &mdash; food safety, supply chain, and so on.
+      <em>Topics</em> are groups of similar posts, worked out automatically, and each one becomes a
+      section of the publication and a slide in the carousel. Themes are what you are looking for;
+      topics are what was found.</p>
+  </div>
+</section>
+
+<!-- ===================================================== -->
+<section id="sources">
+  <span class="step-no">Step one</span>
+  <h2>Sources</h2>
+  <p>The list of LinkedIn pages the tool reads, and where new material comes in.</p>
+  <figure>
+    <img src="{{IMG_G2}}" alt="The Sources screen listing watched LinkedIn pages with their lookback and last fetch time">
+    <figcaption>Sources, as an ordinary user sees it.</figcaption>
+  </figure>
+
+  <h3>The columns</h3>
+  <ul>
+    <li><strong>Lookback</strong> &mdash; how many days back this page is read when you collect. Anyone can change it.</li>
+    <li><strong>Last fetched</strong> &mdash; when this page was last read successfully.</li>
+    <li><strong>Enabled</strong> &mdash; the switch. A page that is off is skipped by
+        <span class="ui">Collect all enabled</span>. Turning it off is reversible and is the
+        polite way to pause a source.</li>
+  </ul>
+
+  <h3>Collecting</h3>
+  <p>Press <span class="ui">Collect</span> on one row to read that page, or
+     <span class="ui">Collect all enabled</span> at the top right for every active page. It takes a
+     few seconds; the button says so while it runs. You then get a short result, for example
+     <em>&ldquo;4 new, 46 outside your lookback window&rdquo;</em> &mdash; the second number is the
+     one to read if nothing new arrived: the posts existed, they were simply older than your
+     lookback.</p>
+
+  <h3>Find names</h3>
+  <p><span class="ui">Find names</span> asks the model to read this page's recent posts and suggest
+     product or subsidiary names worth hiding &mdash; brands the anonymiser would not work out from
+     the page name alone. Everything it returns is a <em>proposal</em>: nothing is hidden until you
+     accept it.</p>
+
+  <div class="money">
+    <p><strong>Collect and Find names both cost money.</strong> Collect sends a real request to the
+      LinkedIn data provider; Find names asks a language model. Neither is free, so collect when you
+      mean to, not to see what happens.</p>
+  </div>
+</section>
+
+<!-- ===================================================== -->
+<section id="settings">
+  <span class="step-no">Step two</span>
+  <h2>Settings</h2>
+  <p>The editorial direction. Nothing here does anything on its own &mdash; it changes what the
+     other screens do the next time you run them. The screen is grouped by which screen each setting
+     actually reaches, and each group says so.</p>
+  <figure>
+    <img src="{{IMG_G3}}" alt="The Settings screen, grouped by the screen each setting affects">
+    <figcaption>Settings. Changes take effect the next time you score, cluster or generate.</figcaption>
+  </figure>
+
+  <h3>What matters most</h3>
+  <ul>
+    <li><strong>Themes</strong> &mdash; the subjects every post is scored against. Change these and
+        you change what the tool considers relevant at all.</li>
+    <li><strong>Relevance threshold</strong> &mdash; the bar a post must clear. It reaches two
+        screens: a post below it is excluded from the topic grouping <em>and</em> from the final
+        text.</li>
+    <li><strong>Editorial brief</strong> &mdash; the instructions to the model about what this
+        publication is and what it should say. This is the single most important field on the
+        screen. Write it as you would brief a colleague: for example, <em>&ldquo;emphasise the
+        factors that shape how consumers choose healthy and sustainable food&rdquo;</em>.</li>
+    <li><strong>Tone</strong> and <strong>Audience</strong> &mdash; two closed lists that shift the
+        register of the writing. They are lists rather than free text so that a typo cannot quietly
+        change the result.</li>
+    <li><strong>Company and brand names</strong> &mdash; the names replaced wherever they appear.
+        This is where accepted <span class="ui">Find names</span> suggestions end up.</li>
+  </ul>
+
+  <p>Press <span class="ui">Save</span> at the top right. An <em>unsaved changes</em> marker appears
+     beside it while anything is unsaved.</p>
+</section>
+
+<!-- ===================================================== -->
+<section id="rating">
+  <span class="step-no">Step three</span>
+  <h2>Rating</h2>
+  <p>Everything collected, scored for how well it fits your themes, with the reasoning shown.</p>
+  <figure>
+    <img src="{{IMG_G4}}" alt="The Rating screen showing posts with an overall score and per-theme bars">
+    <figcaption>Rating. The orange badge at the top left counts posts still waiting to be scored.</figcaption>
+  </figure>
+
+  <h3>Reading a row</h3>
+  <ul>
+    <li><strong>Overall</strong> &mdash; one number out of 100. It is the <em>highest</em> single
+        theme score, not an average: a post that is excellent on one theme and irrelevant to the
+        rest still scores high, which is deliberate.</li>
+    <li><strong>Per-theme scores</strong> &mdash; the same post measured against each theme
+        separately.</li>
+    <li>The paragraph under the title is the model's own explanation of the score. Read it when a
+        number surprises you.</li>
+    <li><strong><span class="ui">1 of 6 themes</span></strong>, in orange &mdash; how many of your
+        themes this post cleared the relevance threshold on. A post showing a low count is narrow,
+        not necessarily weak.</li>
+    <li><strong><span class="ui">in generation</span></strong>, in green &mdash; this post is
+        eligible to be used in the final text.</li>
+  </ul>
+
+  <h3>Scoring</h3>
+  <p>Press <span class="ui">Score now</span>. One press scores <strong>up to ten posts</strong>. If
+     more are waiting, press it again &mdash; the orange badge tells you how many are left. The list
+     refreshes itself when a batch finishes.</p>
+  <p><span class="ui">Re-score all</span> scores everything again from scratch. Use it after you
+     change the themes or the brief, not routinely.</p>
+
+  <div class="note">
+    <p><strong>If the screen looks empty, do not assume something broke.</strong> Either nothing was
+      collected in the period you are looking at, or it was collected but not yet scored. The screen
+      tells you which, and gives you the button that fixes it.</p>
+  </div>
+</section>
+
+<!-- ===================================================== -->
+<section id="topics">
+  <span class="step-no">Step four</span>
+  <h2>Topics</h2>
+  <p>Three things happen here, in order, and the screen is laid out in that order.</p>
+  <figure>
+    <img src="{{IMG_G5}}" alt="The Topics screen with the anonymise, clustering and create-the-carousel controls">
+    <figcaption>Topics. The line under the heading counts what is anonymised, what is not, and how many topics the selected run found.</figcaption>
+  </figure>
+
+  <h3>First &mdash; hide the company names</h3>
+  <p>Press <span class="ui">Anonymise now</span>. This rewrites the collected posts so that company
+     and brand names are replaced with neutral descriptions, using the list in Settings. The
+     publication is written from these rewritten posts, never from the originals.</p>
+  <p><span class="ui">Redo all</span> repeats it for everything, including posts already done. Use
+     it only after changing the name list in Settings.</p>
+
+  <h3>Second &mdash; group them into topics</h3>
+  <p>Choose a <strong>period start</strong> and <strong>period end</strong> and press
+     <span class="ui">Run clustering</span>. Posts that say similar things are grouped together;
+     each group is a topic.</p>
+  <p>Why group at all? Because a carousel is a sequence of sections, not a list of links. Grouping
+     is what turns scattered posts into an argument with parts. Each topic becomes one section of
+     the post and one slide of the carousel.</p>
+  <p>The <strong>Viewing run</strong> dropdown lets you look back at an earlier grouping. Posts
+     marked <span class="ui">unclustered</span> did not resemble anything else closely enough to
+     join a group; they are simply not used this time.</p>
+
+  <h3>Third &mdash; create it</h3>
+  <p>The blue box tells you exactly what you are about to make: the period it covers, how many
+     themes became sections, and how many slides that is. Press
+     <span class="ui">Create the carousel</span>.</p>
+  <p>You get <strong>one post and one carousel</strong> covering that period. The slide count is the
+     number of topics plus an opening and a closing slide.</p>
+
+  <div class="money">
+    <p><strong>Anonymising, grouping and creating all use a language model and all cost money.</strong>
+      They are cheap individually. <span class="ui">Redo all</span> is the expensive one, because it
+      repeats the work for every post.</p>
+  </div>
+  <p>When it finishes, the draft is waiting in Review &amp; Approve.</p>
+</section>
+
+<!-- ===================================================== -->
+<section id="review">
+  <span class="step-no">Step five</span>
+  <h2>Review &amp; Approve</h2>
+  <p>The screen where the work actually gets judged. It opens with the finished thing, not with a
+     form.</p>
+  <figure>
+    <img src="{{IMG_G6}}" alt="Review and Approve, showing the carousel as it will appear with navigation beneath it">
+    <figcaption>The draft shown as a reader will meet it: the accompanying words, then the slide, with the slide counter and swipe dots.</figcaption>
+  </figure>
+
+  <p>The list on the left holds every draft. Each entry says whether it is a
+     <span class="ui">post</span> or a <span class="ui">carousel</span>, its status, and whether it
+     has been <span class="ui">edited</span>.</p>
+
+  <h3>Looking through the carousel</h3>
+  <p>Use <span class="ui">&lsaquo; Previous</span> and <span class="ui">Next &rsaquo;</span>, or
+     click any thumbnail in the strip, to move between slides. Click a slide to enlarge it.</p>
+
+  <h3>Editing</h3>
+  <figure>
+    <img src="{{IMG_G7}}" alt="The editing bench: heading and body for the current slide beside the image file it produces">
+    <figcaption>The bench edits the slide shown above it. The square on the right is the actual file, with its filename.</figcaption>
+  </figure>
+  <p>Under the preview you edit <strong>the slide currently on screen</strong> &mdash; its heading
+     and its body. Change a word and the slide above redraws a moment later, so you see the result
+     rather than imagining it. While it is redrawing, the download buttons are disabled: you can
+     never save a file that does not match the words in front of you.</p>
+
+  <h3>Post text &mdash; the three fields underneath</h3>
+  <div class="scroller">
+  <table>
+    <thead><tr><th>Field</th><th>Drawn on the images?</th><th>Where it appears</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Title</strong></td><td>Yes</td><td>In the footer of every slide except the first, and as the first heading in the exported file</td></tr>
+      <tr><td><strong>Caption</strong></td><td>No</td><td>The words posted alongside the images, and in the export</td></tr>
+      <tr><td><strong>CTA</strong></td><td>No</td><td>The closing line under the caption, and in the export</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="stop">
+    <p><strong>Press <span class="ui">Save edits</span>.</strong> It turns dark with white text, and
+      an <em>unsaved edits</em> marker appears, as soon as you change anything. Nothing you type is
+      kept until you press it &mdash; and the Export screen shows the last <em>saved</em> version.</p>
+  </div>
+
+  <h3>Approving or rejecting</h3>
+  <p>Optionally write a line in <strong>&ldquo;Why you approved or rejected this&rdquo;</strong>.
+     It is exactly what it says: a note to yourself, stored with your decision and visible only when
+     you reopen this item. Nothing else reads it and it does not influence future drafts.</p>
+  <p>Then press <span class="ui">Approve</span> or <span class="ui">Reject</span>. Approving is what
+     makes a draft available on the Export screen.</p>
+
+  <h3>Asking for a different draft</h3>
+  <p><strong>Ask for a new draft</strong> writes a fresh version with your note and the current
+     draft in front of the model &mdash; for example <em>&ldquo;too corporate, lead with the
+     enforcement angle&rdquo;</em>. Leave the box empty for a different take on the same evidence.
+     The existing draft is kept: nothing is overwritten, you get a second one alongside it.</p>
+
+  <h3>Downloading the images</h3>
+  <p>This is the step that produces what you actually upload to LinkedIn. You choose the background:</p>
+  <div class="scroller">
+  <table>
+    <thead><tr><th>Option</th><th>What it is</th><th>Cost</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Designed template</strong></td><td>A designed background drawn by the tool itself. Immediate, no AI involved.</td><td>Free</td></tr>
+      <tr><td><strong>AI background image</strong></td><td>One generated picture per slide, based on that slide's text, with your words drawn on top.</td><td>Billed per image</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p>Nothing is generated until you press the button, and the button tells you how many images it
+     will actually buy. Once a picture exists, changing the wording redraws your text on the same
+     picture at no extra cost &mdash; only <span class="ui">Redo</span> on a single slide buys a new
+     one. Quality is offered as <em>fastest</em>, <em>medium</em> and <em>slowest</em>; higher
+     quality takes longer and costs more.</p>
+  <p>Generating takes a little while and the screen says so throughout &mdash;
+     <em>Drawing&hellip;</em>, <em>Generating&hellip;</em>, <em>Redrawing for your edits&hellip;</em>.
+     Then <span class="ui">Download</span> saves one PNG per slide, 1080&times;1080, named in
+     reading order.</p>
+</section>
+
+<!-- ===================================================== -->
+<section id="export">
+  <span class="step-no">Step six</span>
+  <h2>Export</h2>
+  <p>The final text, as files.</p>
+  <figure>
+    <img src="{{IMG_G8}}" alt="The Export screen with a status filter and format buttons">
+    <figcaption>Export defaults to approved work only. Choose a format, preview it, then download.</figcaption>
+  </figure>
+  <ul>
+    <li><strong>Status</strong> filters what you see. It starts on <span class="ui">approved</span>,
+        because that is normally what you want to send out.</li>
+    <li><strong>MD / JSON / DOCX</strong> choose the format &mdash; Markdown, raw data, or a Word
+        document.</li>
+    <li>Select an entry to preview it, or press <span class="ui">Download all</span>.</li>
+  </ul>
+
+  <div class="note">
+    <p><strong>Export shows your edits; it is the saved version that counts.</strong> If you edited a
+      draft in Review and pressed Save, the export contains the edited text, not the model's
+      original. If you edited and did <em>not</em> press Save, it contains the previous version.</p>
+  </div>
+
+  <p>The images are not here. They are downloaded on the Review &amp; Approve screen, because they
+     are made from the text you are looking at there. Export is for the words.</p>
+</section>
+
+<!-- ===================================================== -->
+<section id="status">
+  <h2>The four status words</h2>
+  <div class="scroller">
+  <table>
+    <thead><tr><th>Status</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><strong>draft</strong></td><td>Written by the tool, not yet judged by a person. The normal starting state.</td></tr>
+      <tr><td><strong>approved</strong></td><td>A person read it and accepted it. This is what Export shows by default.</td></tr>
+      <tr><td><strong>rejected</strong></td><td>A person read it and decided it should not go out. It is kept, not deleted.</td></tr>
+      <tr><td><strong>superseded</strong></td><td>A newer draft answered this one &mdash; you asked for a new version. The older one is kept so the history stays readable, and is hidden by default.</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p>Nothing is ever destroyed by these decisions. A rejected draft and the model's original wording
+     both remain, which is what makes it possible to see later what was written, what was changed,
+     and by whom.</p>
+</section>
+
+<!-- ===================================================== -->
+<section id="permissions">
+  <h2>What you can change</h2>
+  <p>There are two levels of access. Both see everything and both can run the whole process end to
+     end. The difference is a short list of actions that add, rename or permanently delete.</p>
+  <div class="scroller">
+  <table>
+    <thead><tr><th>Action</th><th>Ordinary user</th></tr></thead>
+    <tbody>
+      <tr><td>Collect, score, anonymise, group, create, review, approve, download, export</td><td>Yes</td></tr>
+      <tr><td>Change any setting on the Settings screen</td><td>Yes</td></tr>
+      <tr><td>Change a source's lookback, or switch it on and off</td><td>Yes</td></tr>
+      <tr><td>Add a new source</td><td>No &mdash; ask the team</td></tr>
+      <tr><td>Rename a source or change its address</td><td>No</td></tr>
+      <tr><td>Delete a source, or delete generated text</td><td>No</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p>During the trial, sources are added for you. If you want a page watched, ask &mdash; it takes a
+     minute.</p>
+</section>
+
+<!-- ===================================================== -->
+<section id="costs">
+  <h2>What costs money</h2>
+  <p>Not everything does, and it is worth knowing which is which before you explore.</p>
+  <div class="scroller">
+  <table>
+    <thead><tr><th>Action</th><th>Charged?</th></tr></thead>
+    <tbody>
+      <tr><td>Collect, Collect all enabled</td><td>Yes &mdash; the LinkedIn data provider</td></tr>
+      <tr><td>Find names</td><td>Yes &mdash; a language model</td></tr>
+      <tr><td>Score now, Re-score all</td><td>Yes, per post</td></tr>
+      <tr><td>Anonymise now, Redo all</td><td>Yes, per post</td></tr>
+      <tr><td>Run clustering, Create the carousel</td><td>Yes</td></tr>
+      <tr><td>Ask for a new draft</td><td>Yes</td></tr>
+      <tr><td>AI background images</td><td>Yes, per image</td></tr>
+      <tr><td><strong>Designed template slides</strong></td><td><strong>No</strong> &mdash; drawn by the tool</td></tr>
+      <tr><td><strong>Reading, editing, approving, downloading, exporting</strong></td><td><strong>No</strong></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p>Editing text and redrawing template slides is free and unlimited. Explore there as much as you
+     like.</p>
+</section>
+
+<!-- ===================================================== -->
+<section id="trouble">
+  <h2>If something looks wrong</h2>
+
+  <h3>A screen is empty</h3>
+  <p>Almost always the previous step has not been run, or the period you are looking at has nothing
+     in it. Each screen says which of the two it is. Widen the period, or go back one screen.</p>
+
+  <h3>A red message appears</h3>
+  <p>Read it &mdash; it says what happened. If it mentions permissions, it is one of the admin-only
+     actions in the table above. If it mentions the provider, the request did not get through and
+     trying again later is reasonable. Messages disappear after a few seconds; if you missed one,
+     repeat the action and read it this time.</p>
+
+  <h3>Nothing new was collected</h3>
+  <p>Look at the second half of the result message. <em>&ldquo;46 outside your lookback
+     window&rdquo;</em> means posts were found but were older than the lookback set for that source.
+     Raise the lookback and collect again.</p>
+
+  <h3>Find names returned nothing</h3>
+  <p>That is a normal answer, not a fault. It means nothing new was proposed beyond what is already
+     in the list &mdash; or there were no collected posts in that source's window to read.</p>
+
+  <h3>The images do not match what I just typed</h3>
+  <p>They will, a moment after you stop typing. While a redraw is pending the screen says
+     <em>Redrawing for your edits&hellip;</em> and the download buttons are disabled on purpose.
+     Wait for the count to read <em>ready</em>.</p>
+</section>
+
+<footer>
+  <p>Written for the TechnoAlimenti trial. Screens, labels and behaviour described here were checked
+     against the live application on 16 September 2026, signed in as an ordinary user. If the product
+     changes, this document will drift &mdash; report anything that no longer matches.</p>
+</footer>
+
+</div>
