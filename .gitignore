@@ -45,3 +45,6 @@ supabase/functions/.env*
 # real lock is supabase/functions/deno.lock and IS tracked; this one only pins
 # the root package.json's CLI dependencies and is regenerated on demand.
 /deno.lock
+
+# Built by scripts/build-user-guide-docx.js — regenerate rather than commit.
+CUES_Post_Generator_User_Guide_EN.docx
