@@ -18,11 +18,11 @@ is where drift between the product and the Word user guide is recorded.
 | | |
 | --- | --- |
 | Branch | `phase6-frontend-binding` — **all current work is here, not on `main`** |
-| Last commit at time of writing | `6ad6ef1` |
+| Last commit at time of writing | `b4707fe` (unchanged since 2026-09-16; re-checked 2026-10-15) |
 | Supabase project | `bxaovkzemfyxrxbcqask` (`cues-tca`, eu-west-1) |
-| Production frontend | cues-tca.netlify.app, bundle `index-DFrWsv4w.js` (FLOW-01 deployed 2026-09-15) |
-| Migrations | applied through `0028` |
-| Edge Functions | `ingest` v10, `score-worker` v11, `anonymize-worker` v12, `cluster` v6, `generate` v7 (DOC-05 deployed 2026-09-15), `discover-brands` v7, `slide-images` v2 |
+| Production frontend | cues-tca.netlify.app, bundle `index-CHhKgSHU.js` (the Post Generator rename, `ef41ac7`) |
+| Migrations | applied through **`0029`** (pushed to production 2026-09-16) |
+| Edge Functions | `ingest` v10, `score-worker` v12, `anonymize-worker` v13, `cluster` v7, `generate` v7, `discover-brands` v7, `slide-images` v3 — all post-`0029` |
 
 `origin/phase6-frontend-binding` was fetched on 2026-09-15 and carried **no
 commits beyond `6ad6ef1`**. Netlify was serving the bundle built from it.
@@ -48,6 +48,10 @@ until that is checked. **Before starting any task below:**
 3. For every task marked **TO CONFIRM**, resolve it with Χάρης before writing
    code. Those are the places where duplicate or conflicting work is likely.
 4. Re-read §5 (verification) before declaring anything finished.
+
+**Before anything else, read §9** — it records what the live system showed on
+2026-10-15, including the trial usage, the absence of tenancy separation, and
+two access changes that affect how you deploy.
 
 ### 0.3 What the status words mean
 
@@ -1058,3 +1062,93 @@ Stated plainly rather than guessed:
 - **Trial dates and consumption limits** — not set.
 - **Whether `Find Names` has a real defect** — the one test produced no new
   results, which is not evidence of a malfunction.
+
+---
+
+## 9. Trial observations, checked 2026-10-15
+
+Nothing in the repository changed between 2026-09-16 (`b4707fe`) and this date:
+no commits on any branch, and Netlify still serves `index-CHhKgSHU.js`, the
+bundle built from `ef41ac7`. What follows is what the **live system** shows.
+
+### 9.1 The trial ran, and the partner got through the whole flow unaided
+
+`g.rivoltella@tecnoalimenti.com` used the product without help:
+
+| | |
+| --- | --- |
+| Collections run by him | 3 — 2026-09-28 (×2) and 2026-10-02 |
+| Generations | 3, all on 2026-09-28 within 13 minutes |
+| Approvals after handover | 2 — 2026-09-28 and 2026-09-29 |
+| Last activity of any kind | **2026-10-02** |
+
+Corpus moved from 231 to **273 raw posts**, 272 scored, 40 generation results,
+**7 approved, 0 rejected, 68 still draft**, across 15 clustering runs.
+
+This is the thing session 21 could not get: an outside user who collected,
+generated, read and approved on their own. The nominal one-month trial started
+around 2026-09-16 and has therefore **elapsed**, and there has been **no
+activity for roughly two weeks**. Why it stopped is the single most useful
+thing still unknown — finished, blocked, or simply no further need. That
+question belongs to Χάρης and Theocharis, not to the code.
+
+### 9.2 There is no separation between FINT and Tecnoalimenti — by design
+
+Asked directly: does the partner see different sources from everyone else? No.
+Verified by signing in as both `g.rivoltella@tecnoalimenti.com` and
+`demo.editor@f-in.eu` and comparing: **the same five sources, with identical
+enabled flags and lookback values.**
+
+The schema has no notion of separation at all, and this was checked rather than
+assumed:
+
+- **No `tenant_id`, `owner_id` or `workspace_id` column exists anywhere** in
+  `public`. The only `org` column in the database is `editors.org`, added in
+  `0029` for consumption attribution. **It filters nothing.**
+- **No SELECT policy filters rows per user.** Every policy tests membership of
+  the editors allowlist; passing it grants the whole dataset.
+
+So the product is **single-tenant**: one shared workspace of sources, posts,
+settings and drafts, with the only distinction being editor versus admin.
+
+**The practical consequence, which is not a defect but is worth stating.** The
+partner can change the relevance threshold, the editorial brief, the themes and
+the sources, and those changes land on FINT's output too; the partner also sees
+every FINT draft and approved text.
+
+**This already happened.** All five sources carry `updated_at` of 2026-10-02 —
+the day of the partner's last collection — and `configurations` was last
+changed on 2026-09-28, the day they generated. Two values differ from the
+September state recorded in session 22: *Fratelli Branca Distillerie* was
+disabled and is now enabled, and *Tecnoalimenti*'s lookback went from 60 to 90.
+There is **no audit trail on either table**, so who made those changes cannot be
+proven — only that they were the sole active user on those days.
+
+Nothing here needs fixing for the trial to continue as agreed. If shared
+settings become a problem, permissions are the wrong tool: it needs either the
+separate Tecnoalimenti instance already under consideration (**ACC-05**) or real
+data separation, which is a large schema change. Flagged so the choice is made
+deliberately rather than discovered.
+
+### 9.3 Operational state of access
+
+- **The Supabase personal access token was rotated on 2026-10-15.** The previous
+  one (`sbp_613557…`) returned 401 and was replaced with a new token named
+  `cues-tca-cloud`. Revoking the dead one in the dashboard is outstanding
+  housekeeping for Χάρης — the Management API exposes no endpoint for personal
+  access tokens, so it cannot be scripted.
+- **The token is now also a persistent Windows user environment variable.** It
+  previously lived only in `frontend/.env.local`, which neither `npx supabase`
+  nor the MCP server reads — the misunderstanding that cost session 19 an entire
+  sitting. `npx supabase projects list` now works with no extraction step. The
+  MCP server picks it up **after Claude Code is restarted**.
+- **Direct Postgres connections no longer work from the operator's machine.**
+  Port 5432 on `db.<ref>.supabase.co` is unreachable and `supabase migration
+  list --linked` times out. This worked on 2026-09-16, when `db push` applied
+  `0029` from this same machine. Everything over the Management API — including
+  Edge Function deploys and SQL via `/database/query` — is unaffected.
+  **Consequence: `supabase db push` will fail, so the next schema change needs
+  this resolved first.** Not investigated; the likely cause is Supabase moving
+  direct connections to IPv6, with IPv4 served by the pooler, which would make
+  it a connection-string change.
+
