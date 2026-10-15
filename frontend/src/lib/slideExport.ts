@@ -20,7 +20,48 @@
  */
 import { supabase } from './supabase'
 import type { CarouselOutput, CarouselSlide } from '../components/generation'
-import { DEFAULT_THEME, renderSlidePng, type SlideVariant } from './slides'
+import {
+  DEFAULT_THEME,
+  TEMPLATE_THEME,
+  renderSlidePng,
+  slideDimensions,
+  type SlideVariant,
+} from './slides'
+import templateUrl from '../assets/carousel-template-tca.png'
+
+/**
+ * The Tecnoalimenti template artwork, decoded once and reused.
+ *
+ * Bundled rather than fetched at runtime: it is a fixed part of the design, so
+ * a slide must never depend on a network round trip — and Vite fingerprints it,
+ * so the browser caches it for as long as the file is unchanged.
+ *
+ * A failure here is deliberately not fatal. `renderSlidePng` falls back to the
+ * old gradient when no template arrives, which degrades a slide instead of
+ * breaking the only screen that produces anything publishable.
+ */
+let templatePromise: Promise<HTMLImageElement | null> | null = null
+
+export function loadCarouselTemplate(): Promise<HTMLImageElement | null> {
+  if (!templatePromise) {
+    templatePromise = (async () => {
+      try {
+        const img = new Image()
+        img.src = templateUrl
+        await img.decode()
+        return img
+      } catch {
+        return null
+      }
+    })()
+  }
+  return templatePromise
+}
+
+/** What a given variant renders at, for laying the preview out before it exists. */
+export function variantDimensions(variant: SlideVariant) {
+  return slideDimensions({ templateImage: variant === 'flat' ? ({} as CanvasImageSource) : null })
+}
 import { functionErrorMessage } from './functionError'
 
 export type SlideQuality = 'low' | 'medium' | 'high'
@@ -106,14 +147,20 @@ export async function renderOneSlide(
     background = await fetchSlideBackground(slide, opts.quality ?? 'low')
   }
 
+  // The designed template is now TCA's corporate artwork, which is light and
+  // 4:5. The AI variant keeps the dark square design it was built for.
+  const isTemplate = opts.variant === 'flat'
+  const templateImage = isTemplate ? await loadCarouselTemplate() : null
+
   const blob = await renderSlidePng({
     slide,
     total,
     publicationTitle: carousel.title,
     brand: opts.brand ?? 'CUES',
     variant: opts.variant,
-    theme: DEFAULT_THEME,
+    theme: isTemplate && templateImage ? TEMPLATE_THEME : DEFAULT_THEME,
     background,
+    templateImage,
   })
 
   return { blob, background }

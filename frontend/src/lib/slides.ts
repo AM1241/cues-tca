@@ -33,6 +33,58 @@
 export const SLIDE_SIZE = 1080
 const MARGIN = 88
 
+// =============================================================================
+// The Tecnoalimenti corporate template
+// =============================================================================
+
+/**
+ * TCA supplied a finished background and asked for it to replace the dark
+ * gradient. It is 1122×1402 — exactly 4:5 — and it already carries the
+ * Tecnoalimenti and CUES logos at the top and "Powered by Future Intelligence"
+ * near the bottom.
+ *
+ * THAT ASPECT RATIO IS WHY THESE SLIDES ARE NOT SQUARE. Cover-fitting a 4:5
+ * image into a 1080² frame crops roughly 20% of its height, and the first thing
+ * to go is the logo band at the top and the attribution at the bottom — the two
+ * elements the brief says must stay visible. Letterboxing it instead would band
+ * the slide with dead colour. So the template renders at 1080×1350, LinkedIn's
+ * portrait carousel size, and the artwork is used whole and undistorted.
+ *
+ * The AI-background variant is untouched and stays square: that image comes
+ * from a model at a square size and has no logos to preserve.
+ */
+export const TEMPLATE_WIDTH = 1080
+export const TEMPLATE_HEIGHT = 1350
+
+/**
+ * Where text may go without touching anything the artwork already draws.
+ *
+ * Measured, not estimated: the asset was read pixel by pixel to find the
+ * largest rectangle whose every pixel matches the cream page colour, so the
+ * botanical decorations, the logo band and the attribution line are all
+ * outside it by construction. Expressed at 1080×1350.
+ *
+ * Note it is not centred — the right edge carries more decoration than the
+ * left, so the free column sits slightly left of middle. Centring the text
+ * would push it into the leaves.
+ */
+const TEMPLATE_SAFE = { x: 160, y: 255, width: 678, height: 734 } as const
+
+/**
+ * Sampled from the artwork rather than invented, so the type belongs to the
+ * design instead of merely sitting on it: the heading colour is the ink of the
+ * CUES wordmark, the body a lighter relative of it, and the accent the coral
+ * that dominates the decorations.
+ */
+export const TEMPLATE_THEME: SlideTheme = {
+  background: '#FDFCF8', // the page cream — only visible if the asset fails to load
+  backgroundAlt: '#F4F1EA',
+  accent: '#D2714F',
+  text: '#002934',
+  body: '#2A4A52',
+  muted: '#6E8A91',
+}
+
 /**
  * A websafe stack rather than a webfont: canvas draws with whatever is actually
  * loaded at the moment toBlob runs, and a webfont that has not finished loading
@@ -88,6 +140,22 @@ export type RenderOptions = {
    * background is a degraded slide, not a broken export.
    */
   background?: CanvasImageSource | null
+  /**
+   * The decoded corporate template artwork. Its presence is what selects the
+   * 1080×1350 template layout; passing null falls back to the old gradient at
+   * 1080² rather than failing, for the same reason as `background` above.
+   */
+  templateImage?: CanvasImageSource | null
+}
+
+/** The pixel size a given set of options will render at. */
+export function slideDimensions(opts: Pick<RenderOptions, 'templateImage'>): {
+  width: number
+  height: number
+} {
+  return opts.templateImage
+    ? { width: TEMPLATE_WIDTH, height: TEMPLATE_HEIGHT }
+    : { width: SLIDE_SIZE, height: SLIDE_SIZE }
 }
 
 // =============================================================================
@@ -133,11 +201,37 @@ export function stripEmphasis(text: string): string {
  * the difference shows up immediately on headings, where one word spilling past
  * the margin is the whole slide's first impression.
  */
+/**
+ * A single word wider than the column has nowhere to wrap, so a word-only
+ * wrapper lets it run straight off the edge — on the corporate template, across
+ * the decorations. Rare in prose, routine in a URL, a hashtag or a German or
+ * Italian compound, so it is broken by character instead.
+ */
+function breakLongWord(ctx: CanvasRenderingContext2D, word: string, maxWidth: number): string[] {
+  if (ctx.measureText(word).width <= maxWidth) return [word]
+  const parts: string[] = []
+  let chunk = ''
+  for (const ch of word) {
+    if (chunk && ctx.measureText(chunk + ch).width > maxWidth) {
+      parts.push(chunk)
+      chunk = ch
+    } else {
+      chunk += ch
+    }
+  }
+  if (chunk) parts.push(chunk)
+  return parts
+}
+
 function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
   const lines: string[] = []
   // Respect newlines the editor actually typed; wrap within each of them.
   for (const paragraph of text.split(/\n+/)) {
-    const words = paragraph.trim().split(/\s+/).filter(Boolean)
+    const words = paragraph
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .flatMap((w) => breakLongWord(ctx, w, maxWidth))
     if (words.length === 0) continue
     let line = words[0]
     for (let i = 1; i < words.length; i++) {
@@ -181,6 +275,41 @@ function fitBlock(
     }
     fontSize -= 2
   }
+}
+
+/**
+ * Last line of defence against overflow.
+ *
+ * `fitBlock` shrinks until the text fits OR it reaches its minimum size,
+ * whichever comes first — so text long enough to exhaust the shrink still
+ * runs past the space it was given. On the square design that spilled into a
+ * margin; on the corporate template it would spill onto the artwork, which the
+ * brief forbids.
+ *
+ * So the block is clamped to the lines that actually fit and the last one gets
+ * an ellipsis. Truncation is a real loss and it is therefore made VISIBLE: an
+ * editor who sees "…" knows to shorten the copy, where silently overlapping a
+ * logo would be noticed only after publishing.
+ */
+function clampToHeight(
+  ctx: CanvasRenderingContext2D,
+  block: Block,
+  maxHeight: number,
+  maxWidth: number,
+  weight: string,
+): Block {
+  const fits = Math.max(Math.floor(maxHeight / block.lineHeight), 1)
+  if (block.lines.length <= fits) return block
+
+  const lines = block.lines.slice(0, fits)
+  ctx.font = `${weight} ${block.fontSize}px ${FONT_STACK}`
+  let last = `${lines[lines.length - 1].trimEnd()}…`
+  // The ellipsis itself must not push the final line past the column.
+  while (ctx.measureText(last).width > maxWidth && last.length > 2) {
+    last = `${last.slice(0, -2).trimEnd()}…`
+  }
+  lines[lines.length - 1] = last
+  return { ...block, lines }
 }
 
 function drawLines(
@@ -306,7 +435,154 @@ function drawFooter(ctx: CanvasRenderingContext2D, theme: SlideTheme, title: str
  * preview that renders through a different path is how "it looked fine in the
  * app" happens.
  */
+/**
+ * The corporate template layout, 1080×1350.
+ *
+ * Kept as its own function rather than threaded through the square layout with
+ * conditionals: the two have different canvases, different chrome and opposite
+ * colour polarity, and the AI-background path is the one thing here that has
+ * already been proven in production. Branching early keeps it untouched.
+ *
+ * Everything is drawn inside TEMPLATE_SAFE, so nothing can land on a logo, on
+ * the attribution, or on the botanical decorations. No wordmark is drawn: the
+ * artwork carries both logos already, and "Powered by Future Intelligence" is
+ * printed in it — adding either again would duplicate them.
+ */
+function drawTemplateSlide(ctx: CanvasRenderingContext2D, opts: RenderOptions): void {
+  const theme = opts.theme ?? TEMPLATE_THEME
+  const { slide, total, publicationTitle, templateImage } = opts
+  const opening = slide.position === 1
+  const headingText = stripEmphasis(slide.heading)
+  const bodyText = stripEmphasis(slide.body)
+
+  // The artwork, whole and at the canvas's own aspect — no cover-fit, so
+  // nothing in it is ever cropped. The cream fill underneath is what shows if
+  // the asset failed to load.
+  ctx.fillStyle = theme.background
+  ctx.fillRect(0, 0, TEMPLATE_WIDTH, TEMPLATE_HEIGHT)
+  if (templateImage) {
+    ctx.drawImage(templateImage, 0, 0, TEMPLATE_WIDTH, TEMPLATE_HEIGHT)
+  }
+
+  const { x, width } = TEMPLATE_SAFE
+  const boxTop = TEMPLATE_SAFE.y
+  const boxBottom = TEMPLATE_SAFE.y + TEMPLATE_SAFE.height
+
+  // ---- counter, top right of the safe box --------------------------------
+  ctx.font = `600 24px ${FONT_STACK}`
+  ctx.fillStyle = theme.muted
+  ctx.textAlign = 'right'
+  ctx.textBaseline = 'top'
+  ctx.fillText(
+    `${String(slide.position).padStart(2, '0')} / ${String(total).padStart(2, '0')}`,
+    x + width,
+    boxTop,
+  )
+  ctx.textAlign = 'left'
+
+  // ---- the publication title, inside the box, never near the attribution --
+  const footerText = opening ? '' : publicationTitle.trim()
+  const FOOTER_BAND = footerText ? 52 : 0
+  if (footerText) {
+    ctx.font = `500 22px ${FONT_STACK}`
+    ctx.fillStyle = theme.muted
+    // 'bottom', not 'alphabetic': on an alphabetic baseline the descenders of
+    // g, y and p hang below it, which put four pixels of this line outside the
+    // safe area. Caught by the pixel check, not by looking at it.
+    ctx.textBaseline = 'bottom'
+    let text = stripEmphasis(footerText)
+    while (ctx.measureText(text).width > width && text.length > 4) {
+      text = `${text.slice(0, -2).trimEnd()}…`
+    }
+    ctx.fillText(text, x, boxBottom)
+  }
+
+  const COUNTER_BAND = 56
+  const contentTop = boxTop + COUNTER_BAND
+  const available = boxBottom - FOOTER_BAND - contentTop
+
+  // ---- the words ---------------------------------------------------------
+  if (opening) {
+    const RULE_H = 9
+    const GAP_RULE = 68
+    const GAP_BODY = 48
+    const heading = clampToHeight(
+      ctx,
+      fitBlock(ctx, headingText, width, available * 0.5, 84, '800', 44, 1.16),
+      available * 0.5,
+      width,
+      '800',
+    )
+    const headingUsed = heading.lines.length * heading.lineHeight
+    // The body gets everything the heading did not take, rather than a fixed
+    // share. A fixed share squeezed it to its 22px floor on a two-line heading,
+    // which is legible on a desktop and not on a phone.
+    const bodyRoom = Math.max(available - headingUsed - GAP_RULE - RULE_H - GAP_BODY, 150)
+    const body = bodyText.trim()
+      ? clampToHeight(
+          ctx,
+          fitBlock(ctx, bodyText, width, bodyRoom, 34, '400', 24, 1.45),
+          bodyRoom,
+          width,
+          '400',
+        )
+      : null
+    const blockHeight = headingUsed +
+      GAP_RULE + RULE_H + (body ? body.lines.length * body.lineHeight + GAP_BODY : 0)
+    let y = contentTop + Math.max((available - blockHeight) / 2, 0)
+
+    ctx.fillStyle = theme.accent
+    ctx.fillRect(x, y, 124, RULE_H)
+    y += GAP_RULE
+
+    y = drawLines(ctx, heading, x, y, theme.text, '800')
+    if (body) {
+      y += GAP_BODY
+      drawLines(ctx, body, x, y, theme.body, '400')
+    }
+    return
+  }
+
+  const heading = clampToHeight(
+    ctx,
+    fitBlock(ctx, headingText, width, available * 0.42, 60, '800', 34, 1.18),
+    available * 0.42,
+    width,
+    '800',
+  )
+  const usedByHeading = heading.lines.length * heading.lineHeight
+  const RULE_ABOVE = 28
+  const RULE_H = 7
+  const RULE_BELOW = 40
+  const bodyRoom = Math.max(available - usedByHeading - RULE_ABOVE - RULE_H - RULE_BELOW, 120)
+  const body = clampToHeight(
+    ctx,
+    fitBlock(ctx, bodyText, width, bodyRoom, 32, '400', 21, 1.46),
+    bodyRoom,
+    width,
+    '400',
+  )
+
+  const blockHeight = usedByHeading + RULE_ABOVE + RULE_H + RULE_BELOW +
+    body.lines.length * body.lineHeight
+  let y = contentTop + Math.max((available - blockHeight) * 0.4, 0)
+
+  y = drawLines(ctx, heading, x, y, theme.text, '800')
+  y += RULE_ABOVE
+  ctx.fillStyle = theme.accent
+  ctx.fillRect(x, y, 96, RULE_H)
+  y += RULE_H + RULE_BELOW
+  drawLines(ctx, body, x, y, theme.body, '400')
+}
+
 export function drawSlide(ctx: CanvasRenderingContext2D, opts: RenderOptions): void {
+  // The corporate template is a different canvas size and a different layout;
+  // everything below this line is the original square design, unchanged.
+  if (opts.templateImage) {
+    drawTemplateSlide(ctx, opts)
+    return
+  }
+
   const theme = opts.theme ?? DEFAULT_THEME
   const variant = opts.variant ?? 'flat'
   const brand = opts.brand ?? 'CUES'
@@ -398,8 +674,9 @@ export function drawSlide(ctx: CanvasRenderingContext2D, opts: RenderOptions): v
  */
 export async function renderSlidePng(opts: RenderOptions): Promise<Blob> {
   const canvas = document.createElement('canvas')
-  canvas.width = SLIDE_SIZE
-  canvas.height = SLIDE_SIZE
+  const { width, height } = slideDimensions(opts)
+  canvas.width = width
+  canvas.height = height
   const ctx = canvas.getContext('2d')
   if (!ctx) throw new Error('this browser did not provide a 2D canvas context')
 

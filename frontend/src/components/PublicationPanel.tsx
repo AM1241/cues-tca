@@ -5,6 +5,7 @@ import {
   DOWNLOAD_GAP_MS,
   renderOneSlide,
   sleep,
+  variantDimensions,
   type SlideQuality,
 } from '../lib/slideExport'
 import { downloadBlob } from '../lib/exporters'
@@ -134,6 +135,15 @@ export function PublicationPanel({
   )
 
   const total = slides.length
+
+  /**
+   * The frame must match the file, or the preview lies about what gets
+   * uploaded. The corporate template is 4:5 and the AI variant is square, so
+   * the aspect is read from the renderer rather than hardcoded here.
+   */
+  const { width: slideW, height: slideH } = variantDimensions(variant)
+  const slideAspect = { aspectRatio: `${slideW} / ${slideH}` }
+  const slidePx = `${slideW}×${slideH}`
 
   const renderSlideAt = useCallback(
     async (index: number, useVariant: SlideVariant, opts: { reuseBackground: boolean }) => {
@@ -292,7 +302,7 @@ export function PublicationPanel({
     <div>
       <h3 className="text-sm font-semibold text-slate-700">Your carousel, ready to download</h3>
       <p className="mt-1 text-xs text-slate-500">
-        {total} slides, 1080×1080, ready to upload. The wording is drawn from the text below
+        {total} slides, {slidePx}, ready to upload. The wording is drawn from the text below
         exactly as it stands — no model rewrites it into the picture.
       </p>
 
@@ -323,10 +333,11 @@ export function PublicationPanel({
               src={shown.url}
               alt={`Slide ${shown.slide.position}: ${shown.slide.heading}`}
               onClick={() => setZoomed(shown.url)}
-              className="aspect-square w-full cursor-zoom-in object-cover"
+              style={slideAspect}
+              className="w-full cursor-zoom-in object-cover"
             />
           ) : (
-            <div className="flex aspect-square w-full items-center justify-center">
+            <div style={slideAspect} className="flex w-full items-center justify-center">
               <span className="text-xs text-slate-400">
                 {shown?.status === 'error' ? 'Failed to draw' : 'Drawing…'}
               </span>
@@ -543,13 +554,14 @@ export function PublicationPanel({
                 src={shown.url}
                 alt=""
                 onClick={() => setZoomed(shown.url)}
-                className="aspect-square w-full cursor-zoom-in rounded-md border border-slate-200"
+                style={slideAspect}
+                className="w-full cursor-zoom-in rounded-md border border-slate-200"
               />
             ) : (
-              <div className="aspect-square w-full rounded-md border border-slate-200 bg-slate-900" />
+              <div style={slideAspect} className="w-full rounded-md border border-slate-200 bg-slate-900" />
             )}
             <p className="text-[11px] tabular-nums text-slate-400">
-              {slideFilename(editing.position)} · 1080×1080
+              {slideFilename(editing.position)} · {slidePx}
             </p>
           </div>
         </div>
