@@ -18,10 +18,10 @@ is where drift between the product and the Word user guide is recorded.
 | | |
 | --- | --- |
 | Branch | `phase6-frontend-binding` — **all current work is here, not on `main`** |
-| Last commit at time of writing | `b4707fe` (unchanged since 2026-09-16; re-checked 2026-10-15) |
+| Last commit deployed | `7ac7663` (pushed 2026-10-16 — see §9.4) |
 | Supabase project | `bxaovkzemfyxrxbcqask` (`cues-tca`, eu-west-1) |
-| Production frontend | cues-tca.netlify.app, bundle `index-CHhKgSHU.js` (the Post Generator rename, `ef41ac7`) |
-| Migrations | applied through **`0029`** (pushed to production 2026-09-16) |
+| Production frontend | cues-tca.netlify.app, bundle `index-CwguJip2.js` (the Tecnoalimenti carousel template, `6ea76a6`; deployed 2026-10-16) |
+| Migrations | applied through **`0030`** (`0030` applied 2026-10-16 over the Management API, not `db push` — see §9.4) |
 | Edge Functions | `ingest` v10, `score-worker` v12, `anonymize-worker` v13, `cluster` v7, `generate` v7, `discover-brands` v7, `slide-images` v3 — all post-`0029` |
 
 `origin/phase6-frontend-binding` was fetched on 2026-09-15 and carried **no
@@ -1151,4 +1151,60 @@ deliberately rather than discovered.
   this resolved first.** Not investigated; the likely cause is Supabase moving
   direct connections to IPv6, with IPv4 served by the pooler, which would make
   it a connection-string change.
+
+### 9.4 Deploy of 2026-10-16 — new carousel template and nine sources
+
+Χάρης chose to ship both: the Tecnoalimenti carousel template (`6ea76a6`) and
+the nine LinkedIn sources Tecnoalimenti asked for (`0030`, `7ac7663`).
+
+**Migration `0030`.** `db push` is unavailable (§9.3), so it went over the
+Management API (`/database/query`). Order followed:
+
+1. Dry run against production inside a `do` block that ran the whole file and
+   then raised on purpose, so it rolled back: 14 sources would exist, 9 new,
+   all `linkedin`, enabled, lookback 30, table comment set. Count afterwards
+   was still 5.
+2. Real apply in one `begin … commit`: the migration **and** a hand-written
+   row in `supabase_migrations.schema_migrations` (`version '0030'`,
+   `name 'tca_additional_sources'`, two statements), so the migration history
+   does not lie. Whoever restores direct connections should confirm
+   `supabase migration list --linked` shows `0030` as applied remotely.
+
+**Frontend.** `npm run build` clean; push `d1f84a1..7ac7663`; Netlify served
+`index-CwguJip2.js` within a minute — the same hash as the local build.
+
+**Verified live, signed in as `hzafeiris@f-in.eu` in a headless Chrome against
+cues-tca.netlify.app:** the Sources screen lists the new pages; Review shows
+"10 slides, 1080×1350"; Download produced `slide-01…10.png`, each 1080×1350,
+logos and "Powered by Future Intelligence" intact; zero console errors.
+**CHK-03's "1080×1080" is now 1080×1350** for the Designed template (the AI
+variant is still square — open decision).
+
+**Retrieval proven, not just registration.** `Collect` was run once per new
+source (deliberately, at real provider cost; attributed to `hzafeiris@f-in.eu`
+in `ingest_runs`). Every one completed with no failures:
+
+| Source | Provider requests | Fetched | Inserted (in 30-day window) |
+| --- | --- | --- | --- |
+| CREA | 4 | 200 | 137 |
+| EFSA | 2 | 100 | 47 |
+| EIT Food | 2 | 100 | 17 |
+| EFFoST | 2 | 99 | 15 |
+| GS1 Italy | 2 | 100 | 15 |
+| Unione Italiana Food | 2 | 88 | 13 |
+| Foodvalley | 2 | 100 | 11 |
+| Federalimentare | 2 | 100 | 9 |
+| FoodDrinkEurope | 2 | 81 | 6 |
+| **Total** | **20** | | **270** |
+
+Corpus is now **543 raw posts, 272 scored**. The 271 unscored posts are queued
+but **not scored** — scoring is manual and costs OpenAI calls, ten per click
+(DOC-03), so the Rating screen needs roughly 28 clicks to catch up. That was
+left for the operator to decide. CREA alone is half the new volume.
+
+**Side effect worth knowing.** The new template's text column is narrower
+(x 160–838) than the old design, so long slide bodies are cut with "…" more
+often — seen on the cover slide of a live carousel. The ellipsis is deliberate
+and predates the template (it tells the editor to shorten); it is not a bug,
+but the guide should mention it when it is next revised.
 
