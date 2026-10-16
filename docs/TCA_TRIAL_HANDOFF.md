@@ -18,9 +18,9 @@ is where drift between the product and the Word user guide is recorded.
 | | |
 | --- | --- |
 | Branch | `phase6-frontend-binding` — **all current work is here, not on `main`** |
-| Last commit deployed | `7ac7663` (pushed 2026-10-16 — see §9.4) |
+| Last commit deployed | see `git log origin/phase6-frontend-binding` — last code change 2026-10-16, §9.4 |
 | Supabase project | `bxaovkzemfyxrxbcqask` (`cues-tca`, eu-west-1) |
-| Production frontend | cues-tca.netlify.app, bundle `index-CwguJip2.js` (the Tecnoalimenti carousel template, `6ea76a6`; deployed 2026-10-16) |
+| Production frontend | cues-tca.netlify.app, bundle `index-CvJcFkdD.js` (the Tecnoalimenti carousel template, second artwork with the FINT logo; deployed 2026-10-16) |
 | Migrations | applied through **`0030`** (`0030` applied 2026-10-16 over the Management API, not `db push` — see §9.4) |
 | Edge Functions | `ingest` v10, `score-worker` v12, `anonymize-worker` v13, `cluster` v7, `generate` v7, `discover-brands` v7, `slide-images` v3 — all post-`0029` |
 
@@ -1207,4 +1207,19 @@ left for the operator to decide. CREA alone is half the new volume.
 often — seen on the cover slide of a live carousel. The ellipsis is deliberate
 and predates the template (it tells the editor to shorten); it is not a bug,
 but the guide should mention it when it is next revised.
+
+**Second version of the artwork, same day.** Χάρης replaced the background with
+a version that adds the FINT logo under "Powered by Future Intelligence"
+(same 1122×1402 size, same filename `frontend/src/assets/carousel-template-tca.png`).
+`TEMPLATE_SAFE` did **not** need to change, and this was checked rather than
+assumed: no pixel inside the safe area differs between the two versions beyond
+re-encoding noise (≤ 8/255), the logo sits at y ≈ 1110–1190 (below the safe
+bottom at 989), and both versions show the same cream profile inside the box.
+Then two live carousels (10 and 3 slides, English and Italian) were rendered
+from a local build against production data and compared pixel by pixel with
+the text-free artwork: outside the safe area every slide is identical to it,
+except **one anti-aliased pixel at x = 159** (one column left of the box, faint
+— 12/255 — on plain cream) on two slides. The same pixel appears with the
+first artwork on production, so it predates this change: it is a glyph's left
+edge overhanging its origin, harmless, and left alone.
 

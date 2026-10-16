@@ -41,7 +41,9 @@ const MARGIN = 88
  * TCA supplied a finished background and asked for it to replace the dark
  * gradient. It is 1122×1402 — exactly 4:5 — and it already carries the
  * Tecnoalimenti and CUES logos at the top and "Powered by Future Intelligence"
- * near the bottom.
+ * with the FINT logo beneath it near the bottom. (The FINT logo arrived in a
+ * second version of the artwork; it sits below the safe area, which was
+ * re-checked against that version and did not move.)
  *
  * THAT ASPECT RATIO IS WHY THESE SLIDES ARE NOT SQUARE. Cover-fitting a 4:5
  * image into a 1080² frame crops roughly 20% of its height, and the first thing
