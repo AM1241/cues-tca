@@ -1224,6 +1224,54 @@ Deno.test({
           }
         }
       });
+
+      // =====================================================================
+      // RETRYING A FAILED POST — migration 0032
+      // =====================================================================
+      await runStep("Queue unscored gives a dead-lettered post another chance", async () => {
+        const { data: before } = await db
+          .from("configurations").select("id").eq("id", "default").maybeSingle();
+        if (!before) {
+          const { error } = await db.from("configurations").insert({ id: "default" });
+          if (error) throw error;
+        }
+
+        try {
+          const opened = await db.rpc("queue_scoring", { p_mode: "unscored" });
+          if (opened.error) throw opened.error;
+          const active = opened.data.request_id as string;
+          createdRequestIds.push(active);
+
+          const rawPostId = await makeRawPost("Refused once, and not for ever.");
+          rawPostIds.push(rawPostId);
+
+          const { callOpenAiImpl: refuses } = scriptedOpenAi([{ throws: "refusal" }]);
+          await handleScoreWorker(request({ batch_size: 1 }, INTERNAL_SECRET), { db, callOpenAiImpl: refuses });
+          const { data: dead } = await db
+            .from("scoring_job_state").select("status")
+            .eq("raw_post_id", rawPostId).eq("scoring_request_id", active).single();
+          assertEquals(dead!.status, "dead_letter", "sanity: the job must really have died");
+
+          const retried = await db.rpc("queue_scoring", { p_mode: "unscored" });
+          if (retried.error) throw retried.error;
+          assertEquals(retried.data.enqueued, 1, "the failed post goes back in line");
+
+          const { callOpenAiImpl: scores } = scriptedOpenAi([
+            { result: { theme_scores: themeScores({ tradition: 65 }), reason: "Second attempt." } },
+          ]);
+          const res = await handleScoreWorker(request({ batch_size: 1 }, INTERNAL_SECRET), { db, callOpenAiImpl: scores });
+          const body = await res.json();
+          assertEquals(body.totals.scored, 1);
+          assertEquals(body.results[0].raw_post_id, rawPostId);
+
+          // Now it has a score, so it must not be queued again.
+          const settled = await db.rpc("queue_scoring", { p_mode: "unscored" });
+          if (settled.error) throw settled.error;
+          assertEquals(settled.data.enqueued, 0);
+        } finally {
+          if (!before) await db.from("configurations").delete().eq("id", "default");
+        }
+      });
     } finally {
       await t.step("zzz teardown", teardown);
     }
