@@ -100,6 +100,11 @@ export function Sources() {
   const [editing, setEditing] = useState<Source | 'new' | null>(null)
   // Which source id is collecting, or 'all' for the header run, or null.
   const [collecting, setCollecting] = useState<string | 'all' | null>(null)
+  // How far a "Collect all" has got, shown on its button.
+  const [collectProgress, setCollectProgress] = useState('')
+  // Sources the last "Collect all" did not get. On the screen, not in a toast: a
+  // missing source does not announce itself later, and a toast is gone in seconds.
+  const [notCollected, setNotCollected] = useState<string[]>([])
   // Brand discovery: which source is running, and the pending proposals to
   // review. Proposals change nothing until accepted — see 0020.
   const [discovering, setDiscovering] = useState<string | null>(null)
@@ -176,14 +181,15 @@ export function Sources() {
     )
   }
 
-  // Invoke the deployed `ingest` Edge Function. Omitting source_ids collects
-  // every enabled source; the function honours `enabled` server-side and
-  // returns a per-source breakdown. Auth is the logged-in editor's JWT.
-  async function collect(target: Source | 'all') {
+  // Invoke the deployed `ingest` Edge Function for one source. The function
+  // honours `enabled` server-side and returns a per-source breakdown. Auth is
+  // the logged-in editor's JWT.
+  async function collect(source: Source) {
     if (collecting) return
-    setCollecting(target === 'all' ? 'all' : target.id)
-    const body = target === 'all' ? {} : { source_ids: [target.id] }
-    const { data, error } = await supabase.functions.invoke('ingest', { body })
+    setCollecting(source.id)
+    const { data, error } = await supabase.functions.invoke('ingest', {
+      body: { source_ids: [source.id] },
+    })
     setCollecting(null)
 
     if (error) {
@@ -191,15 +197,50 @@ export function Sources() {
       return
     }
     const results: CollectResult[] = (data?.results as CollectResult[]) ?? []
-    if (results.length === 0) {
-      toast.error('Ingest returned no results.')
-    } else if (results.length === 1) {
-      toast.success(summariseResult(results[0]))
-    } else {
-      const total = results.reduce((n, r) => n + (r.posts_inserted ?? 0), 0)
-      toast.success(`Collected ${results.length} sources — ${total} new posts`)
-    }
+    if (results.length === 0) toast.error('Ingest returned no results.')
+    else toast.success(summariseResult(results[0]))
     // Refresh so last_fetched_at (and disabled-skip behaviour) show through.
+    load()
+  }
+
+  // One request per source, in turn, rather than one request for all of them.
+  // The platform stopped that single request after about 150 seconds, twice, on
+  // 2026-10-19, and 14 sources take longer than that: everything late in the
+  // alphabet, Tecnoalimenti's own page included, was never reached. One source
+  // takes well under the limit, and failing on one does not stop the others.
+  async function collectAll() {
+    if (collecting || !sources) return
+    const targets = sources.filter((s) => s.enabled)
+    setCollecting('all')
+    setNotCollected([])
+    const missed: string[] = []
+    let inserted = 0
+
+    for (const [i, source] of targets.entries()) {
+      setCollectProgress(`${i + 1} of ${targets.length}`)
+      const { data, error } = await supabase.functions.invoke('ingest', {
+        body: { source_ids: [source.id] },
+      })
+      const result = (data?.results as CollectResult[] | undefined)?.[0]
+      if (!error && result?.status === 'ok') {
+        inserted += result.posts_inserted ?? 0
+        continue
+      }
+      missed.push(source.name)
+      // A bad provider key fails identically for every source; stop rather than
+      // spending an attempt per source to learn the same thing, as ingest does.
+      if (result?.error_code === 'auth') {
+        missed.push(...targets.slice(i + 1).map((s) => s.name))
+        break
+      }
+    }
+
+    setCollecting(null)
+    setCollectProgress('')
+    setNotCollected(missed)
+    const summary = `Collected ${targets.length - missed.length} of ${targets.length} sources — ${inserted} new posts`
+    if (missed.length > 0) toast.error(summary)
+    else toast.success(summary)
     load()
   }
 
@@ -236,10 +277,10 @@ export function Sources() {
         </div>
         <div className="flex items-center gap-2">
           <Button
-            onClick={() => collect('all')}
+            onClick={collectAll}
             disabled={collecting !== null || sources.every((s) => !s.enabled)}
           >
-            {collecting === 'all' ? 'Collecting…' : 'Collect all enabled'}
+            {collecting === 'all' ? `Collecting ${collectProgress}…` : 'Collect all enabled'}
           </Button>
           {/* Adding a source is admin-only (0025) — the database refuses a
               non-admin's insert regardless, but there is no reason to offer a
@@ -251,6 +292,12 @@ export function Sources() {
           )}
         </div>
       </div>
+
+      {notCollected.length > 0 && (
+        <p className="mb-3 text-sm text-amber-700">
+          Not collected: {notCollected.join(', ')}. Press Collect on each one to try again.
+        </p>
+      )}
 
       <TableShell>
         <table className="w-full text-sm">
