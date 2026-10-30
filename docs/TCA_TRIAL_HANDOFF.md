@@ -21,7 +21,7 @@ is where drift between the product and the Word user guide is recorded.
 | Last commit deployed | see `git log origin/phase6-frontend-binding` — last code change 2026-10-16, §9.4 |
 | Supabase project | `bxaovkzemfyxrxbcqask` (`cues-tca`, eu-west-1) |
 | Production frontend | cues-tca.netlify.app, bundle `index-CvJcFkdD.js` (the Tecnoalimenti carousel template, second artwork with the FINT logo; deployed 2026-10-16) |
-| Migrations | applied through **`0030`** (`0030` applied 2026-10-16 over the Management API, not `db push` — see §9.4) |
+| Migrations | applied through **`0030`** (`0030` applied 2026-10-16 over the Management API, not `db push` — see §9.4). **`0031` is in the repo and was dry-run on production, but its application is pending as of 2026-10-30 — see §9.5** |
 | Edge Functions | `ingest` v10, `score-worker` v12, `anonymize-worker` v13, `cluster` v7, `generate` v7, `discover-brands` v7, `slide-images` v3 — all post-`0029` |
 
 `origin/phase6-frontend-binding` was fetched on 2026-09-15 and carried **no
@@ -1223,3 +1223,86 @@ except **one anti-aliased pixel at x = 159** (one column left of the box, faint
 first artwork on production, so it predates this change: it is a glyph's left
 edge overhanging its origin, harmless, and left alone.
 
+
+### 9.5 "Rating is not working" — report of 2026-10-29, migration `0031`
+
+Gabriele Rivoltella wrote that Rating did not seem to work and that this blocked
+the following steps. **Nothing was failing.** Read from production on 2026-10-30:
+no job under a closed request, 0 dead letters, 0 failures, the active request's
+hash matching the live configuration, OpenAI answering (last results 2026-10-23).
+
+**The cause was queue order.** On 2026-10-02 at 08:06 a batch of 181 posts entered
+the scoring queue, almost all of them already scored and published as far back as
+June 2025. Only "Re-score all" (`enqueue_reevaluation`) queues a post that already
+has a score; there is no audit trail of who pressed it. `pgmq.read` is strictly
+`order by msg_id`, so every "Score now" since then served that batch:
+
+| | |
+| --- | --- |
+| Results written since 2026-10-16 | 100 (90 by the partner on 19 and 23 October, 10 by the operator) |
+| Of those, on posts that already had a score | **99** |
+| Scored posts | 272 → 273 |
+| Still ahead of every new post | 81, so 8 clicks reached no new post at all |
+| Never scored | 317 of 590 |
+| Published in the last 15 days | 38, **0 scored** |
+| Eligible for Topics in the last 30 days | **0** (last clustering run: 2026-10-02) |
+
+Those old posts fall outside Rating's 15-day window, so the screen said "10 scored"
+in green and did not change. This also corrects §9.1's reading of the partner's
+activity: they kept trying until 2026-10-23.
+
+**The fix, `0031_scoring_queue_order.sql`:**
+
+- `read_scoring_jobs` serves never-scored posts before re-scores, newest first
+  within each, instead of arrival order. No data is removed: the 81 old jobs sink
+  to the back and cost nothing unless someone drains the queue that far.
+- `queue_scoring` now cancels the replaced request's jobs on rotation
+  (`cancel_scoring_request_siblings`, reason `request_rotated`). `close_scoring_request`
+  only flips the status, and `score-worker` skips a closed request's job without
+  archiving it, so a settings change followed by "Queue unscored" while jobs were
+  pending would have left the same ten dead jobs at the head of the queue. This had
+  **not** happened in production; with 398 jobs pending it was one click away.
+
+**Rating screen (`Posts.tsx`):** a run that scored nothing is red, not green; a
+persistent note says when posts just scored fall outside the window; "Re-score all"
+asks first, naming the cost; and "Queue unscored" no longer claims that every post
+has a score when the posts are merely already in line, which is what it would have
+said on production at the time of writing, with 317 posts unscored.
+
+**Tests.** Two new steps in `score-worker/__tests__/handler_test.ts`, each seen
+failing for its own reason before the fix: the order test read the three posts
+exactly backwards, and the rotation test found 139 stranded jobs. Suite: 34 steps
+green from a clean `supabase db reset`. Three existing steps assumed arrival order
+in their setup and were reordered, keeping every assertion. Rating was driven in a
+browser against the local stack with `score-worker` stubbed, so **no real run has
+gone through the deployed screen yet**.
+
+**Dry run on production**, in one `do` block that raised on purpose: the next ten
+posts were all never-scored, published 2026-10-16 to 2026-10-19; the rotation
+scenario cancelled 398 jobs, requeued 317, left 0 stranded, and the first read after
+it was under the active request. State before and after was identical.
+
+**Status of `0031`: not applied.** Applying it over the Management API was refused
+by the agent's permission layer as a production deploy, so it needs running by hand,
+in the same atomic form as §9.4 (the migration plus its row in
+`supabase_migrations.schema_migrations`, version `0031`, name `scoring_queue_order`).
+
+**Once applied, for the editor:** 4 clicks score the 38 posts of the last 15 days,
+19 the 185 of the last 30, and 32 all 317. Each post is one OpenAI call. Topics then
+needs "Anonymise now" and "Run clustering", and only posts at or above the threshold
+of 50 continue.
+
+**Known and left open:**
+
+- A dead-lettered job still blocks its post: `backfill_scoring_for_request` skips any
+  post with a job under the request, so "Queue unscored" can still say every post has
+  a score when the queue is empty. Zero dead letters exist today.
+- **"Collect all enabled" stops after about 2.5 minutes**, most likely the Edge
+  Function limit, and 14 sources take longer than that. On 2026-10-19 it reached 10
+  sources and then 7, so GS1 Italy, MASAF, STAR, Tecnoalimenti and Unione Italiana
+  Food were not collected. The `running` row and the FoodDrinkEurope claim left behind
+  do not block anything: claims are reaped after 15 minutes. Collecting per source
+  works.
+- **The access token rotated on 2026-10-15 stopped working** and was replaced on
+  2026-10-30. It lives in the Windows user variable and `frontend/.env.local`; both
+  `.mcp.json` files only reference the variable.
