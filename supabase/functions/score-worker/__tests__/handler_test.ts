@@ -89,7 +89,7 @@ const CONFIG_SNAPSHOT = {
   min_relevance_score: 50,
 };
 
-async function makeRawPost(text: string): Promise<string> {
+async function makeRawPost(text: string, publishedAt = new Date().toISOString()): Promise<string> {
   const { data, error } = await db
     .from("raw_posts")
     .insert({
@@ -97,7 +97,7 @@ async function makeRawPost(text: string): Promise<string> {
       source_url: `https://example.test/post-${crypto.randomUUID()}`,
       external_post_id: crypto.randomUUID(),
       post_text: text,
-      published_at: new Date().toISOString(),
+      published_at: publishedAt,
     })
     .select("id").single();
   if (error) throw error;
@@ -288,8 +288,12 @@ async function enqueue(text: string): Promise<{ rawPostId: string; jobId: string
   return await enqueueUnder(evalRequestId, text);
 }
 
-async function enqueueUnder(requestId: string, text: string): Promise<{ rawPostId: string; jobId: string }> {
-  const rawPostId = await makeRawPost(text);
+async function enqueueUnder(
+  requestId: string,
+  text: string,
+  publishedAt?: string,
+): Promise<{ rawPostId: string; jobId: string }> {
+  const rawPostId = await makeRawPost(text, publishedAt);
   rawPostIds.push(rawPostId);
   const { data: jobId, error } = await db.rpc("enqueue_scoring_job", {
     p_raw_post_id: rawPostId, p_scoring_request_id: requestId,
@@ -547,8 +551,10 @@ Deno.test({
       });
 
       await runStep("one job's failure does not abort the batch", async () => {
-        const failing = await enqueue("This one fails.");
+        // Newest is read first (0031), so the failing job must be the newer one:
+        // this only proves anything if the failure comes before the other job.
         const succeeding = await enqueue("This one succeeds fine.");
+        const failing = await enqueue("This one fails.");
 
         let call = 0;
         const callOpenAiImpl = (async () => {
@@ -773,8 +779,9 @@ Deno.test({
       await runStep("a pending sibling becomes dead_letter/request_closed when the request circuit-breaks", async () => {
         await drainAmbientQueueNoise();
         const cbReq = await makeEvalRequest();
-        const { jobId: failingJobId } = await enqueueUnder(cbReq, "First job under a doomed request.");
+        // Created in this order because newest is read first (0031).
         const { jobId: siblingJobId } = await enqueueUnder(cbReq, "Second job, never read in this batch.");
+        const { jobId: failingJobId } = await enqueueUnder(cbReq, "First job under a doomed request.");
         const { callOpenAiImpl } = scriptedOpenAi([{ throws: "client_error", httpStatus: 401 }]);
 
         await handleScoreWorker(request({ batch_size: 1 }, INTERNAL_SECRET), { db, callOpenAiImpl });
@@ -956,8 +963,9 @@ Deno.test({
       await runStep("a succeeded job is not altered by a later request cancellation", async () => {
         await drainAmbientQueueNoise();
         const cbReq = await makeEvalRequest();
-        const { jobId: succeededJobId } = await enqueueUnder(cbReq, "This one succeeds before the request breaks.");
+        // Created in this order because newest is read first (0031).
         const { jobId: failingJobId } = await enqueueUnder(cbReq, "This one triggers the circuit-break.");
+        const { jobId: succeededJobId } = await enqueueUnder(cbReq, "This one succeeds before the request breaks.");
 
         const { callOpenAiImpl } = scriptedOpenAi([
           { result: { theme_scores: themeScores({ innovation: 50 }), reason: "scored fine" } },
@@ -1121,6 +1129,100 @@ Deno.test({
           .eq("scoring_request_id", cbReq).in("status", ["pending", "processing"]);
         assertEquals(nonTerminalCount, 0, "zero pending/processing jobs remain under the closed request");
         assert([earlyJobId, triggerJobId].every((id) => id), "sanity: both jobs were created before assertions ran");
+      });
+
+      // =====================================================================
+      // QUEUE ORDER AND REQUEST ROTATION — migration 0031
+      // =====================================================================
+      await runStep("never-scored posts are read before re-scores, newest first", async () => {
+        await drainAmbientQueueNoise();
+
+        const firstPass = await makeEvalRequest();
+        const { rawPostId: alreadyScored } = await enqueueUnder(firstPass, "Scored once already.");
+        const { callOpenAiImpl } = scriptedOpenAi([
+          { result: { theme_scores: themeScores({ innovation: 60 }), reason: "First pass." } },
+        ]);
+        await handleScoreWorker(request({ batch_size: 1 }, INTERNAL_SECRET), { db, callOpenAiImpl });
+        const { data: projection } = await db
+          .from("analyzed_posts").select("current_result_id").eq("raw_post_id", alreadyScored).single();
+        assert(projection?.current_result_id, "sanity: the first post must really have a score");
+
+        // Queued in the worst order: the re-score first, the newest post last.
+        const backlog = await makeEvalRequest();
+        const { error: enqueueErr } = await db.rpc("enqueue_scoring_job", {
+          p_raw_post_id: alreadyScored, p_scoring_request_id: backlog,
+        });
+        if (enqueueErr) throw enqueueErr;
+        const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString();
+        const { rawPostId: older } = await enqueueUnder(backlog, "Never scored, a month old.", daysAgo(30));
+        const { rawPostId: newer } = await enqueueUnder(backlog, "Never scored, a day old.", daysAgo(1));
+
+        const order: string[] = [];
+        for (let i = 0; i < 3; i++) {
+          const { data, error } = await db.rpc("read_scoring_jobs", { p_vt: 120, p_qty: 1 });
+          if (error) throw error;
+          order.push(data[0].message.raw_post_id as string);
+        }
+        assertEquals(order, [newer, older, alreadyScored]);
+      });
+
+      await runStep("a settings change does not strand the replaced request's jobs ahead of the queue", async () => {
+        const { data: before } = await db
+          .from("configurations").select("min_relevance_score").eq("id", "default").maybeSingle();
+        if (!before) {
+          const { error } = await db.from("configurations").insert({ id: "default" });
+          if (error) throw error;
+        }
+        const { data: current } = await db
+          .from("configurations").select("min_relevance_score").eq("id", "default").single();
+        const threshold = Number(current!.min_relevance_score);
+
+        try {
+          const opened = await db.rpc("queue_scoring", { p_mode: "unscored" });
+          if (opened.error) throw opened.error;
+          const replaced = opened.data.request_id as string;
+          createdRequestIds.push(replaced);
+
+          // The raw_posts trigger queues this under the active production request.
+          const rawPostId = await makeRawPost("Waiting when the settings change.");
+          rawPostIds.push(rawPostId);
+
+          const { error: updateErr } = await db
+            .from("configurations").update({ min_relevance_score: threshold + 1 }).eq("id", "default");
+          if (updateErr) throw updateErr;
+
+          const rotated = await db.rpc("queue_scoring", { p_mode: "unscored" });
+          if (rotated.error) throw rotated.error;
+          assert(rotated.data.config_rotated, "the changed settings must rotate the request");
+          createdRequestIds.push(rotated.data.request_id as string);
+
+          const { count: stranded } = await db
+            .from("scoring_job_state").select("*", { count: "exact", head: true })
+            .eq("scoring_request_id", replaced).in("status", ["pending", "processing"]);
+          assertEquals(stranded, 0, "the replaced request keeps no live jobs");
+
+          const { data: cancelled } = await db
+            .from("scoring_job_state").select("status, last_failure_type")
+            .eq("raw_post_id", rawPostId).eq("scoring_request_id", replaced).single();
+          assertEquals(cancelled!.status, "dead_letter");
+          assertEquals(cancelled!.last_failure_type, "request_rotated");
+
+          // The whole point: the very next click scores this post, under the new request.
+          const { callOpenAiImpl } = scriptedOpenAi([
+            { result: { theme_scores: themeScores({ food_safety: 70 }), reason: "After the rotation." } },
+          ]);
+          const res = await handleScoreWorker(request({ batch_size: 1 }, INTERNAL_SECRET), { db, callOpenAiImpl });
+          const body = await res.json();
+          assertEquals(body.totals.circuit_break, 0);
+          assertEquals(body.totals.scored, 1);
+          assertEquals(body.results[0].raw_post_id, rawPostId);
+        } finally {
+          if (before) {
+            await db.from("configurations").update({ min_relevance_score: threshold }).eq("id", "default");
+          } else {
+            await db.from("configurations").delete().eq("id", "default");
+          }
+        }
       });
     } finally {
       await t.step("zzz teardown", teardown);
