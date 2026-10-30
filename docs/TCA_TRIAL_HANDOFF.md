@@ -20,8 +20,8 @@ is where drift between the product and the Word user guide is recorded.
 | Branch | `phase6-frontend-binding` — **all current work is here, not on `main`** |
 | Last commit deployed | see `git log origin/phase6-frontend-binding` — last code change 2026-10-16, §9.4 |
 | Supabase project | `bxaovkzemfyxrxbcqask` (`cues-tca`, eu-west-1) |
-| Production frontend | cues-tca.netlify.app, bundle `index-CvJcFkdD.js` (the Tecnoalimenti carousel template, second artwork with the FINT logo; deployed 2026-10-16) |
-| Migrations | applied through **`0030`** (`0030` applied 2026-10-16 over the Management API, not `db push` — see §9.4). **`0031` is in the repo and was dry-run on production, but its application is pending as of 2026-10-30 — see §9.5** |
+| Production frontend | cues-tca.netlify.app, deployed from `phase6-frontend-binding` by Netlify on push. Rating and Collect changes of 2026-10-30, see §9.5 |
+| Migrations | applied through **`0031`**, over the Management API, not `db push` — see §9.4 and §9.5. **`0032` is in the repo and passed a production dry run, but its application is pending as of 2026-10-30 — see §9.5** |
 | Edge Functions | `ingest` v10, `score-worker` v12, `anonymize-worker` v13, `cluster` v7, `generate` v7, `discover-brands` v7, `slide-images` v3 — all post-`0029` |
 
 `origin/phase6-frontend-binding` was fetched on 2026-09-15 and carried **no
@@ -1282,27 +1282,47 @@ posts were all never-scored, published 2026-10-16 to 2026-10-19; the rotation
 scenario cancelled 398 jobs, requeued 317, left 0 stranded, and the first read after
 it was under the active request. State before and after was identical.
 
-**Status of `0031`: not applied.** Applying it over the Management API was refused
-by the agent's permission layer as a production deploy, so it needs running by hand,
-in the same atomic form as §9.4 (the migration plus its row in
-`supabase_migrations.schema_migrations`, version `0031`, name `scoring_queue_order`).
+**`0031` was applied to production on 2026-10-30** and verified: the new order is
+live, the rotation fix is live, the version is in `schema_migrations`, `anon` can run
+none of the changed functions, and `read_scoring_jobs` stays `service_role` only. The
+first attempt was refused by the agent's permission layer as a production deploy and
+went through once the operator instructed it directly.
 
-**Once applied, for the editor:** 4 clicks score the 38 posts of the last 15 days,
+**No real run has gone through it yet**, so the first "Score now" is the final check.
+
+**For the editor now:** 4 clicks score the 38 posts of the last 15 days,
 19 the 185 of the last 30, and 32 all 317. Each post is one OpenAI call. Topics then
 needs "Anonymise now" and "Run clustering", and only posts at or above the threshold
 of 50 continue.
 
+**Also fixed on 2026-10-30:**
+
+- **"Collect all enabled" now sends one request per source, in turn** (`Sources.tsx`).
+  As one request it stopped after about 145 seconds, twice, on 2026-10-19: it reached
+  10 sources and then 7 of 14, so GS1 Italy, MASAF, STAR, Tecnoalimenti and Unione
+  Italiana Food were not collected. `EXECUTION_BUDGET_MS` (240s) and its comment
+  ("roughly 400s") assume a limit this project does not get, so that guard never
+  fired; it is unchanged because the browser path no longer depends on it. The longest
+  single source on record took about 50 seconds. The button shows progress, a failed
+  source does not stop the rest, the ones missed stay listed on screen, and a provider
+  auth failure stops the loop as `ingest` itself does. Checked in a browser against the
+  local stack with `ingest` stubbed: **no real Collect has run on it yet.**
+- **Migration `0032`: "Queue unscored" retries posts that failed.** A dead-lettered job
+  blocked its post for good, because the backfill skips any post with a job under the
+  request, so the screen could say every post had a score when one had none. The
+  backfill now revives dead-lettered jobs of posts still without a score. Test seen
+  failing first; suite 35 steps green. Production dry run: nothing queued with no
+  failures, one job back to `pending` with one failure, state unchanged. **Not applied:
+  the permission layer refused it as a production deploy.** It needs the operator's
+  direct instruction, or running by hand in the same form as `0031`, with version
+  `0032` and name `queue_unscored_retries_failures`. It changes nothing today: there
+  are 0 dead letters.
+
 **Known and left open:**
 
-- A dead-lettered job still blocks its post: `backfill_scoring_for_request` skips any
-  post with a job under the request, so "Queue unscored" can still say every post has
-  a score when the queue is empty. Zero dead letters exist today.
-- **"Collect all enabled" stops after about 2.5 minutes**, most likely the Edge
-  Function limit, and 14 sources take longer than that. On 2026-10-19 it reached 10
-  sources and then 7, so GS1 Italy, MASAF, STAR, Tecnoalimenti and Unione Italiana
-  Food were not collected. The `running` row and the FoodDrinkEurope claim left behind
-  do not block anything: claims are reaped after 15 minutes. Collecting per source
-  works.
+- The run `9a607d29` of 2026-10-19 still shows `running`. It blocks nothing: its source
+  claim is reaped on the next Collect of FoodDrinkEurope.
 - **The access token rotated on 2026-10-15 stopped working** and was replaced on
   2026-10-30. It lives in the Windows user variable and `frontend/.env.local`; both
-  `.mcp.json` files only reference the variable.
+  `.mcp.json` files only reference the variable. The replacement passed through a chat
+  transcript, so it should be replaced again.
