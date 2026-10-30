@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { Spinner, ErrorNotice, Button, Badge, TableShell, THead, Th, TBody } from '../components/ui'
+import { Spinner, ErrorNotice, Button, Badge, Modal, TableShell, THead, Th, TBody } from '../components/ui'
 import { useToast } from '../components/toast-context'
 import { functionErrorMessage } from '../lib/functionError'
 
@@ -57,6 +57,10 @@ export function Posts() {
   // the UI could add to it, so the button answered "the queue is empty" while
   // 47 posts sat unscored and the operator had no way to see why.
   const [queued, setQueued] = useState<number | null>(null)
+  const [confirmingRescore, setConfirmingRescore] = useState(false)
+  // Says why a run that scored posts did not change the table. Not a toast: those
+  // are gone in four seconds, and this is the question left on the screen.
+  const [scoredOutsideWindow, setScoredOutsideWindow] = useState<string | null>(null)
   const toast = useToast()
 
   const [sourceFilter, setSourceFilter] = useState('all')
@@ -164,14 +168,20 @@ export function Posts() {
     setQueueing(false)
     if (error) return toast.error(error.message)
 
-    const r = data as { enqueued: number; config_rotated: boolean } | null
+    const r = data as { enqueued: number; config_rotated: boolean; queued_total: number } | null
     await loadQueue()
     if (r?.config_rotated) {
       toast.success(
         `Settings changed since this was last scored — restarted under the new settings. ${r.enqueued} queued.`,
       )
     } else if (!r?.enqueued) {
-      toast.success('Nothing to queue — every post already has a score.')
+      // Zero queued usually means the posts are already in line, not that they
+      // have been scored: a post with a job is skipped whether it ran or not.
+      toast.success(
+        r?.queued_total
+          ? `Nothing new to queue — ${r.queued_total} post(s) already waiting. Press Score now to process them.`
+          : 'Nothing to queue — every post already has a score.',
+      )
     } else {
       toast.success(`${r.enqueued} post(s) queued. Press Score now to process them.`)
     }
@@ -213,10 +223,37 @@ export function Posts() {
     if (t.dead_lettered) parts.push(`${t.dead_lettered} dead-lettered`)
     if (t.retried) parts.push(`${t.retried} retrying`)
     if (t.circuit_break) parts.push(`${t.circuit_break} circuit-broken`)
-    toast.success(`${t.jobs_read} job(s) read — ${parts.join(', ')}`)
+    const summary = `${t.jobs_read} job(s) read — ${parts.join(', ')}`
+    // A run that scored nothing is a problem however cleanly the call returned;
+    // shown in green it reads as success while the editor makes no progress.
+    if (t.scored > 0) toast.success(summary)
+    else toast.error(summary)
     await load()
     await loadQueue()
     await loadUnscoredInWindow()
+    await explainScoredOutsideWindow(data.results ?? [])
+  }
+
+  // This screen lists a window, and the queue does not stop at its edge, so a
+  // run can score posts that never appear here. "10 scored" over an unchanged
+  // table looks like a broken button: that is what Tecnoalimenti reported.
+  async function explainScoredOutsideWindow(results: { raw_post_id: string; status: string }[]) {
+    setScoredOutsideWindow(null)
+    const scoredIds = results.filter((r) => r.status === 'scored').map((r) => r.raw_post_id)
+    if (showAll || scoredIds.length === 0) return
+    const cutoff = new Date(Date.now() - lookbackDays * 86_400_000).toISOString()
+    const { count } = await supabase
+      .from('raw_posts')
+      .select('id', { count: 'exact', head: true })
+      .in('id', scoredIds)
+      .gte('published_at', cutoff)
+    if (count === null) return
+    const outside = scoredIds.length - count
+    if (outside > 0) {
+      setScoredOutsideWindow(
+        `${outside} of the ${scoredIds.length} post(s) just scored were published before the last ${lookbackDays} days, so they are not listed here. Press All to see them.`,
+      )
+    }
   }
 
   const sourceNames = useMemo(() => {
@@ -276,9 +313,9 @@ export function Posts() {
               {queueing ? 'Queueing…' : 'Queue unscored'}
             </Button>
             <Button
-              onClick={() => queue('all')}
+              onClick={() => setConfirmingRescore(true)}
               disabled={queueing || scoring}
-              title="Re-score every post — use after changing the objective"
+              title="Re-score every post — use after changing Settings"
             >
               Re-score all
             </Button>
@@ -371,6 +408,10 @@ export function Posts() {
           </label>
         </div>
       </div>
+
+      {scoredOutsideWindow && !showAll && (
+        <p className="mb-3 text-sm text-amber-700">{scoredOutsideWindow}</p>
+      )}
 
       <TableShell className={`transition-opacity ${reloading ? 'opacity-50' : ''}`}>
         <table className="w-full text-sm">
@@ -481,7 +522,50 @@ export function Posts() {
           </div>
         )}
       </TableShell>
+
+      {confirmingRescore && (
+        <RescoreConfirm
+          onClose={() => setConfirmingRescore(false)}
+          onConfirm={() => {
+            setConfirmingRescore(false)
+            queue('all')
+          }}
+        />
+      )}
     </div>
+  )
+}
+
+/**
+ * Re-scoring is one click away and is not free: it queues every post ever
+ * collected, whether or not it already has a score. It is a modal rather than a
+ * native confirm() for the same reason as Review's delete: the consequence has
+ * to be readable before the button is pressed. New posts are served first either
+ * way (0031), so this protects the budget, not the queue.
+ */
+function RescoreConfirm({ onClose, onConfirm }: { onClose: () => void; onConfirm: () => void }) {
+  return (
+    <Modal onClose={onClose}>
+      <h2 className="text-lg font-semibold text-slate-900">Re-score every post?</h2>
+      <div className="mt-3 space-y-2 text-sm text-slate-600">
+        <p>
+          This queues <strong>every post ever collected</strong>, including those that
+          already have a score. Each one is a paid AI call when it is processed.
+        </p>
+        <p>
+          You only need this after changing Settings. To score new posts, use{' '}
+          <strong>Score now</strong>.
+        </p>
+      </div>
+      <div className="mt-6 flex justify-end gap-3">
+        <Button variant="ghost" className="px-4 py-2" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button variant="primary" size="md" onClick={onConfirm}>
+          Re-score everything
+        </Button>
+      </div>
+    </Modal>
   )
 }
 
