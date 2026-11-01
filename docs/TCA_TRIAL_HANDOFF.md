@@ -21,7 +21,7 @@ is where drift between the product and the Word user guide is recorded.
 | Last commit deployed | see `git log origin/phase6-frontend-binding` — last code change 2026-10-16, §9.4 |
 | Supabase project | `bxaovkzemfyxrxbcqask` (`cues-tca`, eu-west-1) |
 | Production frontend | cues-tca.netlify.app, deployed from `phase6-frontend-binding` by Netlify on push. Rating and Collect changes of 2026-10-30, see §9.5 |
-| Migrations | applied through **`0031`**, over the Management API, not `db push` — see §9.4 and §9.5. **`0032` is in the repo and passed a production dry run, but its application is pending as of 2026-10-30 — see §9.5** |
+| Migrations | applied through **`0032`**, over the Management API, not `db push` — see §9.4 and §9.5 |
 | Edge Functions | `ingest` v10, `score-worker` v12, `anonymize-worker` v13, `cluster` v7, `generate` v7, `discover-brands` v7, `slide-images` v3 — all post-`0029` |
 
 `origin/phase6-frontend-binding` was fetched on 2026-09-15 and carried **no
@@ -1274,8 +1274,7 @@ failing for its own reason before the fix: the order test read the three posts
 exactly backwards, and the rotation test found 139 stranded jobs. Suite: 34 steps
 green from a clean `supabase db reset`. Three existing steps assumed arrival order
 in their setup and were reordered, keeping every assertion. Rating was driven in a
-browser against the local stack with `score-worker` stubbed, so **no real run has
-gone through the deployed screen yet**.
+browser against the local stack with `score-worker` stubbed; the real run is below.
 
 **Dry run on production**, in one `do` block that raised on purpose: the next ten
 posts were all never-scored, published 2026-10-16 to 2026-10-19; the rotation
@@ -1288,10 +1287,23 @@ none of the changed functions, and `read_scoring_jobs` stays `service_role` only
 first attempt was refused by the agent's permission layer as a production deploy and
 went through once the operator instructed it directly.
 
-**No real run has gone through it yet**, so the first "Score now" is the final check.
+**Live test on production, 2026-11-01**, signed in once as `hzafeiris@f-in.eu` on the
+operator's instruction, then signed out:
 
-**For the editor now:** 4 clicks score the 38 posts of the last 15 days,
-19 the 185 of the last 30, and 32 all 317. Each post is one OpenAI call. Topics then
+| | |
+| --- | --- |
+| Collect all enabled | **14 of 14 sources**, about 4 minutes, 160 new posts, 590 → 750, including the five missed on 2026-10-19 |
+| Score now, one click | 21 seconds, 10 scored, **all 10 never scored before**, published 2026-10-30 to 2026-11-01 |
+| The screen | Rating went from "0 of 0" to "10 of 10" in the 15-day window, and the queue from 558 to 548 |
+| Failures | 0 dead letters, 0 stuck runs, 0 source locks held. The run left `running` on 2026-10-19 was reaped by this Collect |
+| Cost | 10 OpenAI scoring calls and 32 provider requests, attributed to the operator |
+
+Anonymise, clustering and generation were not re-run: their code did not change, and
+that spend is the partner's to choose.
+
+**For the editor now, as of 2026-11-01:** 138 posts of the last 15 days are unscored
+(14 clicks), 306 of the last 30 (31 clicks), and 467 in all (47 clicks). Each post is
+one OpenAI call, and all of them do not need doing. Topics then
 needs "Anonymise now" and "Run clustering", and only posts at or above the threshold
 of 50 continue.
 
@@ -1305,23 +1317,25 @@ of 50 continue.
   fired; it is unchanged because the browser path no longer depends on it. The longest
   single source on record took about 50 seconds. The button shows progress, a failed
   source does not stop the rest, the ones missed stay listed on screen, and a provider
-  auth failure stops the loop as `ingest` itself does. Checked in a browser against the
-  local stack with `ingest` stubbed: **no real Collect has run on it yet.**
+  auth failure stops the loop as `ingest` itself does. Proven live, see above.
 - **Migration `0032`: "Queue unscored" retries posts that failed.** A dead-lettered job
   blocked its post for good, because the backfill skips any post with a job under the
   request, so the screen could say every post had a score when one had none. The
   backfill now revives dead-lettered jobs of posts still without a score. Test seen
   failing first; suite 35 steps green. Production dry run: nothing queued with no
-  failures, one job back to `pending` with one failure, state unchanged. **Not applied:
-  the permission layer refused it as a production deploy.** It needs the operator's
-  direct instruction, or running by hand in the same form as `0031`, with version
-  `0032` and name `queue_unscored_retries_failures`. It changes nothing today: there
-  are 0 dead letters.
+  failures, one job back to `pending` with one failure, state unchanged. **Applied to
+  production on 2026-11-01** and verified: the function body is live, the version is in
+  `schema_migrations`, and only `service_role` can run the backfill.
 
 **Known and left open:**
 
-- The run `9a607d29` of 2026-10-19 still shows `running`. It blocks nothing: its source
-  claim is reaped on the next Collect of FoodDrinkEurope.
+- **One source ran twice in the live test.** EFFoST has two runs 10 seconds apart with
+  identical `requested_source_ids`, where every other gap is 1 second, and the client
+  waited through both. The code calls once per source and neither client library
+  retries, so the request was most likely re-sent below the application after its
+  response was lost; the function logs were not reachable to confirm it. It is harmless:
+  the second run inserted 0 posts and cost 2 provider requests. The only visible effect
+  is the toast, which counted the second run and said 151 new posts instead of 160.
 - **The access token rotated on 2026-10-15 stopped working** and was replaced on
   2026-10-30. It lives in the Windows user variable and `frontend/.env.local`; both
   `.mcp.json` files only reference the variable. The replacement passed through a chat
