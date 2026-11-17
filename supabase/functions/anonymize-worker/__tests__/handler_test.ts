@@ -55,7 +55,7 @@ function request(body: unknown, apikey?: string): Request {
 /** Insert a scored raw_post (source + raw_posts + a fake current scoring_result
  *  + analyzed_posts row), which is the precondition backfill_anonymize_jobs
  *  and complete_anonymize_job both read from (overall_relevance, source name). */
-async function makeScoredPost(text: string, overallRelevance = 80): Promise<string> {
+async function makeScoredPost(text: string, overallRelevance = 80, publishedAt?: string): Promise<string> {
   const { data: rp, error: rpErr } = await db
     .from("raw_posts")
     .insert({
@@ -63,7 +63,7 @@ async function makeScoredPost(text: string, overallRelevance = 80): Promise<stri
       source_url: `https://example.test/post-${crypto.randomUUID()}`,
       external_post_id: crypto.randomUUID(),
       post_text: text,
-      published_at: new Date().toISOString(),
+      published_at: publishedAt ?? new Date().toISOString(),
     })
     .select("id").single();
   if (rpErr) throw rpErr;
@@ -412,6 +412,49 @@ Deno.test({
           p_entity_extraction_used: false, p_config_snapshot: {}, p_processing_token: mine.processing_token,
         });
         assert(error, "completing with entity_extraction_used=false must raise, never silently succeed");
+      });
+
+      // =====================================================================
+      // QUEUE ORDER — migration 0033 (the anonymise twin of 0031)
+      // =====================================================================
+      await runStep("never-anonymised posts are read before re-anonymisations, newest first", async () => {
+        await drainAmbientQueueNoise();
+        const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString();
+
+        // A post anonymised once, then reset by "Redo all". It is the newest of
+        // the three, so only the "anonymised before" rule can put it last.
+        const redone = await makeScoredPost(`${runTag} anonymised once, then Redo all.`, 80, daysAgo(0));
+        await backfillAndClaim();
+        const { data: firstClaim } = await db.rpc("read_anonymize_jobs", { p_vt: 120, p_qty: 50 });
+        const first = (firstClaim as { msg_id: number; message: { job_id: string; raw_post_id: string }; processing_token: string }[])
+          .find((m) => m.message.raw_post_id === redone)!;
+        const { data: done } = await db.rpc("complete_anonymize_job", {
+          p_job_id: first.message.job_id, p_msg_id: first.msg_id, p_raw_post_id: redone,
+          p_anonymized_text: "first pass", p_replacements: [], p_generalized_source_name: "x",
+          p_entity_extraction_used: true, p_config_snapshot: {}, p_processing_token: first.processing_token,
+        });
+        assertEquals(done, "inserted", "sanity: the first pass must really land");
+        const { error: redoErr } = await db.rpc("requeue_anonymisation");
+        if (redoErr) throw redoErr;
+
+        // Queued in the worst order for arrival-order reading: the
+        // re-anonymisation first, then the month-old post, the day-old post last.
+        await backfillAndClaim();
+        const older = await makeScoredPost(`${runTag} never anonymised, a month old.`, 80, daysAgo(30));
+        await backfillAndClaim();
+        const newer = await makeScoredPost(`${runTag} never anonymised, a day old.`, 80, daysAgo(1));
+        await backfillAndClaim();
+
+        // One claim of everything visible; the function returns rows in the
+        // order it serves them. Other steps' posts are re-queued by Redo all
+        // too, so only the relative order of these three is asserted.
+        const { data: claimed, error } = await db.rpc("read_anonymize_jobs", { p_vt: 120, p_qty: 1000 });
+        if (error) throw error;
+        const mine = [redone, older, newer];
+        const order = (claimed as { message: { raw_post_id: string } }[])
+          .map((m) => m.message.raw_post_id)
+          .filter((id) => mine.includes(id));
+        assertEquals(order, [newer, older, redone]);
       });
     } finally {
       await t.step("zzz teardown", teardown);
