@@ -1424,11 +1424,20 @@ local Docker database only) as a local editor account: `npm run build` and `oxli
 clean, no console errors, numbers match production (Review 23 to approve / 7 approved / 30;
 last Collect 1 Nov 22:33, 160 new posts). The first build glued the stuck 2026-10-19 run
 to the 2026-11-01 Collect, because that run's `finished_at` is 2026-11-01; sessions are now
-measured start to start. **Nothing is deployed or applied;** the work is committed on
-`ui-post-journey`, not pushed (Netlify builds `phase6-frontend-binding`, which is unchanged).
+measured start to start.
 
-**Still to do, each only on the operator's explicit instruction:** the production dry run
-and apply of `0033`; deploying `generate` (the language rule — its effect shows only on a
-real, paid generation); merging and deploying the frontend; a Collect, so the 15-day
-window has posts again. Phase 3 of the plan — one "Find topics" action that anonymises and
-groups only the working period's posts — is not started.
+**Put into production on 2026-11-17, on the operator's instruction ("Κάντα όλα εσύ"):**
+
+| Step | How it was checked |
+| --- | --- |
+| `0033` dry run | One `do` block on production that applied it, measured and raised. Next five claims: 2025-09-10, 2026-04-13, 2026-07-02, 2026-09-18, 2026-07-03 with 0014; 2026-10-31, -31, -30, -30, -30 with 0033; last post since 2026-10-02 at position 21; grants unchanged. Queue, job states, tokens and archive identical before and after. |
+| `0033` applied | Migration and its `schema_migrations` row in one transaction. Function body is 0033's, version `0033` recorded, only `service_role` can run it, queue untouched (145 pending, 0 invisible). |
+| `generate` deployed | Version 7 → 8, active, `verify_jwt` unchanged. Version 7 was commit `747bd1e` (deployed 10 s after it); the only change to `generate` or `_shared` since is the language rule. Its effect is not yet seen: that needs a real, paid generation. |
+| Frontend | `ui-post-journey` fast-forwarded into `phase6-frontend-binding` and pushed (`9cbc3f8..0d926e0`); tag `pre-ui-post-journey` pushed too. Netlify serves `index-D2TF_EQf.js`, the same hash as the local `npm run build`. |
+| Collect | Signed in once as `hzafeiris@f-in.eu`, pressed Collect all enabled, signed out. 14 of 14 sources, 15:37–15:40 Athens, 186 new posts (750 → 936), 30 provider requests, no source run twice, no AI call (scoring and anonymise result counts unchanged). The new Rating showed it at once: "Last Collect: 17 Nov, 15:37 · 186 new posts", 186 in the 15-day period, next step Score now. |
+
+**Next, for the editor:** 704 posts wait to be scored (186 of them this fortnight, newest
+first, ten per click), then Anonymise now (new posts first since 0033) and Run clustering
+over the working period. The 100 re-anonymisations left by Redo all are now served last and
+matter only for groupings of older periods. Phase 3 of the plan — one "Find topics" action
+that anonymises and groups only the working period's posts — is not started.
