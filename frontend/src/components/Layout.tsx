@@ -15,7 +15,9 @@ const routes = [
   { to: '/export', label: 'Export' },
 ]
 
-export function Layout({ email }: { email: string }) {
+// `onSwitchUi` is the only addition since the new layout (JourneyLayout.tsx)
+// arrived: a way back to it. Everything else here is the classic screen as-is.
+export function Layout({ email, onSwitchUi }: { email: string; onSwitchUi?: () => void }) {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
       <header className="border-b border-slate-200 bg-white">
@@ -59,6 +61,14 @@ export function Layout({ email }: { email: string }) {
 
       <main className="mx-auto max-w-6xl px-6 py-8">
         <Outlet />
+        {onSwitchUi && (
+          <p className="mt-10 text-center text-xs text-slate-400">
+            Classic screens ·{' '}
+            <button onClick={onSwitchUi} className="underline hover:text-slate-600">
+              switch to the new layout
+            </button>
+          </p>
+        )}
       </main>
     </div>
   )

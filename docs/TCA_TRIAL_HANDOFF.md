@@ -1340,3 +1340,95 @@ of 50 continue.
   2026-10-30. It lives in the Windows user variable and `frontend/.env.local`; both
   `.mcp.json` files only reference the variable. The replacement passed through a chat
   transcript, so it should be replaced again.
+
+### 9.6 "Users lose track of their posts" — call of 2026-11-06, branch `ui-post-journey`
+
+**What Tecnoalimenti said** (relayed by the operator on 2026-11-17; the call transcript
+was lost and may come back): with hundreds of posts, a user cannot follow which posts get
+rated and which end up in the carousel; posts need a visible date and date ordering, so it
+is clear what a Collect just brought; Review is confusing (what each item is, how the list
+is ordered). The operator added: separate what was used further on from what was not.
+
+**What production showed (read-only, 2026-11-17):** 750 collected → 313 scored → 110
+anonymised; only 23 distinct posts were ever in a carousel. Rating had no date column and
+hid unscored posts; Topics listed 260 posts with no period filter; Review showed 60 rows
+for 30 carousels (post and carousel apart), no dates, versions of the same grouping
+unrelated. Each screen had its own window (15 days, 30 days, all). Since 2026-11-01 nobody
+collected, so Rating's 15-day window is empty today. Activity after the 2026-11-01 test:
+the partner generated 3 versions on 2026-11-02 and changed `voice_style` (added "Scrivi in
+italiano e basta"), the operator and the partner scored 30 posts and generated 4 versions
+during and after the call on 2026-11-06; nothing since. All 7 versions came from the
+2026-10-02 grouping.
+
+**Two backend faults found on the way:**
+
+- **Anonymise had the queue-order fault 0031 fixed for scoring.** `read_anonymize_jobs` was
+  a plain `pgmq.read`: 145 pending, first post newer than 2026-10-02 at position 97, five
+  per click. `0033_anonymise_queue_order.sql` serves never-anonymised posts first, newest
+  first, re-anonymisations after. Proven locally in a rolled-back transaction on a copy of
+  production's data, with the queue rebuilt in production's enqueue order: the next five
+  went from posts of 2025-11 … 2026-06 to posts of 2026-10-30/31; all 21 new posts now sit
+  in the first 21 places; lease, `read_ct` and grants unchanged. New Deno step in
+  `anonymize-worker/__tests__/handler_test.ts`, seen failing without 0033 (it read the three
+  posts exactly in arrival order, the reverse of the expected one), green with it: 35 steps;
+  `cluster` (20), `generate` (10) and `_admin_rpcs` (17) suites also green from a clean
+  `supabase db reset`. **Not applied to production;** the production dry run is still to do.
+- **"Redo all" had reset almost every anonymisation.** `requeue_anonymisation` (0021) keeps
+  the `anonymized_posts_current` row and nulls `current_result_id`, and clustering only takes
+  rows where it is set. On production on 2026-11-17, **105 of 110 rows were nulled**, so only
+  5 posts were really anonymised, and 100 of the 145 pending jobs were re-anonymisations
+  (45 first ones). Nothing records who pressed it or when; row timestamps cluster on
+  2026-09-28, 2026-10-02 and 2026-11-02 (when only the partner was active), which is
+  suggestive, not proof. Consequences taken: 0033 tells a re-anonymisation by the row's
+  existence, not by `current_result_id`; the new screens count a post as anonymised only
+  when `current_result_id` is set (the classic Topics list counts every row, so it showed
+  110); and the new Topics puts Redo all under Advanced behind a dialog naming the count and
+  the cost.
+- **The generator ignored the language in the brief.** `generate/prompt.ts` said "Write in
+  English." unconditionally; the partner's brief says Italian, and 4 of 7 versions came out
+  in English. Both prompts now share `LANGUAGE_RULE` (the brief decides, English is only
+  the default); versions bumped to `generate_v5` / `publication_v3`. `deno check` clean.
+  **Not deployed**; its effect can only be seen on a real (paid) generation.
+
+**The new layout (frontend only, no schema change).** The operator asked that the old
+version be kept so it can come back. Three ways back, smallest first: "switch to the classic
+screens" at the bottom of every page (per browser); `NEW_LAYOUT = false` in
+`frontend/src/lib/features.ts` and a deploy (everyone gets the classic screens, the switch
+disappears — tried locally both ways); the tag `pre-ui-post-journey` for the code before
+any of this. The classic screens are unchanged apart from two `export`s in `Review.tsx` and
+the optional switch link in `Layout.tsx`.
+
+- `lib/journey.ts` places every post at the furthest stage it reached (not scored, below
+  threshold, waiting for anonymisation, ready, did not fit a topic, in a topic, in a
+  carousel) with one sentence saying why, from tables editors can already read.
+- A step strip above every screen except Settings: one shared **working period** (default
+  last 15 days), the count at each step, the last Collect (time, who, new posts), and the
+  one **next step** with a link.
+- **Rating:** every post of the period, scored or not; grouped by day; Newest/Highest-score
+  sort; NEW for what the last Collect brought; tabs Going forward / Stopped here / Not
+  scored yet / All; a "just scored" note after Score now. The per-theme bars and the
+  "1 of 6 themes" warning of the classic table stay on every row (operator's request).
+- **Topics:** the period's selected posts not in a topic yet, with the reason; the
+  grouping as topic cards with dated posts and how many carousel versions used each; a
+  warning when the grouping shown does not cover the working period; Run clustering uses
+  the working period.
+- **Review & Approve:** one line per carousel (post and carousel together) with date,
+  author and post count; tabs To approve / Approved / Rejected / All; grouped by the period
+  covered, older versions folded. The editing/approval panel is the classic
+  `GeneratedDetail`, unchanged, now exported.
+- **A post's journey panel** opens from any post anywhere: each step, its date, and where
+  the post stopped.
+
+Verified against a local copy of production's data (read with `read_only`, loaded into the
+local Docker database only) as a local editor account: `npm run build` and `oxlint`
+clean, no console errors, numbers match production (Review 23 to approve / 7 approved / 30;
+last Collect 1 Nov 22:33, 160 new posts). The first build glued the stuck 2026-10-19 run
+to the 2026-11-01 Collect, because that run's `finished_at` is 2026-11-01; sessions are now
+measured start to start. **Nothing is deployed or applied;** the work is committed on
+`ui-post-journey`, not pushed (Netlify builds `phase6-frontend-binding`, which is unchanged).
+
+**Still to do, each only on the operator's explicit instruction:** the production dry run
+and apply of `0033`; deploying `generate` (the language rule — its effect shows only on a
+real, paid generation); merging and deploying the frontend; a Collect, so the 15-day
+window has posts again. Phase 3 of the plan — one "Find topics" action that anonymises and
+groups only the working period's posts — is not started.

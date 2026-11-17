@@ -1,16 +1,30 @@
+import { useState } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from './lib/useAuth'
 import { Login } from './components/Login'
 import { Layout } from './components/Layout'
+import { JourneyLayout } from './components/JourneyLayout'
 import { Posts } from './routes/Posts'
 import { Sources } from './routes/Sources'
 import { Objective } from './routes/Objective'
 import { Clusters } from './routes/Clusters'
 import { Review } from './routes/Review'
 import { Export } from './routes/Export'
+import { RatingJourney } from './routes/RatingJourney'
+import { TopicsJourney } from './routes/TopicsJourney'
+import { ReviewJourney } from './routes/ReviewJourney'
+import { readUiVersion, writeUiVersion, type UiVersion } from './lib/uiVersion'
+import { NEW_LAYOUT } from './lib/features'
 
 function App() {
   const { session, isEditor, loading, signOut } = useAuth()
+  const [ui, setUi] = useState<UiVersion>(readUiVersion)
+  const switchUi = () => {
+    const next: UiVersion = ui === 'journey' ? 'classic' : 'journey'
+    writeUiVersion(next)
+    setUi(next)
+  }
+  const classic = ui === 'classic'
 
   if (loading) {
     return (
@@ -61,15 +75,25 @@ function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route element={<Layout email={session.user.email ?? ''} />}>
+        <Route
+          element={
+            classic ? (
+              <Layout email={session.user.email ?? ''} onSwitchUi={NEW_LAYOUT ? switchUi : undefined} />
+            ) : (
+              <JourneyLayout email={session.user.email ?? ''} onSwitchUi={switchUi} />
+            )
+          }
+        >
           {/* Same pipeline order as the nav bar in Layout.tsx: collect,
-              configure, then the stages that read the configuration. */}
+              configure, then the stages that read the configuration. The
+              same paths serve both layouts, so links and bookmarks keep
+              working whichever one is chosen. */}
           <Route index element={<Navigate to="/sources" replace />} />
           <Route path="/sources" element={<Sources />} />
           <Route path="/objective" element={<Objective />} />
-          <Route path="/posts" element={<Posts />} />
-          <Route path="/clusters" element={<Clusters />} />
-          <Route path="/review" element={<Review />} />
+          <Route path="/posts" element={classic ? <Posts /> : <RatingJourney />} />
+          <Route path="/clusters" element={classic ? <Clusters /> : <TopicsJourney />} />
+          <Route path="/review" element={classic ? <Review /> : <ReviewJourney />} />
           <Route path="/export" element={<Export />} />
           <Route path="*" element={<Navigate to="/sources" replace />} />
         </Route>

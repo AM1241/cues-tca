@@ -32,7 +32,7 @@ type TraceLink = {
 // One reviewable output: a row of cluster_generation_reviews joined to the
 // immutable result it reviews. `output_type` decides which of the result's two
 // output columns this row is about.
-type ReviewRow = {
+export type ReviewRow = {
   result_id: string
   output_type: 'post' | 'carousel'
   status: string
@@ -240,7 +240,9 @@ function GeneratedReview() {
   )
 }
 
-function GeneratedDetail({
+// Exported so the new Review screen (ReviewJourney.tsx) edits, approves and
+// regenerates through exactly this component — one editor, two list layouts.
+export function GeneratedDetail({
   row,
   onChanged,
   onOpenResult,

@@ -24,3 +24,18 @@
  * hide per-cluster results while this is false.
  */
 export const PER_CLUSTER_GENERATION = false
+
+/**
+ * The new layout of 2026-11-17 (step strip, working period, Rating/Topics/Review
+ * reorganised around each post's journey — TCA_TRIAL_HANDOFF.md §9.6).
+ *
+ * The operator asked that the old version be kept so that we can go back to it.
+ * There are three ways, smallest first:
+ *   1. In the app: "switch to the classic screens" at the bottom of every page.
+ *      Per browser, nothing to deploy.
+ *   2. For everyone: set this to `false` and deploy. The classic screens come
+ *      back exactly as they were and the switch disappears. The new files stay
+ *      in the tree, unused.
+ *   3. In git: the tag `pre-ui-post-journey` is the code before any of this.
+ */
+export const NEW_LAYOUT = true
