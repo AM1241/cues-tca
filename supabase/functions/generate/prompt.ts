@@ -13,7 +13,20 @@
 import type { JsonSchemaFormat } from "../_shared/openai.ts";
 import type { GenerationConfigRow } from "./data.ts";
 
-export const PROMPT_VERSION = "generate_v4";
+export const PROMPT_VERSION = "generate_v5";
+
+/**
+ * The language rule, shared by both prompts. It used to say "Write in English."
+ * unconditionally, while the editorial brief (Settings → voice_style) is where an
+ * operator says which language they want. Tecnoalimenti's brief says to write in
+ * Italian, and from 2026-11-02 to 2026-11-06 four of seven publications came out
+ * in English and three in Italian: the model was given two opposite orders and
+ * picked one at random. The brief now decides, and English is only the default.
+ */
+export const LANGUAGE_RULE =
+  "- Write every part of the output (title, post, hashtags, slides, call to action) in the language the\n" +
+  "  editorial brief asks for. If the brief names no language, write in English. Do not switch\n" +
+  "  language to match the source posts.";
 
 /**
  * Fallback brief, derived from the operator's editorial_domain rather than
@@ -142,7 +155,7 @@ Rules:
 - Do not mention any specific company, brand, or person name. The source posts have already been
   anonymised — do not attempt to infer, guess, or reintroduce any real identity that was removed;
   refer only to the generic descriptions already present in the evidence (e.g. "${genericEntity}").
-- Write in English.
+${LANGUAGE_RULE}
 - Ground every claim in the evidence provided; do not invent facts not supported by it.
 - Use short paragraphs, a clear structure, and a publication-ready tone.
 - Keep the editorial voice strong, purposeful, and insight-driven; connect the cluster's posts
@@ -166,7 +179,7 @@ Rules:
 // the evidence can say "these five things are the same story", which is the
 // editorial judgement the tool exists to make.
 
-export const PUBLICATION_PROMPT_VERSION = "publication_v2";
+export const PUBLICATION_PROMPT_VERSION = "publication_v3";
 
 /**
  * Carousel length is 2 + themes, so the theme count is what bounds it. Eight
@@ -248,7 +261,7 @@ Rules:
   been anonymised — do not attempt to infer, guess, or reintroduce any real identity that was
   removed; refer only to the generic descriptions already present in the evidence
   (e.g. "${genericEntity}").
-- Write in English.
+${LANGUAGE_RULE}
 - Ground every claim in the evidence provided; do not invent facts not supported by it.
 - Do not flatten the themes into a list. If two themes genuinely disagree, say so — a
   publication that finds tension is more useful than one that finds harmony everywhere.
