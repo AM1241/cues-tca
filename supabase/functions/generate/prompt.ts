@@ -13,7 +13,7 @@
 import type { JsonSchemaFormat } from "../_shared/openai.ts";
 import type { GenerationConfigRow } from "./data.ts";
 
-export const PROMPT_VERSION = "generate_v5";
+export const PROMPT_VERSION = "generate_v6";
 
 /**
  * The language rule, shared by both prompts. It used to say "Write in English."
@@ -21,12 +21,32 @@ export const PROMPT_VERSION = "generate_v5";
  * operator says which language they want. Tecnoalimenti's brief says to write in
  * Italian, and from 2026-11-02 to 2026-11-06 four of seven publications came out
  * in English and three in Italian: the model was given two opposite orders and
- * picked one at random. The brief now decides, and English is only the default.
+ * picked one at random. With no language chosen in Settings, the brief decides,
+ * and English is only the default.
  */
 export const LANGUAGE_RULE =
   "- Write every part of the output (title, post, hashtags, slides, call to action) in the language the\n" +
   "  editorial brief asks for. If the brief names no language, write in English. Do not switch\n" +
   "  language to match the source posts.";
+
+/** Settings → Output language (configurations.output_language, 0034). */
+export const OUTPUT_LANGUAGES: Record<string, string> = { en: "English", it: "Italian" };
+
+/**
+ * An explicit output language, chosen in Settings, overrides the brief. Asked
+ * for in the call of 2026-11-06: a dedicated control, not wording in the brief.
+ * "Native, not translated" is there because the partner found the Italian
+ * stilted; the sources and theme names are often English.
+ */
+export function languageRule(config: Pick<GenerationConfigRow, "output_language">): string {
+  const name = config.output_language ? OUTPUT_LANGUAGES[config.output_language] : undefined;
+  if (!name) return LANGUAGE_RULE;
+  return (
+    `- Write every part of the output (title, post, hashtags, slides, call to action) in ${name}, whatever\n` +
+    `  language the editorial brief, the theme names or the source posts are in. Write natural, idiomatic\n` +
+    `  ${name} as a native ${name}-speaking editor would write for LinkedIn, not a word-for-word translation.`
+  );
+}
 
 /**
  * Fallback brief, derived from the operator's editorial_domain rather than
@@ -155,7 +175,7 @@ Rules:
 - Do not mention any specific company, brand, or person name. The source posts have already been
   anonymised — do not attempt to infer, guess, or reintroduce any real identity that was removed;
   refer only to the generic descriptions already present in the evidence (e.g. "${genericEntity}").
-${LANGUAGE_RULE}
+${languageRule(config)}
 - Ground every claim in the evidence provided; do not invent facts not supported by it.
 - Use short paragraphs, a clear structure, and a publication-ready tone.
 - Keep the editorial voice strong, purposeful, and insight-driven; connect the cluster's posts
@@ -179,7 +199,7 @@ ${LANGUAGE_RULE}
 // the evidence can say "these five things are the same story", which is the
 // editorial judgement the tool exists to make.
 
-export const PUBLICATION_PROMPT_VERSION = "publication_v3";
+export const PUBLICATION_PROMPT_VERSION = "publication_v4";
 
 /**
  * Carousel length is 2 + themes, so the theme count is what bounds it. Eight
@@ -261,7 +281,7 @@ Rules:
   been anonymised — do not attempt to infer, guess, or reintroduce any real identity that was
   removed; refer only to the generic descriptions already present in the evidence
   (e.g. "${genericEntity}").
-${LANGUAGE_RULE}
+${languageRule(config)}
 - Ground every claim in the evidence provided; do not invent facts not supported by it.
 - Do not flatten the themes into a list. If two themes genuinely disagree, say so — a
   publication that finds tension is more useful than one that finds harmony everywhere.

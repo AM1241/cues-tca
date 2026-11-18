@@ -511,6 +511,7 @@ export async function handleGenerate(req: Request, deps: GenerateDeps = {}): Pro
       voice_tone: config.voice_tone,
       voice_audience: config.voice_audience,
       voice_style: config.voice_style,
+      output_language: config.output_language ?? null,
     };
 
     // ---- The publication: one text whose sections are the themes -----------

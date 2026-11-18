@@ -25,6 +25,8 @@ type Draft = {
   voice_tone: string
   voice_audience: string
   voice_style: string
+  /** '' = follow the editorial brief (English by default). See 0034. */
+  output_language: '' | 'en' | 'it'
   min_relevance_score: number
   cluster_similarity_threshold: number
   min_cluster_size: number
@@ -66,6 +68,7 @@ function toDraft(c: Config, themes: Theme[]): Draft {
     voice_tone: c.voice_tone ?? '',
     voice_audience: c.voice_audience ?? '',
     voice_style: c.voice_style ?? '',
+    output_language: c.output_language === 'en' || c.output_language === 'it' ? c.output_language : '',
     min_relevance_score: Number(c.min_relevance_score),
     cluster_similarity_threshold: Number(c.cluster_similarity_threshold),
     min_cluster_size: Number(c.min_cluster_size),
@@ -144,6 +147,7 @@ export function Objective() {
         voice_tone: draft.voice_tone.trim() || null,
         voice_audience: draft.voice_audience.trim() || null,
         voice_style: draft.voice_style.trim() || null,
+        output_language: draft.output_language || null,
         min_relevance_score: draft.min_relevance_score,
         cluster_similarity_threshold: draft.cluster_similarity_threshold,
         min_cluster_size: draft.min_cluster_size,
@@ -461,6 +465,27 @@ export function Objective() {
         reaches={['Topics']}
         detail="Read only when a post or carousel is actually written on the Topics screen's Create the carousel button. Nothing here touches scoring or anonymisation."
       />
+
+      {/* A dedicated control, asked for in the call of 2026-11-06: language
+          written into the brief gave English in 4 of 7 publications. */}
+      <Section
+        title="Output language"
+        hint="The language of the post and the carousel. It overrides anything the brief says about language; the source posts can be in any language."
+      >
+        <select
+          value={draft.output_language}
+          onChange={(e) => patch({ output_language: e.target.value as Draft['output_language'] })}
+          className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+          aria-label="Output language"
+        >
+          <option value="it">Italiano</option>
+          <option value="en">English</option>
+          <option value="">As the editorial brief says (English if it names none)</option>
+        </select>
+        <p className="mt-2 text-xs text-slate-500">
+          Applies to the next post or carousel you create; nothing already written changes.
+        </p>
+      </Section>
 
       <Section
         title="Editorial brief"

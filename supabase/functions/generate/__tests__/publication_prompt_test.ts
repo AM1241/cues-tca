@@ -11,6 +11,7 @@
 import { assert, assertEquals, assertStringIncludes, assertThrows } from "jsr:@std/assert@1.0.19";
 import {
   buildPublicationPrompt,
+  LANGUAGE_RULE,
   MAX_PUBLICATION_THEMES,
   type PublicationTheme,
   type RevisionContext,
@@ -56,6 +57,28 @@ function output(slideCount: number): Record<string, unknown> {
     carousel: { title: "T", slides: slides(slideCount), caption: "c", cta: "c" },
   };
 }
+
+// Output language (0034). The brief route alone gave 4 English publications of 7
+// for a brief asking for Italian; the setting has to win, and the old fixed
+// "Write in English." must never come back next to it.
+Deno.test("Italian chosen in Settings: the prompt asks for Italian, whatever the brief says", () => {
+  const prompt = buildPublicationPrompt(themes, { ...config, voice_style: "Write in English.", output_language: "it" }, period);
+  assertStringIncludes(prompt, "in Italian, whatever");
+  assertStringIncludes(prompt, "native Italian-speaking editor");
+  assert(!prompt.includes(LANGUAGE_RULE), "the brief-decides rule is replaced, not added");
+  assert(!prompt.includes("- Write in English."), "no fixed English order alongside");
+});
+
+Deno.test("no language chosen: the brief decides, English by default", () => {
+  const prompt = buildPublicationPrompt(themes, { ...config, output_language: null }, period);
+  assertStringIncludes(prompt, LANGUAGE_RULE);
+  assert(!prompt.includes("- Write in English."));
+});
+
+Deno.test("an unknown language code falls back to the brief rather than inventing one", () => {
+  const prompt = buildPublicationPrompt(themes, { ...config, output_language: "xx" }, period);
+  assertStringIncludes(prompt, LANGUAGE_RULE);
+});
 
 Deno.test("every selected theme appears in the prompt, in order", () => {
   const prompt = buildPublicationPrompt(themes, config, period);

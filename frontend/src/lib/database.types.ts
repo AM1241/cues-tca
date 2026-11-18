@@ -775,6 +775,7 @@ export type Database = {
           keep_public_bodies: boolean
           min_cluster_size: number
           min_relevance_score: number
+          output_language: string | null
           scoring_model: string
           scoring_model_snapshot: string
           themes: Json
@@ -796,6 +797,7 @@ export type Database = {
           keep_public_bodies?: boolean
           min_cluster_size?: number
           min_relevance_score?: number
+          output_language?: string | null
           scoring_model?: string
           scoring_model_snapshot?: string
           themes?: Json
@@ -817,6 +819,7 @@ export type Database = {
           keep_public_bodies?: boolean
           min_cluster_size?: number
           min_relevance_score?: number
+          output_language?: string | null
           scoring_model?: string
           scoring_model_snapshot?: string
           themes?: Json
