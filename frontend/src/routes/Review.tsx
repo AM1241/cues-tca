@@ -698,7 +698,8 @@ function DeleteResultDialog({
 // -----------------------------------------------------------------------------
 // Legacy — the pre-cloud editorial_assets, unchanged
 // -----------------------------------------------------------------------------
-function LegacyReview() {
+// Exported for the new Review screen's Legacy tab (ReviewJourney.tsx).
+export function LegacyReview() {
   const [assets, setAssets] = useState<Asset[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)

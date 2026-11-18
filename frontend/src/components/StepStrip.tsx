@@ -2,7 +2,8 @@ import { Link, useLocation } from 'react-router-dom'
 import { fmtDayTime, fmtPeriod, shortName, type PeriodChoice } from '../lib/journey'
 import { useJourney } from '../lib/journey-context'
 
-const PRESETS = [7, 15, 30, 90]
+// 3 days: "we need recent posts, e.g. only the last three days" (call of 2026-11-06).
+const PRESETS = [3, 7, 15, 30, 90]
 
 function PeriodPicker() {
   const { choice, period, setChoice } = useJourney()

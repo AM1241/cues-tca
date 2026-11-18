@@ -1436,6 +1436,56 @@ measured start to start.
 | Frontend | `ui-post-journey` fast-forwarded into `phase6-frontend-binding` and pushed (`9cbc3f8..0d926e0`); tag `pre-ui-post-journey` pushed too. Netlify serves `index-D2TF_EQf.js`, the same hash as the local `npm run build`. |
 | Collect | Signed in once as `hzafeiris@f-in.eu`, pressed Collect all enabled, signed out. 14 of 14 sources, 15:37–15:40 Athens, 186 new posts (750 → 936), 30 provider requests, no source run twice, no AI call (scoring and anonymise result counts unchanged). The new Rating showed it at once: "Last Collect: 17 Nov, 15:37 · 186 new posts", 186 in the 15-day period, next step Score now. |
 
+### 9.7 Follow-ups from the call's minutes — branch `ui-call-followups`
+
+The transcript and Gabriele's LLM-written minutes turned up on 2026-11-18
+(`CUES TCA.docx`, `TCA-FINT minute 6-11-2026.docx`, one level above the repo). They match
+§9.6, and add: a dedicated output-language control, promised by Haris in the call; better
+Italian (a larger model was discussed); scoring without a click per ten posts; a time filter
+as short as three days; finding a new carousel in Review; carousel font 14 → 18 and logos on
+top, **deferred** until Kiki's visual guidelines; IT/EN scoring consistency; an outside
+usability tester; calls every two weeks, next Friday 2026-11-20 on Teams. The minutes say
+Legacy holds earlier carousel versions; it holds the 15 pre-cloud assets, and earlier
+versions are the superseded drafts.
+
+**The "button that disappeared" in the call,** reconstructed from production: Anonymise now
+had just processed 5 old posts (queue order, fixed by 0033) and Redo all had reset almost
+every anonymisation, so Run clustering found nothing eligible; the classic Topics then says
+"Clustering complete: 0 cluster(s)" in green and sets the selected run to null
+(`Clusters.tsx` `runClustering`), which hides "Create the carousel". The new Topics reports
+"nothing to group" as an error and keeps the selection.
+
+**IT/EN scoring, read-only 2026-11-18:** English posts average 24 (28% selected), Italian 65
+(76%), but European Commission alone is 141 English posts averaging 15. English food sources
+score as high as Italian ones (EFSA 71, EFFoST 80, Foodvalley 76; Tecnoalimenti 76 EN vs 72
+IT). No sign of a language bias; the source mix explains it.
+
+**Built and tested locally, not in production:**
+
+- **`0034_output_language.sql`:** `configurations.output_language` (`en`/`it`, NULL = the
+  brief decides). Not in `scoring_config_snapshot`, so no scoring rotation. Settings has an
+  "Output language" select above the brief (classic and new layouts share Settings).
+  `generate` reads it (`languageRule`; versions `generate_v6` / `publication_v4`) and asks
+  for natural Italian written by a native editor, not a translation. Three new prompt tests;
+  `generate` 26, `anonymize-worker` 35, `cluster` 20 green from a clean reset.
+  `database.types.ts` was edited by hand for the one column: a regenerated file also carried
+  unrelated drift and dropped `__InternalSupabase`.
+- **Rating:** "Score all N in this period" calls `score-worker` ten at a time until the
+  period has no unscored post, with a confirmation naming the count and the time, progress,
+  and Stop; it stops on its own when a call scores nothing of the period (the queue serving
+  other posts), on an error, or when the screen is left. Checked in the browser with the
+  function mocked: 106 posts in 11 calls; a queue serving other posts stopped after one
+  call. "Score 10" stays; Queue unscored and Re-score all moved under Advanced with plain
+  explanations; "Last 3 days" added to the working period.
+- **Topics → Review:** after Create, "Open it in Review" goes to that draft; Review selects
+  it, switches to its status tab, unfolds its group, scrolls to it; carousels made in the
+  last 24 hours are marked NEW. Checked with an older, folded version.
+- **Review:** the Legacy tab is back in the new layout, labelled "Legacy (old system)", with
+  a line saying earlier carousel versions are not there.
+
+**Order matters when this goes live:** `0034` first — both the new `generate` (it selects
+`output_language`) and the new Settings (it writes it) fail without the column.
+
 **Next, for the editor:** 704 posts wait to be scored (186 of them this fortnight, newest
 first, ten per click), then Anonymise now (new posts first since 0033) and Run clustering
 over the working period. The 100 re-anonymisations left by Redo all are now served last and

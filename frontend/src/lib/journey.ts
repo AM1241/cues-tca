@@ -470,8 +470,8 @@ export function placePost(
       topic: null,
       carousels,
       why: ctx.scoringQueued.has(p.id)
-        ? 'Not scored yet — waiting in the scoring queue. Press Score now in Rating.'
-        : 'Not scored yet, and not in the queue. Press Queue unscored in Rating.',
+        ? 'Not scored yet — waiting in the scoring queue. Score all in Rating scores it.'
+        : 'Not scored yet, and not in the queue. Use Queue unscored (Rating → Advanced).',
     }
   }
   if (p.score < ctx.threshold) {
@@ -615,7 +615,7 @@ export function nextStep(s: Summary, ctx: JourneyContext, period: Period): NextS
   }
   if (s.unscored > 0) {
     return {
-      text: `${s.unscored} post${s.unscored === 1 ? ' is' : 's are'} not scored yet. Each Score now scores 10, newest first.`,
+      text: `${s.unscored} post${s.unscored === 1 ? ' is' : 's are'} not scored yet. Score all scores them ten at a time, newest first.`,
       to: '/posts',
       action: 'Score in Rating',
     }

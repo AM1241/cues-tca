@@ -41,6 +41,7 @@ export function TopicsJourney() {
   const [anonymising, setAnonymising] = useState(false)
   const [publishing, setPublishing] = useState(false)
   const [anonBatch, setAnonBatch] = useState(5)
+  const [created, setCreated] = useState<{ id: string; title: string } | null>(null)
   // "Redo all" un-anonymises everything at once. On production it had reset 105
   // of 110 posts by 2026-11-17, with no record of who pressed it — so it asks.
   const [confirmingRedo, setConfirmingRedo] = useState(false)
@@ -216,7 +217,11 @@ export function TopicsJourney() {
     setPublishing(false)
     if (error) return toast.error(await functionErrorMessage(error, 'The post and carousel failed to generate.'))
     if (data?.ok === false) return toast.error(data.error ?? 'The post and carousel failed to generate.')
-    toast.success('Drafted — approve it in Review.')
+    // "Now the post will be in Review — OK, how can I find it?" (call of
+    // 2026-11-06). The answer is a link to exactly this draft.
+    const pub = data?.publication as { generation_result_id?: string; title?: string } | undefined
+    if (pub?.generation_result_id) setCreated({ id: pub.generation_result_id, title: pub.title ?? 'New carousel' })
+    toast.success('Drafted — open it in Review to edit and approve.')
     await refresh()
   }
 
@@ -334,6 +339,19 @@ export function TopicsJourney() {
                   {publishing ? 'Writing…' : runCarousels.length > 0 ? 'Create another version' : 'Create the carousel'}
                 </button>
               </div>
+              {created && (
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-emerald-200 bg-white px-3 py-2">
+                  <p className="text-sm text-slate-800">
+                    <span className="font-medium text-emerald-700">Draft ready:</span> «{created.title}»
+                  </p>
+                  <Link
+                    to={`/review?result=${created.id}`}
+                    className="rounded-md bg-emerald-600 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-500"
+                  >
+                    Open it in Review →
+                  </Link>
+                </div>
+              )}
             </div>
           )}
 

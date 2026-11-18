@@ -200,9 +200,9 @@ export function PostJourneyPanel({
                 >
                   {score === null ? (
                     ctx.scoringQueued.has(rawPostId) ? (
-                      'Waiting in the scoring queue. Score now in Rating scores 10 at a time, newest posts first.'
+                      'Waiting in the scoring queue. Score all in Rating scores the period, newest posts first.'
                     ) : (
-                      'Not in the scoring queue. Queue unscored in Rating adds it.'
+                      'Not in the scoring queue. Queue unscored (Rating → Advanced) adds it.'
                     )
                   ) : (
                     <>

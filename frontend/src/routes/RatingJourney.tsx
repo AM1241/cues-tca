@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useToast } from '../components/toast-context'
@@ -15,7 +15,7 @@ type Sort = 'newest' | 'score'
 const TABS: { key: Tab; label: string; hint: string }[] = [
   { key: 'forward', label: 'Going forward', hint: 'Selected: these go on to Topics' },
   { key: 'stopped', label: 'Stopped here', hint: 'Scored below the threshold' },
-  { key: 'unscored', label: 'Not scored yet', hint: 'Waiting for Score now' },
+  { key: 'unscored', label: 'Not scored yet', hint: 'Waiting to be scored' },
   { key: 'all', label: 'All', hint: 'Everything published in the period' },
 ]
 
@@ -50,7 +50,15 @@ export function RatingJourney() {
   const [scoring, setScoring] = useState(false)
   const [queueing, setQueueing] = useState(false)
   const [confirmingRescore, setConfirmingRescore] = useState(false)
+  const [confirmingAll, setConfirmingAll] = useState(false)
   const [justScored, setJustScored] = useState<string[]>([])
+  // Progress of "Score all"; note says how it ended.
+  const [bulk, setBulk] = useState<{ done: number; total: number; note: string | null } | null>(null)
+  const stopRef = useRef(false)
+  // Leaving the screen stops the loop after the batch in flight.
+  useEffect(() => () => {
+    stopRef.current = true
+  }, [])
 
   function setParam(key: string, value: string) {
     const next = new URLSearchParams(params)
@@ -86,6 +94,8 @@ export function RatingJourney() {
   }, [base, tab, sort])
 
   const newCount = (posts ?? []).filter((p) => p.isNew).length
+  // Score all works on the whole period, whatever the source / NEW filters show.
+  const unscoredInPeriod = (posts ?? []).filter((p) => p.stage === 'unscored').length
   const scoredSet = useMemo(() => new Set(justScored), [justScored])
 
   // What the last Score now did, said in terms of this screen.
@@ -101,30 +111,89 @@ export function RatingJourney() {
   // Actions — the same calls as the classic Rating screen (routes/Posts.tsx)
   // ---------------------------------------------------------------------------
 
-  async function scoreNow() {
-    if (scoring) return
-    setScoring(true)
+  /**
+   * One call to score-worker: at most ten jobs, never-scored posts first and
+   * newest first (0031). The cap is server policy (MANUAL_BATCH_CAP), so the
+   * browser never sends a batch size; "Score all" below is many of these calls.
+   */
+  async function scoreBatch(): Promise<
+    | { ok: true; jobsRead: number; scored: string[]; failed: number }
+    | { ok: false; message: string }
+  > {
     const { data: sessionData } = await supabase.auth.getSession()
     const token = sessionData.session?.access_token
     const { data, error } = await supabase.functions.invoke('score-worker', {
       body: {},
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     })
-    setScoring(false)
-    if (error) return toast.error(await functionErrorMessage(error, 'Scoring failed'))
-    if (data?.ok === false) return toast.error(data.error ?? 'Scoring failed')
-    const t = data?.totals
-    if (!t || t.jobs_read === 0) return toast.success('Scoring queue is empty — nothing to score.')
-    const parts = [`${t.scored} scored`]
-    if (t.dead_lettered) parts.push(`${t.dead_lettered} failed`)
-    if (t.retried) parts.push(`${t.retried} retrying`)
-    const summary = parts.join(', ')
-    if (t.scored > 0) toast.success(summary)
-    else toast.error(summary)
-    const ids = ((data.results ?? []) as { raw_post_id: string; status: string }[])
+    if (error) return { ok: false, message: await functionErrorMessage(error, 'Scoring failed') }
+    if (data?.ok === false) return { ok: false, message: data.error ?? 'Scoring failed' }
+    const t = data?.totals ?? { jobs_read: 0, dead_lettered: 0 }
+    const scored = ((data?.results ?? []) as { raw_post_id: string; status: string }[])
       .filter((r) => r.status === 'scored')
       .map((r) => r.raw_post_id)
-    setJustScored(ids)
+    return { ok: true, jobsRead: t.jobs_read ?? 0, scored, failed: t.dead_lettered ?? 0 }
+  }
+
+  async function scoreNow() {
+    if (scoring) return
+    setScoring(true)
+    const r = await scoreBatch()
+    setScoring(false)
+    if (!r.ok) return toast.error(r.message)
+    if (r.jobsRead === 0) return toast.success('Scoring queue is empty — nothing to score.')
+    const summary = `${r.scored.length} scored${r.failed ? `, ${r.failed} failed` : ''}`
+    if (r.scored.length > 0) toast.success(summary)
+    else toast.error(summary)
+    setJustScored(r.scored)
+    await refresh()
+  }
+
+  /**
+   * Score every unscored post of the working period, ten per call, until none
+   * is left. Asked for in the call of 2026-11-06 ("do I need to click again for
+   * each ten?"). It stops on its own when the period is done, when a call
+   * scores nothing of this period (the queue has moved on to other posts), on
+   * an error, on Stop, or when the editor leaves the screen.
+   */
+  async function scoreAll() {
+    if (scoring || !posts) return
+    const targets = new Set(posts.filter((p) => p.stage === 'unscored').map((p) => p.id))
+    if (targets.size === 0) return
+    stopRef.current = false
+    setScoring(true)
+    setBulk({ done: 0, total: targets.size, note: null })
+    const scoredAll: string[] = []
+    let done = 0
+    let note: string | null = null
+    const maxCalls = Math.ceil(targets.size / 10) + 3
+    for (let i = 0; i < maxCalls; i++) {
+      if (stopRef.current) {
+        note = 'Stopped. The rest are still in the queue.'
+        break
+      }
+      const r = await scoreBatch()
+      if (!r.ok) {
+        note = `Stopped by an error: ${r.message}`
+        break
+      }
+      scoredAll.push(...r.scored)
+      const here = r.scored.filter((id) => targets.has(id)).length
+      done += here
+      setBulk({ done, total: targets.size, note: null })
+      if (r.jobsRead === 0) {
+        note = 'The scoring queue is empty.'
+        break
+      }
+      if (done >= targets.size) break
+      if (here === 0) {
+        note = 'The queue is now serving posts outside this period, so scoring stopped here.'
+        break
+      }
+    }
+    setScoring(false)
+    setBulk({ done, total: targets.size, note: note ?? `Done: ${done} of ${targets.size} scored.` })
+    setJustScored(scoredAll)
     await refresh()
   }
 
@@ -140,11 +209,11 @@ export function RatingJourney() {
     } else if (!r?.enqueued) {
       toast.success(
         r?.queued_total
-          ? `Nothing new to queue — ${r.queued_total} post(s) already waiting. Press Score now to process them.`
+          ? `Nothing new to queue — ${r.queued_total} post(s) already waiting. Press Score all to process them.`
           : 'Nothing to queue — every post already has a score.',
       )
     } else {
-      toast.success(`${r.enqueued} post(s) queued. Press Score now to process them.`)
+      toast.success(`${r.enqueued} post(s) queued. Press Score all to process them.`)
     }
     await refresh()
   }
@@ -174,19 +243,50 @@ export function RatingJourney() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button onClick={() => queue('unscored')} disabled={queueing || scoring} title="Put every post that has never been scored in the queue">
-            {queueing ? 'Queueing…' : 'Queue unscored'}
+          <Button onClick={scoreNow} disabled={scoring || queueing} title="Scores the next ten posts in line, newest first">
+            Score 10
           </Button>
-          <Button onClick={() => setConfirmingRescore(true)} disabled={queueing || scoring} title="Only after changing Settings">
-            Re-score all…
-          </Button>
-          <Button variant="primary" onClick={scoreNow} disabled={scoring || queueing}>
-            {scoring ? 'Scoring…' : 'Score now (10)'}
+          <Button
+            variant="primary"
+            onClick={() => setConfirmingAll(true)}
+            disabled={scoring || queueing || unscoredInPeriod === 0}
+            title="Scores every post of the working period that has no score yet"
+          >
+            {scoring && bulk && !bulk.note
+              ? `Scoring ${bulk.done} of ${bulk.total}…`
+              : scoring
+                ? 'Scoring…'
+                : `Score all ${unscoredInPeriod} in this period`}
           </Button>
         </div>
       </div>
 
-      {scoredSummary && (
+      {bulk && (
+        <div className="mb-4 rounded-md border border-slate-200 bg-white px-4 py-3 text-sm">
+          <div className="flex items-center justify-between gap-4">
+            <span className="text-slate-700">
+              {bulk.note ?? `Scoring this period: ${bulk.done} of ${bulk.total}. Keep this screen open.`}
+            </span>
+            {scoring ? (
+              <button className="text-xs font-medium text-slate-500 underline" onClick={() => (stopRef.current = true)}>
+                stop after this batch
+              </button>
+            ) : (
+              <button className="text-xs text-slate-500 underline" onClick={() => setBulk(null)}>
+                dismiss
+              </button>
+            )}
+          </div>
+          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
+            <div
+              className="h-full rounded-full bg-emerald-500 transition-all"
+              style={{ width: `${bulk.total ? Math.round((100 * bulk.done) / bulk.total) : 0}%` }}
+            />
+          </div>
+        </div>
+      )}
+
+      {scoredSummary && !scoring && (
         <div className="mb-4 flex items-start justify-between gap-4 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm text-emerald-900">
           <p>
             <span className="font-medium">{scoredSummary.total} scored just now</span>
@@ -283,6 +383,62 @@ export function RatingJourney() {
         )}
       </div>
 
+      <details className="mt-6 rounded-md border border-slate-200 bg-white">
+        <summary className="cursor-pointer px-3 py-2 text-sm font-semibold text-slate-700">Advanced</summary>
+        <div className="space-y-4 border-t border-slate-200 p-3 text-sm">
+          <div className="flex items-start gap-4">
+            <Button onClick={() => queue('unscored')} disabled={queueing || scoring} className="shrink-0">
+              {queueing ? 'Queueing…' : 'Queue unscored'}
+            </Button>
+            <p className="text-xs text-slate-500">
+              New posts join the scoring line by themselves when they are collected. Use this only if a post says it is
+              not in the queue, for example after a failed attempt. It costs nothing by itself.
+            </p>
+          </div>
+          <div className="flex items-start gap-4">
+            <Button onClick={() => setConfirmingRescore(true)} disabled={queueing || scoring} className="shrink-0">
+              Re-score all…
+            </Button>
+            <p className="text-xs text-slate-500">
+              Only after changing the themes or the domain in Settings. Every post ever collected is scored again, and
+              each one is a paid AI call.
+            </p>
+          </div>
+        </div>
+      </details>
+
+      {confirmingAll && (
+        <Modal onClose={() => setConfirmingAll(false)}>
+          <h2 className="text-lg font-semibold text-slate-900">Score all {unscoredInPeriod} posts of this period?</h2>
+          <div className="mt-3 space-y-2 text-sm text-slate-600">
+            <p>
+              The posts published in the working period that have no score yet are scored ten at a time, newest first,
+              until none is left. Each post is one paid AI call.
+            </p>
+            <p>
+              It takes about {Math.max(1, Math.round((Math.ceil(unscoredInPeriod / 10) * 22) / 60))} minute
+              {Math.round((Math.ceil(unscoredInPeriod / 10) * 22) / 60) > 1 ? 's' : ''}. Keep this screen open; you can stop
+              it after any batch.
+            </p>
+          </div>
+          <div className="mt-6 flex justify-end gap-3">
+            <Button variant="ghost" className="px-4 py-2" onClick={() => setConfirmingAll(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              size="md"
+              onClick={() => {
+                setConfirmingAll(false)
+                scoreAll()
+              }}
+            >
+              Score {unscoredInPeriod} posts
+            </Button>
+          </div>
+        </Modal>
+      )}
+
       {confirmingRescore && (
         <Modal onClose={() => setConfirmingRescore(false)}>
           <h2 className="text-lg font-semibold text-slate-900">Re-score every post?</h2>
@@ -292,7 +448,7 @@ export function RatingJourney() {
               a paid AI call when it is processed.
             </p>
             <p>
-              You only need this after changing Settings. To score new posts, use <strong>Score now</strong>.
+              You only need this after changing Settings. To score new posts, use <strong>Score all</strong>.
             </p>
           </div>
           <div className="mt-6 flex justify-end gap-3">

@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { Spinner, EmptyState, ErrorNotice, Card } from '../components/ui'
-import { GeneratedDetail, type ReviewRow } from './Review'
+import { Spinner, EmptyState, ErrorNotice, Card, TabSwitch } from '../components/ui'
+import { GeneratedDetail, LegacyReview, type ReviewRow } from './Review'
 import { PER_CLUSTER_GENERATION } from '../lib/features'
 import { useJourney } from '../lib/journey-context'
 import { combineStatus, fmtCalendarDay, fmtDay, fmtDayTime, postTitle, shortName, type ReviewStatus } from '../lib/journey'
@@ -88,8 +88,15 @@ export function ReviewJourney() {
   const [showSuperseded, setShowSuperseded] = useState(false)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [output, setOutput] = useState<'carousel' | 'post'>('carousel')
+  // Legacy: the 15 texts migrated from the pre-cloud system, still reviewable.
+  // Not earlier carousel versions — those are the "older versions" below.
+  const [view, setView] = useState<'generated' | 'legacy'>('generated')
   const selectedId = params.get('result')
   const runFilter = params.get('run')
+  // A selection made by clicking the list needs no focusing; one that arrives
+  // in the URL (Topics' "Open it in Review", the journey panel) does.
+  const fromListRef = useRef<string | null>(null)
+  const focusedRef = useRef<string | null>(null)
 
   const load = useCallback(async () => {
     const { data, error } = await supabase
@@ -184,10 +191,29 @@ export function ReviewJourney() {
   const supersededCount = items.filter((i) => i.status === 'superseded').length
 
   function select(resultId: string) {
+    fromListRef.current = resultId
     const next = new URLSearchParams(params)
     next.set('result', resultId)
     setParams(next, { replace: true })
   }
+
+  // Arriving with ?result=: show that carousel wherever it sits — its status
+  // tab, its group unfolded, scrolled into view.
+  useEffect(() => {
+    if (!selectedId || focusedRef.current === selectedId || fromListRef.current === selectedId) return
+    const it = items.find((i) => i.resultId === selectedId)
+    if (!it) return
+    focusedRef.current = selectedId
+    setView('generated')
+    if (it.status === 'superseded') {
+      setShowSuperseded(true)
+      setTab('all')
+    } else {
+      setTab(it.status)
+    }
+    setExpanded((prev) => new Set(prev).add(it.runId))
+    setTimeout(() => document.getElementById(`item-${selectedId}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 100)
+  }, [selectedId, items])
 
   // Land on the carousel when it exists; a post-only result has only the post.
   const selectedOutput: 'carousel' | 'post' = selected
@@ -205,14 +231,29 @@ export function ReviewJourney() {
     <div>
       <div className="mb-4 flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold">Review & Approve</h1>
+          <div className="flex items-center gap-4">
+            <h1 className="text-xl font-semibold">Review & Approve</h1>
+            <TabSwitch
+              value={view}
+              onChange={setView}
+              options={[
+                ['generated', 'Carousels'],
+                ['legacy', 'Legacy (old system)'],
+              ]}
+            />
+          </div>
           <p className="mt-1 max-w-2xl text-sm text-slate-500">
-            Each line is one carousel with its LinkedIn post. Versions made from the same topics are kept together under the
-            period they cover. Approved carousels can be downloaded in Export.
+            {view === 'generated'
+              ? 'Each line is one carousel with its LinkedIn post. Versions made from the same topics are kept together under the period they cover — earlier versions are folded under the newest. Approved carousels can be downloaded in Export.'
+              : 'Texts made by the system that came before this one. Earlier versions of your carousels are not here: they are under each carousel in the Carousels tab.'}
           </p>
         </div>
       </div>
 
+      {view === 'legacy' ? (
+        <LegacyReview />
+      ) : (
+      <>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <div className="inline-flex overflow-hidden rounded-md border border-slate-300 text-sm" role="tablist">
           {TABS.map((t) => (
@@ -347,18 +388,29 @@ export function ReviewJourney() {
           )}
         </div>
       )}
+      </>
+      )}
     </div>
   )
 }
 
+const NEW_FOR_MS = 24 * 3_600_000
+
 function ItemCard({ item, active, by, onClick }: { item: Item; active: boolean; by: string; onClick: () => void }) {
+  const isNew = Date.now() - Date.parse(item.createdAt) < NEW_FOR_MS
   return (
     <button
+      id={`item-${item.resultId}`}
       onClick={onClick}
-      className={`w-full rounded-lg border bg-white p-3 text-left transition ${active ? 'border-slate-900' : 'border-slate-200 hover:border-slate-400'}`}
+      className={`w-full rounded-lg border bg-white p-3 text-left transition ${active ? 'border-slate-900 ring-2 ring-slate-900/10' : 'border-slate-200 hover:border-slate-400'}`}
     >
       <div className="flex items-baseline justify-between gap-2 text-xs text-slate-500">
         <span>
+          {isNew && (
+            <span className="mr-1.5 rounded bg-blue-600 px-1.5 py-px text-[10px] font-bold tracking-wide text-white" title="Made in the last 24 hours">
+              NEW
+            </span>
+          )}
           {fmtDayTime(item.createdAt)} · {by}
         </span>
         <span>
