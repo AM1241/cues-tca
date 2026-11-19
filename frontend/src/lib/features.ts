@@ -39,3 +39,16 @@ export const PER_CLUSTER_GENERATION = false
  *   3. In git: the tag `pre-ui-post-journey` is the code before any of this.
  */
 export const NEW_LAYOUT = true
+
+/**
+ * The Legacy tabs in Review and Export (both layouts): the 15 texts migrated
+ * from the pre-cloud system (`editorial_assets`, all `is_legacy`; 9 of them are
+ * the old tool's simulated fallback, not AI output). Nothing in the current
+ * pipeline writes there.
+ *
+ * Hidden on 2026-11-19 at the operator's request: in the call of 2026-11-06 the
+ * tab was taken for "earlier carousel versions", and it is of no use to the
+ * partner. Only the tabs are hidden — the rows stay in the database, and setting
+ * this to `true` and deploying brings the tabs back as they were.
+ */
+export const SHOW_LEGACY = false

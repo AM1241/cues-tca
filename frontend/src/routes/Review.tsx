@@ -5,7 +5,7 @@ import { useAuth } from '../lib/useAuth'
 import { useToast } from '../components/toast-context'
 import { Spinner, EmptyState, ErrorNotice, Button, Badge, Card, Modal, TabSwitch, type BadgeTone } from '../components/ui'
 import type { Database, Json } from '../lib/database.types'
-import { PER_CLUSTER_GENERATION } from '../lib/features'
+import { PER_CLUSTER_GENERATION, SHOW_LEGACY } from '../lib/features'
 import {
   PostOutputCard,
   CarouselOutputCard,
@@ -88,14 +88,16 @@ export function Review() {
     <div>
       <div className="mb-6 flex items-center gap-6">
         <h1 className="text-xl font-semibold">Review & Approve</h1>
-        <TabSwitch
-          value={tab}
-          onChange={setTab}
-          options={[
-            ['generated', 'Generated'],
-            ['legacy', 'Legacy'],
-          ]}
-        />
+        {SHOW_LEGACY && (
+          <TabSwitch
+            value={tab}
+            onChange={setTab}
+            options={[
+              ['generated', 'Generated'],
+              ['legacy', 'Legacy'],
+            ]}
+          />
+        )}
       </div>
 
       {tab === 'generated' ? <GeneratedReview /> : <LegacyReview />}

@@ -20,7 +20,7 @@ is where drift between the product and the Word user guide is recorded.
 | Branch | `phase6-frontend-binding` — **all current work is here, not on `main`** |
 | Last commit deployed | see `git log origin/phase6-frontend-binding` — last code change 2026-11-19 (`a885eb6`), §9.7 |
 | Supabase project | `bxaovkzemfyxrxbcqask` (`cues-tca`, eu-west-1) |
-| Production frontend | cues-tca.netlify.app, deployed from `phase6-frontend-binding` by Netlify on push. New "journey" layout since 2026-11-17 (§9.6), call follow-ups since 2026-11-19 (§9.7); bundle `index-BvReRa9l.js` |
+| Production frontend | cues-tca.netlify.app, deployed from `phase6-frontend-binding` by Netlify on push. New "journey" layout since 2026-11-17 (§9.6), call follow-ups and Legacy hidden since 2026-11-19 (§9.7); bundle `index-D4OLJDd3.js` |
 | Migrations | applied through **`0034`**, over the Management API, not `db push` — see §9.4–§9.7 |
 | Edge Functions | `ingest` v10, `score-worker` v12, `anonymize-worker` v13, `cluster` v7, `generate` **v9** (`generate_v6` / `publication_v4`), `discover-brands` v7, `slide-images` v3 |
 
@@ -1500,6 +1500,12 @@ IT). No sign of a language bias; the source mix explains it.
 
 `output_language` is still NULL in production, so generation behaves as before (the brief
 decides, English by default) until someone picks a language in Settings.
+
+**Legacy hidden, same day, at the operator's request.** Once it was explained that Legacy is
+the 15 pre-cloud texts (9 of them the old tool's simulated fallback) and never receives
+anything new, the operator asked not to show it. `SHOW_LEGACY = false` in
+`lib/features.ts` hides the Legacy tabs of Review (both layouts) and Export; the rows stay in
+`editorial_assets`, and `true` plus a deploy brings the tabs back.
 
 **Next, for the editor:** 704 posts wait to be scored (186 of them this fortnight, newest
 first, ten per click), then Anonymise now (new posts first since 0033) and Run clustering

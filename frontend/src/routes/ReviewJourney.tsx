@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { Spinner, EmptyState, ErrorNotice, Card, TabSwitch } from '../components/ui'
 import { GeneratedDetail, LegacyReview, type ReviewRow } from './Review'
-import { PER_CLUSTER_GENERATION } from '../lib/features'
+import { PER_CLUSTER_GENERATION, SHOW_LEGACY } from '../lib/features'
 import { useJourney } from '../lib/journey-context'
 import { combineStatus, fmtCalendarDay, fmtDay, fmtDayTime, postTitle, shortName, type ReviewStatus } from '../lib/journey'
 
@@ -90,6 +90,7 @@ export function ReviewJourney() {
   const [output, setOutput] = useState<'carousel' | 'post'>('carousel')
   // Legacy: the 15 texts migrated from the pre-cloud system, still reviewable.
   // Not earlier carousel versions — those are the "older versions" below.
+  // Only reachable while SHOW_LEGACY is on (features.ts).
   const [view, setView] = useState<'generated' | 'legacy'>('generated')
   const selectedId = params.get('result')
   const runFilter = params.get('run')
@@ -233,14 +234,16 @@ export function ReviewJourney() {
         <div>
           <div className="flex items-center gap-4">
             <h1 className="text-xl font-semibold">Review & Approve</h1>
-            <TabSwitch
-              value={view}
-              onChange={setView}
-              options={[
-                ['generated', 'Carousels'],
-                ['legacy', 'Legacy (old system)'],
-              ]}
-            />
+            {SHOW_LEGACY && (
+              <TabSwitch
+                value={view}
+                onChange={setView}
+                options={[
+                  ['generated', 'Carousels'],
+                  ['legacy', 'Legacy (old system)'],
+                ]}
+              />
+            )}
           </div>
           <p className="mt-1 max-w-2xl text-sm text-slate-500">
             {view === 'generated'

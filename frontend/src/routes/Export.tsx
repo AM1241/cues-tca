@@ -18,7 +18,7 @@ import {
   type GenerationExport,
 } from '../lib/exporters'
 import { assetsToDocx, generationsToDocx } from '../lib/docx'
-import { PER_CLUSTER_GENERATION } from '../lib/features'
+import { PER_CLUSTER_GENERATION, SHOW_LEGACY } from '../lib/features'
 
 type Asset = Database['public']['Tables']['editorial_assets']['Row']
 
@@ -45,14 +45,16 @@ export function Export() {
       <div className="mb-6 flex items-end justify-between gap-6">
         <div className="flex items-center gap-6">
           <h1 className="text-xl font-semibold">Export</h1>
-          <TabSwitch
-            value={tab}
-            onChange={setTab}
-            options={[
-              ['generated', 'Generated'],
-              ['legacy', 'Legacy'],
-            ]}
-          />
+          {SHOW_LEGACY && (
+            <TabSwitch
+              value={tab}
+              onChange={setTab}
+              options={[
+                ['generated', 'Generated'],
+                ['legacy', 'Legacy'],
+              ]}
+            />
+          )}
         </div>
         <div className="flex items-end gap-4">
           <label className="text-sm">
