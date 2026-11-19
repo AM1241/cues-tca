@@ -8,7 +8,10 @@
  * source, merges both into one replacements audit trail, and persists via
  * `complete_anonymize_job`.
  *
- *   { "batch_size": 1..25? }   // default 10
+ *   { "batch_size": 1..25?,      // default 10
+ *     "backfill": true?,          // enqueue eligible posts first (the UI does)
+ *     "period_start": iso?,       // with period_end: only posts published in
+ *     "period_end": iso? }        // [period_start, period_end) — 0035
  *
  * Dual auth, same as score-worker — anonymisation is driven by
  * backfill_anonymize_jobs() populating the queue and then draining this
@@ -45,6 +48,7 @@ import {
   readJobs,
   recordFailure,
   type ConfigRow,
+  type PublishedWindow,
   type QueueMessage,
 } from "./queue.ts";
 
@@ -65,6 +69,27 @@ function parseBatchSize(body: Record<string, unknown>): number {
     throw new RequestError(400, `batch_size must be an integer between 1 and ${MAX_BATCH_SIZE}.`);
   }
   return n;
+}
+
+/**
+ * Optional working period: { period_start, period_end } (ISO timestamps,
+ * end exclusive). Both or neither. When given, only posts published in it are
+ * anonymised — the same window Run clustering groups (0035).
+ */
+export function parsePeriod(body: Record<string, unknown>): PublishedWindow | null {
+  const start = body.period_start;
+  const end = body.period_end;
+  if ((start === undefined || start === null) && (end === undefined || end === null)) return null;
+  if (typeof start !== "string" || typeof end !== "string") {
+    throw new RequestError(400, "period_start and period_end must be given together, as ISO timestamps.");
+  }
+  const from = Date.parse(start);
+  const to = Date.parse(end);
+  if (Number.isNaN(from) || Number.isNaN(to)) {
+    throw new RequestError(400, "period_start and period_end must be valid ISO timestamps.");
+  }
+  if (from >= to) throw new RequestError(400, "period_start must be before period_end.");
+  return { from: new Date(from).toISOString(), to: new Date(to).toISOString() };
 }
 
 interface JobOutcome {
@@ -202,6 +227,7 @@ export async function handleAnonymizeWorker(req: Request, deps: AnonymizeWorkerD
     const actor = await authenticate(req, body as Record<string, unknown>);
 
     const batchSize = parseBatchSize(body as Record<string, unknown>);
+    const period = parsePeriod(body as Record<string, unknown>);
 
     const apiKey = Deno.env.get("OPENAI_API_KEY");
     if (!apiKey) throw new RequestError(500, "OPENAI_API_KEY is not configured.");
@@ -216,7 +242,9 @@ export async function handleAnonymizeWorker(req: Request, deps: AnonymizeWorkerD
       ? await backfillJobs(db)
       : 0;
 
-    const messages = await readJobs(db, batchSize);
+    // Backfill still enqueues every eligible post (free); only the claim is
+    // limited to the period, so posts of other dates wait for their own.
+    const messages = await readJobs(db, batchSize, undefined, period);
 
     const results: JobOutcome[] = [];
     if (messages.length > 0) {

@@ -241,6 +241,20 @@ Deno.test({
         assertEquals(res.status, 400);
       });
 
+      await runStep("a period needs both ends, valid, start before end -> 400 otherwise", async () => {
+        const bad = [
+          { period_start: "2026-11-01T00:00:00Z" },
+          { period_end: "2026-11-01T00:00:00Z" },
+          { period_start: "not a date", period_end: "2026-11-01T00:00:00Z" },
+          { period_start: "2026-11-02T00:00:00Z", period_end: "2026-11-01T00:00:00Z" },
+        ];
+        for (const b of bad) {
+          const res = await handleAnonymizeWorker(request(b, INTERNAL_SECRET), { db });
+          assertEquals(res.status, 400, JSON.stringify(b));
+          await res.body?.cancel();
+        }
+      });
+
       await runStep("no jobs queued -> ok with zero totals", async () => {
         await drainAmbientQueueNoise();
         const { callOpenAiImpl, calls } = scriptedOpenAi([]);
@@ -455,6 +469,57 @@ Deno.test({
           .map((m) => m.message.raw_post_id)
           .filter((id) => mine.includes(id));
         assertEquals(order, [newer, older, redone]);
+      });
+
+      // =====================================================================
+      // WORKING PERIOD — migration 0035
+      // =====================================================================
+      await runStep("with a period, only posts published in it are anonymised; the rest stay queued", async () => {
+        await drainAmbientQueueNoise();
+        const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString();
+
+        // The period is days 12 to 6 ago, a window no other step publishes in
+        // (their posts are dated now, 1 and 30 days ago), so a retry of an
+        // earlier step that comes due mid-step cannot enter it. Two posts
+        // inside it, one forty days old; the old one is queued FIRST, so
+        // arrival order would not keep it out either.
+        const outside = await makeScoredPost(`${runTag} forty days old, outside the period.`, 80, daysAgo(40));
+        await backfillAndClaim();
+        const insideOld = await makeScoredPost(`${runTag} ten days old, inside.`, 80, daysAgo(10));
+        const insideNew = await makeScoredPost(`${runTag} eight days old, inside.`, 80, daysAgo(8));
+        await backfillAndClaim();
+
+        const { callOpenAiImpl, calls } = scriptedOpenAi([{ entities: [] }, { entities: [] }]);
+        const res = await handleAnonymizeWorker(
+          request({ batch_size: 5, period_start: daysAgo(12), period_end: daysAgo(6) }, INTERNAL_SECRET),
+          { db, callOpenAiImpl },
+        );
+        assertEquals(res.status, 200);
+        const body = await res.json();
+        assertEquals(body.totals.jobs_read, 2, "only the two posts of the period are claimed, with room for five");
+        assertEquals(body.totals.anonymized, 2);
+        assertEquals(calls.length, 2, "no paid call for the post outside the period");
+        assertEquals(
+          (body.results as { raw_post_id: string }[]).map((r) => r.raw_post_id),
+          [insideNew, insideOld],
+          "newest first inside the period",
+        );
+
+        const { data: waiting } = await db
+          .from("anonymize_job_state").select("status").eq("raw_post_id", outside).single();
+        assertEquals(waiting!.status, "pending", "the post outside the period is still queued, not dropped");
+        const { data: notDone } = await db
+          .from("anonymized_posts_current").select("raw_post_id").eq("raw_post_id", outside).maybeSingle();
+        assertEquals(notDone, null);
+
+        // Without a period it is served as before.
+        const { callOpenAiImpl: plainImpl } = scriptedOpenAi([{ entities: [] }]);
+        const plain = await handleAnonymizeWorker(request({ batch_size: 5 }, INTERNAL_SECRET), { db, callOpenAiImpl: plainImpl });
+        const plainBody = await plain.json();
+        assert(
+          (plainBody.results as { raw_post_id: string }[]).some((r) => r.raw_post_id === outside),
+          "a drain without a period still reaches it",
+        );
       });
     } finally {
       await t.step("zzz teardown", teardown);

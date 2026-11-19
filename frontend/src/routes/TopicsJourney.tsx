@@ -7,7 +7,7 @@ import { StagePill } from '../components/StagePill'
 import { GenerationHistory } from '../components/GenerationHistory'
 import { functionErrorMessage } from '../lib/functionError'
 import { useJourney } from '../lib/journey-context'
-import { fmtCalendarDay, fmtDay, fmtPeriod, overlaps, shortName, type ClusterInfo, type JourneyPost } from '../lib/journey'
+import { fmtCalendarDay, fmtDay, fmtPeriod, overlaps, periodBounds, shortName, type ClusterInfo, type JourneyPost } from '../lib/journey'
 
 /** Mirrors MAX_PUBLICATION_THEMES in supabase/functions/generate/prompt.ts (see classic Clusters.tsx). */
 const MAX_PUBLICATION_THEMES = 8
@@ -142,21 +142,30 @@ export function TopicsJourney() {
   // Actions — the same calls as the classic Topics screen (routes/Clusters.tsx)
   // ---------------------------------------------------------------------------
 
+  /**
+   * Anonymises the next posts of the working period only — the same window Run
+   * clustering groups (0035, asked for on 2026-11-20). Posts of other dates
+   * stay queued for their own period.
+   */
   async function anonymiseNow() {
     if (anonymising) return
     setAnonymising(true)
     const { data: sessionData } = await supabase.auth.getSession()
     const token = sessionData.session?.access_token
+    const { from, to } = periodBounds(period)
     const { data, error } = await supabase.functions.invoke('anonymize-worker', {
-      body: { backfill: true, batch_size: anonBatch },
+      body: { backfill: true, batch_size: anonBatch, period_start: from, period_end: to },
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     })
     setAnonymising(false)
     if (error) return toast.error(await functionErrorMessage(error, 'Anonymisation failed'))
     if (data?.ok === false) return toast.error(data.error ?? 'Anonymisation failed')
     const t = data?.totals
-    if (!t || (t.jobs_read === 0 && t.enqueued === 0)) toast.success('Nothing to anonymise — no eligible scored posts.')
-    else toast.success(`${t.anonymized} anonymised${t.dead_lettered ? `, ${t.dead_lettered} failed` : ''}`)
+    if (!t || t.jobs_read === 0) toast.success(`Nothing left to anonymise in ${fmtPeriod(period)}.`)
+    else
+      toast.success(
+        `${t.anonymized} anonymised from ${fmtPeriod(period)}${t.dead_lettered ? `, ${t.dead_lettered} failed` : ''}${t.retried ? `, ${t.retried} will be retried` : ''}`,
+      )
     await refresh()
   }
 
@@ -241,7 +250,11 @@ export function TopicsJourney() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button onClick={anonymiseNow} disabled={busy} title={`Anonymises up to ${anonBatch} posts per click`}>
+          <Button
+            onClick={anonymiseNow}
+            disabled={busy}
+            title={`Anonymises up to ${anonBatch} selected posts published in ${fmtPeriod(period)}, newest first. Posts of other dates wait for their own period.`}
+          >
             {anonymising ? 'Anonymising…' : `Anonymise now (${anonBatch})`}
           </Button>
           <Button variant="primary" onClick={runClustering} disabled={busy}>

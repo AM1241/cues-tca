@@ -23,12 +23,27 @@ export async function backfillJobs(db: SupabaseClient): Promise<number> {
   return (data ?? 0) as number;
 }
 
+/** A publication window, [from, to), as ISO timestamps. */
+export interface PublishedWindow {
+  from: string;
+  to: string;
+}
+
+/**
+ * Claims up to `qty` jobs. With `period`, only posts published inside it are
+ * claimed (0035); the window is sent only when given, so a plain drain is the
+ * same call as before 0035.
+ */
 export async function readJobs(
   db: SupabaseClient,
   qty: number,
   vt: number = VISIBILITY_TIMEOUT_SECONDS,
+  period: PublishedWindow | null = null,
 ): Promise<QueueMessage[]> {
-  const { data, error } = await db.rpc("read_anonymize_jobs", { p_vt: vt, p_qty: qty });
+  const args = period
+    ? { p_vt: vt, p_qty: qty, p_from: period.from, p_to: period.to }
+    : { p_vt: vt, p_qty: qty };
+  const { data, error } = await db.rpc("read_anonymize_jobs", args);
   if (error) throw new Error(`read_anonymize_jobs failed: ${error.message}`);
   return (data ?? []) as QueueMessage[];
 }
