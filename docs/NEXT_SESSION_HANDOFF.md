@@ -1,5 +1,9 @@
 # Handoff for the next session
 
+> **Superseded (2026-11-19).** This note describes September and its "not pushed" warnings
+> no longer hold. Start with `docs/TCA_TRIAL_HANDOFF.md` **§9.8** (current state and open
+> items), then §9.7 and §9.6.
+
 **Written:** 2026-09-15 (fifth session — FLOW-01 implemented and verified).
 **Audience:** whoever continues this next, including a non-Claude agent
 (DeepSeek). Read this in full before touching anything.

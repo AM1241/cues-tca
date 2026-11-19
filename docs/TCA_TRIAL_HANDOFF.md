@@ -34,6 +34,10 @@ That branch already contains everything through `162f80f`
 and **not yet merged into `phase6-frontend-binding`**. See
 `docs/NEXT_SESSION_HANDOFF.md` for the current pointer.
 
+**Update 2026-11-19:** the two paragraphs above and `docs/NEXT_SESSION_HANDOFF.md` are
+September history. The current state and the open items are in **§9.8**; start there, then
+§9.7 and §9.6.
+
 ### 0.2 Reconciliation check — do this first
 
 Χάρης has stated he has begun implementing changes that have not all been
@@ -1512,3 +1516,36 @@ first, ten per click), then Anonymise now (new posts first since 0033) and Run c
 over the working period. The 100 re-anonymisations left by Redo all are now served last and
 matter only for groupings of older periods. Phase 3 of the plan — one "Find topics" action
 that anonymises and groups only the working period's posts — is not started.
+
+### 9.8 Where things stand at the end of 2026-11-19 — start the next session here
+
+**Production, read-only at 21:17 UTC:** 936 posts, newest published 2026-11-17; last Collect
+2026-11-17 13:40; 613 posts never scored (128 of them published in the last 15 days), 694
+scoring jobs waiting; the last score was written 2026-11-17 14:15, the last anonymisation
+2026-11-06, the last generation 2026-11-06 (52 in all); only 5 posts currently anonymised
+(Redo all, §9.6). Nobody has used the tool since 2026-11-17, so the partner has not yet
+tried the new layout. `output_language` is NULL **by the operator's choice** ("είναι όπως
+θέλω", 2026-11-19): do not offer to set it again.
+
+**Code:** everything is on `origin/phase6-frontend-binding`, live, nothing unpushed.
+`ui-post-journey` and `ui-call-followups` are merged into it and need no further work.
+The production helpers (read-only query, dry run/apply, snapshot for a local copy) are in
+`scripts/prod/` with a README; use them rather than rewriting them.
+
+**Open items, none started:**
+
+1. **Call with Tecnoalimenti, Friday 2026-11-20 (Teams).** An email to Gabriele was offered
+   and not yet asked for: what the new screens are, Score all, "Open it in Review", the
+   language select in Settings, the switch back to the classic screens, and that Legacy is
+   gone because it was the old system's texts, not earlier carousel versions.
+2. **Security, left to the operator since 2026-10-30:** replace the Supabase access token
+   (it passed through a chat) and the admin password `123456`. Both need the operator.
+3. **Decisions for the operator:** a larger model for Italian generation (cost); carousel
+   font 14 → 18 and logos (the minutes defer these until Kiki's visual guidelines); the
+   European Commission source, 141 English posts averaging 15, which drags the English
+   averages down (its lookback or whether to keep it).
+4. **Phase 3 of the layout plan:** one "Find topics" action that anonymises and groups only
+   the working period's posts. Not started; needs the operator's go-ahead.
+5. **After the partner's first real use:** read what they did (`triggered_by_email`,
+   `created_by` on the run tables — not `last_sign_in_at`) and whether Score all, Anonymise
+   now and Run clustering got a period to a carousel.
