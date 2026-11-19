@@ -7,7 +7,7 @@ import { StagePill } from '../components/StagePill'
 import { SingleThemeNotice, ThemeScores } from '../components/ThemeScores'
 import { functionErrorMessage } from '../lib/functionError'
 import { useJourney } from '../lib/journey-context'
-import { fmtDay, fmtDayHeading, fmtDayTime, goesForward, type JourneyPost } from '../lib/journey'
+import { fmtDayHeading, fmtDayTime, goesForward, type JourneyPost } from '../lib/journey'
 
 type Tab = 'forward' | 'stopped' | 'unscored' | 'all'
 type Sort = 'newest' | 'score'
@@ -366,7 +366,7 @@ export function RatingJourney() {
               {fmtDayHeading(r.iso)}
             </div>
           ) : (
-            <PostRow key={r.post.id} post={r.post} justScored={scoredSet.has(r.post.id)} showDate={sort === 'score'} onOpen={() => openPost(r.post.id)} />
+            <PostRow key={r.post.id} post={r.post} justScored={scoredSet.has(r.post.id)} onOpen={() => openPost(r.post.id)} />
           ),
         )}
 
@@ -472,23 +472,56 @@ export function RatingJourney() {
   )
 }
 
+/**
+ * The post's LinkedIn publication date on every row, as a small calendar leaf:
+ * month, day, time. Asked for in the call of 2026-11-06 ("posts need a clearly
+ * shown date") — the day headings alone left a row without its date as soon as
+ * the list was scrolled or sorted by score.
+ */
+function PublishedDate({ iso }: { iso: string }) {
+  const d = new Date(iso)
+  const otherYear = d.getFullYear() !== new Date().getFullYear()
+  const month = d.toLocaleDateString('en-GB', { month: 'short' })
+  const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+  const full = d.toLocaleString('en-GB', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+  return (
+    <div
+      className="overflow-hidden rounded-md border border-slate-200 bg-white text-center leading-none shadow-sm"
+      title={`Published on LinkedIn: ${full}`}
+    >
+      <div className="bg-slate-700 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-white">
+        {month}
+        {otherYear && ` ’${String(d.getFullYear()).slice(2)}`}
+      </div>
+      <div className="pt-1 text-lg font-semibold tabular-nums text-slate-900">{d.getDate()}</div>
+      <div className="pb-1 pt-0.5 text-[10px] tabular-nums text-slate-500">{time}</div>
+    </div>
+  )
+}
+
 function PostRow({
   post,
   justScored,
-  showDate,
   onOpen,
 }: {
   post: JourneyPost
   justScored: boolean
-  showDate: boolean
   onOpen: () => void
 }) {
   return (
     <div
-      className={`grid grid-cols-[minmax(0,1fr)_4.5rem_22rem] items-start gap-4 border-b border-slate-100 px-4 py-3 last:border-b-0 ${
+      className={`grid grid-cols-[3.5rem_minmax(0,1fr)_4.5rem_22rem] items-start gap-4 border-b border-slate-100 px-4 py-3 last:border-b-0 ${
         justScored ? 'bg-emerald-50/50' : ''
       }`}
     >
+      <PublishedDate iso={post.published_at} />
       <div className="min-w-0">
         <div className="flex items-start gap-2">
           {post.isNew && (
@@ -507,7 +540,6 @@ function PostRow({
         </div>
         <p className="mt-1 text-xs text-slate-500">
           {post.source_name}
-          {showDate && <> · {fmtDay(post.published_at)}</>}
           {' · '}
           <a href={post.source_url} target="_blank" rel="noreferrer" className="hover:underline">
             LinkedIn ↗
