@@ -18,11 +18,11 @@ is where drift between the product and the Word user guide is recorded.
 | | |
 | --- | --- |
 | Branch | `phase6-frontend-binding` — **all current work is here, not on `main`** |
-| Last commit deployed | see `git log origin/phase6-frontend-binding` — last code change 2026-10-16, §9.4 |
+| Last commit deployed | see `git log origin/phase6-frontend-binding` — last code change 2026-11-19 (`a885eb6`), §9.7 |
 | Supabase project | `bxaovkzemfyxrxbcqask` (`cues-tca`, eu-west-1) |
-| Production frontend | cues-tca.netlify.app, deployed from `phase6-frontend-binding` by Netlify on push. Rating and Collect changes of 2026-10-30, see §9.5 |
-| Migrations | applied through **`0032`**, over the Management API, not `db push` — see §9.4 and §9.5 |
-| Edge Functions | `ingest` v10, `score-worker` v12, `anonymize-worker` v13, `cluster` v7, `generate` v7, `discover-brands` v7, `slide-images` v3 — all post-`0029` |
+| Production frontend | cues-tca.netlify.app, deployed from `phase6-frontend-binding` by Netlify on push. New "journey" layout since 2026-11-17 (§9.6), call follow-ups since 2026-11-19 (§9.7); bundle `index-BvReRa9l.js` |
+| Migrations | applied through **`0034`**, over the Management API, not `db push` — see §9.4–§9.7 |
+| Edge Functions | `ingest` v10, `score-worker` v12, `anonymize-worker` v13, `cluster` v7, `generate` **v9** (`generate_v6` / `publication_v4`), `discover-brands` v7, `slide-images` v3 |
 
 `origin/phase6-frontend-binding` was fetched on 2026-09-15 and carried **no
 commits beyond `6ad6ef1`**. Netlify was serving the bundle built from it.
@@ -1460,7 +1460,7 @@ every anonymisation, so Run clustering found nothing eligible; the classic Topic
 score as high as Italian ones (EFSA 71, EFFoST 80, Foodvalley 76; Tecnoalimenti 76 EN vs 72
 IT). No sign of a language bias; the source mix explains it.
 
-**Built and tested locally, not in production:**
+**Built and tested locally, then put live on 2026-11-19** (see the rollout below):
 
 - **`0034_output_language.sql`:** `configurations.output_language` (`en`/`it`, NULL = the
   brief decides). Not in `scoring_config_snapshot`, so no scoring rotation. Settings has an
@@ -1485,6 +1485,21 @@ IT). No sign of a language bias; the source mix explains it.
 
 **Order matters when this goes live:** `0034` first — both the new `generate` (it selects
 `output_language`) and the new Settings (it writes it) fail without the column.
+
+**Rollout, 2026-11-19, authorised by the operator for these three actions:**
+
+1. `0034` — dry run in one DO block that raised (rolled back): 1 configuration row, `fr`
+   rejected, `it` and NULL accepted, scoring hash unchanged, `authenticated` holds UPDATE on
+   the column, comment set. Re-read afterwards: no column, so nothing was left behind. Then
+   applied in one transaction with its `schema_migrations` row (`0034`, `output_language`).
+   Re-read: column present, scoring hash still `45cb07d9…`.
+2. `generate` deployed as **v9**; the deployed body carries `generate_v6` and
+   `publication_v4` and no `generate_v5`.
+3. `phase6-frontend-binding` fast-forwarded to `a885eb6` and pushed. Netlify serves
+   `index-BvReRa9l.js`, byte-identical to the local `npm run build`.
+
+`output_language` is still NULL in production, so generation behaves as before (the brief
+decides, English by default) until someone picks a language in Settings.
 
 **Next, for the editor:** 704 posts wait to be scored (186 of them this fortnight, newest
 first, ten per click), then Anonymise now (new posts first since 0033) and Run clustering
