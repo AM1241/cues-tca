@@ -1549,3 +1549,53 @@ The production helpers (read-only query, dry run/apply, snapshot for a local cop
 5. **After the partner's first real use:** read what they did (`triggered_by_email`,
    `created_by` on the run tables — not `last_sign_in_at`) and whether Score all, Anonymise
    now and Run clustering got a period to a carousel.
+
+### 9.9 Dates on Rating and Anonymise by period — 2026-11-20, branch `nov20-followups`
+
+**Correction to §9.8:** the handover commit of 2026-11-19 (`25b0366`, docs and
+`scripts/prod/`) was never pushed. It travels with the next push of this branch. The live
+bundle on 2026-11-20 was `index-D4OLJDd3.js`, byte-identical to a local build of `960f6a8`.
+Nobody used the tool between 2026-11-17 16:15 Athens and 2026-11-20.
+
+**Asked for by the operator on 2026-11-20:**
+
+1. **The publication date on every post in Rating** (`a025353`). The day headings left a
+   row without its date once the list was scrolled or sorted by score. Every row now opens
+   with a calendar leaf: month, day, time of the LinkedIn publication, full date on hover;
+   the headings stay. Production's `published_at` carries real times (none of 936 at
+   midnight), so the time is meaningful. Frontend only. Checked on the local copy of
+   production's data in both sorts.
+2. **Anonymise now works on the working period** (`95469b2`). Run clustering only groups
+   the posts published in the working period, but Anonymise now drained the whole queue,
+   newest first across every date.
+   - `0035_anonymise_period.sql`: `read_anonymize_jobs(p_vt, p_qty, p_from, p_to)`, the
+     window optional and end-exclusive. Inside it 0033's order holds; jobs outside it stay
+     queued. The 0033 function is dropped and recreated (the argument list changes); the
+     new parameters default to null, so two-argument callers — the classic Topics, the
+     tests, the deployed worker until its own deploy — are unchanged.
+   - `anonymize-worker` takes `period_start` / `period_end` (both or neither, valid,
+     start before end, 400 otherwise). Backfill still enqueues every eligible post.
+   - The new Topics sends `periodBounds(period)` with Anonymise now and names the period
+     in its message, or says nothing is left there.
+
+**Verified locally:** 0035 in a rolled-back transaction on the local copy (a 25–31 Oct
+window claimed only 28 Oct posts; one function left; only `service_role` may execute; the
+local queue's leftover orphan messages are archived first by a plain read, as under
+0033). The Topics button in the browser with the worker mocked: Last 7 days was sent as
+`2026-11-12T00:00:00Z` → `2026-11-20T00:00:00Z`, message "3 anonymised from 12 Nov – 19
+Nov". Then, from a clean `supabase db reset` (the operator's go-ahead, since it wiped the
+local copy): `anonymize-worker` 35 tests (15 steps, two new: period validation; only the
+period's posts claimed, the old one still pending, a plain drain still reaches it),
+`cluster` 20 steps, `generate` 10 steps, `_admin_rpcs` 17 steps, all green. The new period
+step was seen failing with the worker's period passing removed ("only the two posts of the
+period are claimed": 3, not 2), then green again with it restored. `npm run build`,
+`oxlint` and `deno check` clean.
+
+**Production before 0035 (read-only, 2026-11-20):** 135 anonymise messages, all visible,
+none orphaned; 135 jobs pending, 5 dead-lettered; migrations through 0034; no selected
+post of the last 15 days waits for anonymisation, because those posts are not scored yet —
+Score all comes first.
+
+**Rollout order:** `0035`, then `anonymize-worker`, then the frontend. A new worker before
+0035 would call a function that does not exist yet; the frontend before the new worker
+is harmless (the old worker ignores the period).
