@@ -1599,3 +1599,27 @@ Score all comes first.
 **Rollout order:** `0035`, then `anonymize-worker`, then the frontend. A new worker before
 0035 would call a function that does not exist yet; the frontend before the new worker
 is harmless (the old worker ignores the period).
+
+**Also asked the same day: who collected is no longer shown** (`0cb9d06`). The step strip
+said "Last Collect: 1 Nov, 22:33 by hzafeiris · 160 new posts" with the email on hover; it
+now says when and how many. It was the only place that named the collector; who ran a
+grouping (Topics) and who made a carousel (Review) are unchanged.
+
+**Rollout, 2026-11-20, on the operator's instruction** ("hide the by … and then upload
+it", given as the answer to the request for the three steps below):
+
+1. `0035` dry run on production, one DO block that raised: one `read_anonymize_jobs`
+   left, with the new signature; execute for `service_role` only; the last 15 days hold
+   0 visible jobs, so a windowed read claimed none; without a window the next five were
+   2026-10-29, -29, -29, -28, -28 (0033's order); queue 135 → 135. Re-read afterwards:
+   old signature, 135 pending, nothing left behind. Then applied with its
+   `schema_migrations` row (`0035`, `anonymise_period`). Re-read: new signature, grants as
+   in the dry run, queue unchanged (135 pending, 5 dead-lettered, no orphans).
+2. `anonymize-worker` deployed as **v14** (was 13, `verify_jwt` unchanged). The deployed
+   body carries the period validation and `p_from`; an unauthenticated call gets 401.
+3. Frontend: `phase6-frontend-binding` fast-forwarded to this branch and pushed; the local
+   `npm run build` of the pushed commit is `index-OnMTrjiG.js` (docs commits do not change
+   it).
+
+Not exercised live: a real Anonymise now with a period, which is a paid call and, for the
+last 15 days, would find nothing until those posts are scored.
