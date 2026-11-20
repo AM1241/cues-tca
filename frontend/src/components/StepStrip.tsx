@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom'
-import { fmtDayTime, fmtPeriod, shortName, type PeriodChoice } from '../lib/journey'
+import { fmtDayTime, fmtPeriod, type PeriodChoice } from '../lib/journey'
 import { useJourney } from '../lib/journey-context'
 
 // 3 days: "we need recent posts, e.g. only the last three days" (call of 2026-11-06).
@@ -89,9 +89,11 @@ export function StepStrip() {
         <PeriodPicker />
         <div className="flex items-center gap-3 text-xs text-slate-500">
           {loading && <span className="h-3 w-3 animate-spin rounded-full border-2 border-slate-300 border-t-slate-600" />}
+          {/* Who collected is left out on purpose (operator, 2026-11-20): the
+              strip says when and how much, not by whom. */}
           {ctx?.lastCollect && (
-            <span title={ctx.lastCollect.by ?? undefined}>
-              Last Collect: {fmtDayTime(ctx.lastCollect.started_at)} by {shortName(ctx.lastCollect.by)} ·{' '}
+            <span>
+              Last Collect: {fmtDayTime(ctx.lastCollect.started_at)} ·{' '}
               <span className="font-medium text-slate-700">{ctx.lastCollect.posts_inserted} new posts</span>
             </span>
           )}
