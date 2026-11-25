@@ -278,14 +278,14 @@ export function PostJourneyPanel({
                       )}
                     </>
                   ) : redo ? (
-                    'Redo all marked this post for a fresh pass, so its earlier anonymisation no longer counts and it cannot be grouped until Anonymise now in Topics processes it again.'
+                    'Redo all marked this post for a fresh pass, so its earlier anonymisation no longer counts and it cannot be grouped until Anonymise all in Topics processes it again.'
                   ) : anonJob?.status === 'dead_letter' ? (
                     <>Failed: {anonJob.last_error_message ?? 'no message recorded'}.</>
                   ) : score !== null && score >= ctx.threshold ? (
                     anonJob ? (
-                      'In the anonymisation queue. Anonymise now in Topics processes it.'
+                      'In the anonymisation queue. Anonymise all in Topics processes it.'
                     ) : (
-                      'Not queued yet. Anonymise now in Topics queues and processes it.'
+                      'Not queued yet. Anonymise all in Topics queues and processes it.'
                     )
                   ) : (
                     'Only selected posts are anonymised.'

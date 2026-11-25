@@ -491,11 +491,11 @@ export function placePost(
       why:
         st === 'dead_letter'
           ? p.redo
-            ? 'Selected. Its anonymisation was reset by Redo all and must run again. Press Anonymise now in Topics.'
+            ? 'Selected. Its anonymisation was reset by Redo all and must run again. Press Anonymise all in Topics.'
             : 'Selected, but anonymisation failed. Open it to see why.'
           : p.redo
-            ? 'Selected. Its anonymisation was reset by Redo all and is waiting to run again (Anonymise now in Topics).'
-            : 'Selected — next it needs anonymising. Press Anonymise now in Topics.',
+            ? 'Selected. Its anonymisation was reset by Redo all and is waiting to run again (Anonymise all in Topics).'
+            : 'Selected — next it needs anonymising. Press Anonymise all in Topics.',
     }
   }
   if (!newestRun) {

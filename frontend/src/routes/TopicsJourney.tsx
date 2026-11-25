@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useToast } from '../components/toast-context'
@@ -40,7 +40,21 @@ export function TopicsJourney() {
   const [running, setRunning] = useState(false)
   const [anonymising, setAnonymising] = useState(false)
   const [publishing, setPublishing] = useState(false)
-  const [anonBatch, setAnonBatch] = useState(5)
+  // Posts per call to anonymize-worker. "Anonymise all" makes as many calls as
+  // the period needs; on production a post takes one to two seconds, so ten
+  // keeps each call short.
+  const [anonBatch, setAnonBatch] = useState(10)
+  const [confirmingAnon, setConfirmingAnon] = useState(false)
+  // Progress of "Anonymise all"; note says how it ended.
+  const [anonBulk, setAnonBulk] = useState<{ done: number; total: number; note: string | null } | null>(null)
+  const anonStopRef = useRef(false)
+  // Leaving the screen stops the loop after the batch in flight.
+  useEffect(
+    () => () => {
+      anonStopRef.current = true
+    },
+    [],
+  )
   const [created, setCreated] = useState<{ id: string; title: string } | null>(null)
   // "Redo all" un-anonymises everything at once. On production it had reset 105
   // of 110 posts by 2026-11-17, with no record of who pressed it — so it asks.
@@ -143,13 +157,14 @@ export function TopicsJourney() {
   // ---------------------------------------------------------------------------
 
   /**
-   * Anonymises the next posts of the working period only — the same window Run
-   * clustering groups (0035, asked for on 2026-11-20). Posts of other dates
+   * One call to anonymize-worker for the working period only — the same window
+   * Run clustering groups (0035, asked for on 2026-11-20). Posts of other dates
    * stay queued for their own period.
    */
-  async function anonymiseNow() {
-    if (anonymising) return
-    setAnonymising(true)
+  async function anonymiseBatch(): Promise<
+    | { ok: true; jobsRead: number; anonymised: string[]; failed: number }
+    | { ok: false; message: string }
+  > {
     const { data: sessionData } = await supabase.auth.getSession()
     const token = sessionData.session?.access_token
     const { from, to } = periodBounds(period)
@@ -157,15 +172,58 @@ export function TopicsJourney() {
       body: { backfill: true, batch_size: anonBatch, period_start: from, period_end: to },
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     })
+    if (error) return { ok: false, message: await functionErrorMessage(error, 'Anonymisation failed') }
+    if (data?.ok === false) return { ok: false, message: data.error ?? 'Anonymisation failed' }
+    const t = data?.totals ?? { jobs_read: 0, dead_lettered: 0 }
+    const anonymised = ((data?.results ?? []) as { raw_post_id: string; status: string }[])
+      .filter((r) => r.status === 'anonymized')
+      .map((r) => r.raw_post_id)
+    return { ok: true, jobsRead: t.jobs_read ?? 0, anonymised, failed: t.dead_lettered ?? 0 }
+  }
+
+  /**
+   * Anonymise every selected post of the working period, a batch per call,
+   * until none is left. Asked for by Tecnoalimenti on 2026-11-24: five posts a
+   * click made 165 posts some thirty clicks. It stops on its own when the
+   * period is done, when a batch anonymises nothing (something is failing), on
+   * an error, on Stop, or when the editor leaves the screen.
+   */
+  async function anonymiseAll() {
+    if (anonymising || !posts) return
+    const targets = new Set(waitingAnon.map((p) => p.id))
+    if (targets.size === 0) return
+    anonStopRef.current = false
+    setAnonymising(true)
+    setAnonBulk({ done: 0, total: targets.size, note: null })
+    let done = 0
+    let failed = 0
+    let note: string | null = null
+    const maxCalls = Math.ceil(targets.size / anonBatch) + 3
+    for (let i = 0; i < maxCalls; i++) {
+      if (anonStopRef.current) {
+        note = 'Stopped. The rest are still waiting; press Anonymise all again to go on.'
+        break
+      }
+      const r = await anonymiseBatch()
+      if (!r.ok) {
+        note = `Stopped by an error: ${r.message}`
+        break
+      }
+      done += r.anonymised.filter((id) => targets.has(id)).length
+      failed += r.failed
+      setAnonBulk({ done, total: targets.size, note: null })
+      if (r.jobsRead === 0 || done >= targets.size) break
+      if (r.anonymised.length === 0) {
+        note = 'The last batch anonymised nothing, so it stopped here. Open a waiting post to see why.'
+        break
+      }
+    }
+    const end =
+      done >= targets.size
+        ? `Done: all ${targets.size} anonymised. Next, run clustering for ${fmtPeriod(period)}.`
+        : `Done: ${done} of ${targets.size} anonymised${failed ? `, ${failed} failed` : ''}. Open a waiting post to see why.`
     setAnonymising(false)
-    if (error) return toast.error(await functionErrorMessage(error, 'Anonymisation failed'))
-    if (data?.ok === false) return toast.error(data.error ?? 'Anonymisation failed')
-    const t = data?.totals
-    if (!t || t.jobs_read === 0) toast.success(`Nothing left to anonymise in ${fmtPeriod(period)}.`)
-    else
-      toast.success(
-        `${t.anonymized} anonymised from ${fmtPeriod(period)}${t.dead_lettered ? `, ${t.dead_lettered} failed` : ''}${t.retried ? `, ${t.retried} will be retried` : ''}`,
-      )
+    setAnonBulk({ done, total: targets.size, note: note ?? end })
     await refresh()
   }
 
@@ -176,7 +234,7 @@ export function TopicsJourney() {
     setAnonymising(false)
     if (error) return toast.error(error.message)
     const n = (data as { requeued: number } | null)?.requeued ?? 0
-    toast.success(n === 0 ? 'Nothing anonymised yet — nothing to redo.' : `${n} post(s) marked for a fresh pass. Press Anonymise now to process them.`)
+    toast.success(n === 0 ? 'Nothing anonymised yet — nothing to redo.' : `${n} post(s) marked for a fresh pass. Press Anonymise all to process them.`)
     await refresh()
   }
 
@@ -251,11 +309,19 @@ export function TopicsJourney() {
         </div>
         <div className="flex items-center gap-2">
           <Button
-            onClick={anonymiseNow}
-            disabled={busy}
-            title={`Anonymises up to ${anonBatch} selected posts published in ${fmtPeriod(period)}, newest first. Posts of other dates wait for their own period.`}
+            onClick={() => setConfirmingAnon(true)}
+            disabled={busy || waitingAnon.length === 0}
+            title={
+              waitingAnon.length === 0
+                ? `Every selected post of ${fmtPeriod(period)} is already anonymised.`
+                : `Anonymises every selected post published in ${fmtPeriod(period)} that is not anonymised yet, newest first. Posts of other dates wait for their own period.`
+            }
           >
-            {anonymising ? 'Anonymising…' : `Anonymise now (${anonBatch})`}
+            {anonymising && anonBulk && !anonBulk.note
+              ? `Anonymising ${anonBulk.done} of ${anonBulk.total}…`
+              : anonymising
+                ? 'Anonymising…'
+                : `Anonymise all ${waitingAnon.length} in this period`}
           </Button>
           <Button variant="primary" onClick={runClustering} disabled={busy}>
             {running ? 'Grouping…' : `Run clustering for ${fmtPeriod(period)}`}
@@ -263,13 +329,38 @@ export function TopicsJourney() {
         </div>
       </div>
 
+      {anonBulk && (
+        <div className="mb-4 rounded-md border border-slate-200 bg-white px-4 py-3 text-sm">
+          <div className="flex items-center justify-between gap-4">
+            <span className="text-slate-700">
+              {anonBulk.note ?? `Anonymising this period: ${anonBulk.done} of ${anonBulk.total}. Keep this screen open.`}
+            </span>
+            {anonymising ? (
+              <button className="text-xs font-medium text-slate-500 underline" onClick={() => (anonStopRef.current = true)}>
+                stop after this batch
+              </button>
+            ) : (
+              <button className="text-xs text-slate-500 underline" onClick={() => setAnonBulk(null)}>
+                dismiss
+              </button>
+            )}
+          </div>
+          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
+            <div
+              className="h-full rounded-full bg-emerald-500 transition-all"
+              style={{ width: `${anonBulk.total ? Math.round((100 * anonBulk.done) / anonBulk.total) : 0}%` }}
+            />
+          </div>
+        </div>
+      )}
+
       {(waitingAnon.length > 0 || readyNotGrouped.length > 0) && (
         <Card className="mb-5">
           <h2 className="text-sm font-semibold text-slate-900">Selected posts of this period not in a topic yet</h2>
           {waitingAnon.length > 0 && (
             <PostGroup
               title={`${waitingAnon.length} waiting for anonymisation`}
-              note="Anonymise now processes them. Then run clustering."
+              note="Anonymise all processes them. Then run clustering."
               posts={waitingAnon}
               onOpen={openPost}
             />
@@ -453,7 +544,7 @@ export function TopicsJourney() {
         <summary className="cursor-pointer px-3 py-2 text-sm font-semibold text-slate-700">Advanced</summary>
         <div className="flex flex-wrap items-end gap-4 border-t border-slate-200 p-3 text-sm">
           <label>
-            <span className="mb-1 block text-slate-600">Posts per Anonymise now</span>
+            <span className="mb-1 block text-slate-600">Posts per batch (Anonymise all)</span>
             <input
               type="number"
               min={1}
@@ -472,12 +563,46 @@ export function TopicsJourney() {
         </div>
       </details>
 
+      {confirmingAnon && (
+        <Modal onClose={() => setConfirmingAnon(false)}>
+          <h2 className="text-lg font-semibold text-slate-900">
+            Anonymise all {waitingAnon.length} posts of this period?
+          </h2>
+          <div className="mt-3 space-y-2 text-sm text-slate-600">
+            <p>
+              The selected posts published in {fmtPeriod(period)} that are not anonymised yet are processed {anonBatch} at a
+              time, newest first, until none is left. Each post is one paid AI call.
+            </p>
+            <p>
+              It takes about {Math.max(1, Math.round((waitingAnon.length * 2) / 60))} minute
+              {Math.max(1, Math.round((waitingAnon.length * 2) / 60)) > 1 ? 's' : ''}. Keep this screen open; you can stop it
+              after any batch.
+            </p>
+          </div>
+          <div className="mt-6 flex justify-end gap-3">
+            <Button variant="ghost" className="px-4 py-2" onClick={() => setConfirmingAnon(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              size="md"
+              onClick={() => {
+                setConfirmingAnon(false)
+                anonymiseAll()
+              }}
+            >
+              Anonymise {waitingAnon.length} posts
+            </Button>
+          </div>
+        </Modal>
+      )}
+
       {confirmingRedo && (
         <Modal onClose={() => setConfirmingRedo(false)}>
           <h2 className="text-lg font-semibold text-slate-900">Redo every anonymisation?</h2>
           <div className="mt-3 space-y-2 text-sm text-slate-600">
             <p>
-              Every post anonymised so far ({currentAnonymised ?? '…'}) stops counting as anonymised. Until Anonymise now has processed
+              Every post anonymised so far ({currentAnonymised ?? '…'}) stops counting as anonymised. Until Anonymise all has processed
               each one again, none of them can be grouped into topics, and each one is a paid AI call.
             </p>
             <p>You only need this after accepting new brand names on Sources.</p>
