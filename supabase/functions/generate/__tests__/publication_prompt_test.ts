@@ -10,6 +10,7 @@
  */
 import { assert, assertEquals, assertStringIncludes, assertThrows } from "jsr:@std/assert@1.0.19";
 import {
+  buildGenerationPrompt,
   buildPublicationPrompt,
   LANGUAGE_RULE,
   MAX_PUBLICATION_THEMES,
@@ -18,6 +19,9 @@ import {
   validatePublicationOutput,
 } from "../prompt.ts";
 import type { GenerationConfigRow } from "../data.ts";
+
+/** An unpaired surrogate escape in serialised JSON: what OpenAI refuses (see _shared/text.ts). */
+const LONE_ESCAPE = /\\ud[89ab][0-9a-f]{2}(?!\\ud[c-f][0-9a-f]{2})|(?<!\\ud[89ab][0-9a-f]{2})\\ud[c-f][0-9a-f]{2}/i;
 
 const config: GenerationConfigRow = {
   themes: [{ theme_id: "traceability", label: "traceability" }],
@@ -179,4 +183,19 @@ Deno.test("a missing post object fails rather than shipping half a publication",
 Deno.test("the theme cap is low enough to keep a carousel readable", () => {
   // 2 + MAX must stay within the ten slides LinkedIn carousels are read at.
   assert(MAX_PUBLICATION_THEMES + 2 <= 10, "carousel would exceed ten slides");
+});
+
+Deno.test("an emoji at the 500-character cut does not break the request (production, 2026-11-24)", () => {
+  // Three posts of the 9–24 November grouping had an emoji exactly where each
+  // post is cut. The prompt then carried half an emoji, and OpenAI refused
+  // every "Create the carousel" with 400 "failed to parse JSON value".
+  const straddling = "a".repeat(499) + "\u{1F331} rest of the post";
+  const withEmoji: PublicationTheme[] = [
+    { label: "Theme with emoji", posts: [{ anonymized_text: straddling, generalized_source_name: "A research body" }] },
+  ];
+  const prompt = buildPublicationPrompt(withEmoji, config, period);
+  assert(!LONE_ESCAPE.test(JSON.stringify({ input: prompt })), "publication prompt carries half an emoji");
+
+  const perCluster = buildGenerationPrompt("Theme with emoji", withEmoji[0].posts, config);
+  assert(!LONE_ESCAPE.test(JSON.stringify({ input: perCluster })), "per-cluster prompt carries half an emoji");
 });

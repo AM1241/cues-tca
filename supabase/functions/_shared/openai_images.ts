@@ -11,6 +11,7 @@
  * caller can store it verbatim.
  */
 import { OpenAiError, type OpenAiFailureType } from "./openai.ts";
+import { requestJson } from "./text.ts";
 
 const DEFAULT_BASE_URL = "https://api.openai.com/v1/images/generations";
 
@@ -96,7 +97,7 @@ export async function callOpenAiImage(opts: CallOpenAiImageOptions): Promise<Ope
         "Authorization": `Bearer ${opts.apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
+      body: requestJson({
         model: opts.model,
         prompt: opts.prompt,
         size: opts.size,

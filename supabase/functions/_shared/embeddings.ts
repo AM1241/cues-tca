@@ -7,6 +7,8 @@
  * caller decides what to do (per-post exclusion, not a canned vector).
  */
 
+import { requestJson } from "./text.ts";
+
 export type EmbeddingFailureType =
   | "rate_limit"
   | "server_error"
@@ -53,7 +55,7 @@ export async function callEmbedding(opts: CallEmbeddingOptions): Promise<number[
         "Content-Type": "application/json",
         "Authorization": `Bearer ${opts.apiKey}`,
       },
-      body: JSON.stringify({ model: opts.model, input: opts.input }),
+      body: requestJson({ model: opts.model, input: opts.input }),
       signal: controller.signal,
     });
   } catch (e) {

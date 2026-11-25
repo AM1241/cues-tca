@@ -10,6 +10,8 @@
  * default score.
  */
 
+import { requestJson } from "./text.ts";
+
 export type OpenAiFailureType =
   | "refusal"
   | "incomplete"
@@ -88,7 +90,7 @@ export async function callOpenAi(opts: CallOpenAiOptions): Promise<OpenAiCallRes
         "Content-Type": "application/json",
         "Authorization": `Bearer ${opts.apiKey}`,
       },
-      body: JSON.stringify({
+      body: requestJson({
         model: opts.model,
         input: opts.input,
         store: false,

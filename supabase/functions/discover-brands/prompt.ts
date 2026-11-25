@@ -13,6 +13,7 @@
  * category in the list is not noticed until the output is nonsense.
  */
 import type { JsonSchemaFormat } from "../_shared/openai.ts";
+import { clipText } from "../_shared/text.ts";
 
 const MAX_POSTS = 25;
 const MAX_CHARS_PER_POST = 600;
@@ -28,7 +29,7 @@ export function buildDiscoveryPrompt(
   knownNames: string[],
 ): string {
   const evidence = posts.slice(0, MAX_POSTS)
-    .map((p, i) => `${i + 1}. ${p.text.slice(0, MAX_CHARS_PER_POST)}`)
+    .map((p, i) => `${i + 1}. ${clipText(p.text, MAX_CHARS_PER_POST)}`)
     .join("\n\n");
 
   const known = knownNames.length

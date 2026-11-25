@@ -5,6 +5,7 @@
  * passes representative post text as the evidence the model names from.
  */
 import type { JsonSchemaFormat } from "../_shared/openai.ts";
+import { clipText } from "../_shared/text.ts";
 
 /**
  * The naming brief, built from the operator's configured scope.
@@ -34,7 +35,7 @@ export function buildClusterLabelPrompt(
   themeLabels: string[],
 ): string {
   const representative = postTexts.slice(0, MAX_REPRESENTATIVE_POSTS)
-    .map((t, i) => `${i + 1}. ${t.slice(0, MAX_CHARS_PER_POST)}`)
+    .map((t, i) => `${i + 1}. ${clipText(t, MAX_CHARS_PER_POST)}`)
     .join("\n\n");
 
   return `${buildBrief(domain, themeLabels)}

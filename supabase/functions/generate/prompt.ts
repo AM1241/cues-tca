@@ -11,6 +11,7 @@
  * model not to reintroduce any identity the anonymisation step removed.
  */
 import type { JsonSchemaFormat } from "../_shared/openai.ts";
+import { clipText } from "../_shared/text.ts";
 import type { GenerationConfigRow } from "./data.ts";
 
 export const PROMPT_VERSION = "generate_v6";
@@ -118,7 +119,7 @@ export interface GenerationInputPost {
 
 function buildEvidenceBlock(posts: GenerationInputPost[]): string {
   return posts.slice(0, MAX_POSTS)
-    .map((p, i) => `${i + 1}. [${p.generalized_source_name}] ${p.anonymized_text.slice(0, MAX_CHARS_PER_POST)}`)
+    .map((p, i) => `${i + 1}. [${p.generalized_source_name}] ${clipText(p.anonymized_text, MAX_CHARS_PER_POST)}`)
     .join("\n\n");
 }
 
@@ -223,7 +224,7 @@ function buildThemeBlocks(themes: PublicationTheme[]): string {
     .map((t, i) => {
       const evidence = t.posts
         .slice(0, MAX_POSTS_PER_THEME)
-        .map((p) => `   - [${p.generalized_source_name}] ${p.anonymized_text.slice(0, MAX_CHARS_PER_POST)}`)
+        .map((p) => `   - [${p.generalized_source_name}] ${clipText(p.anonymized_text, MAX_CHARS_PER_POST)}`)
         .join("\n");
       return `Theme ${i + 1}: "${t.label}"\n${evidence}`;
     })

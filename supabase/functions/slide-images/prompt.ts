@@ -27,6 +27,8 @@
  * picture would be absurd.
  */
 
+import { clipText } from "../_shared/text.ts";
+
 /** Snapshot pinned like every other model in this project — see score-worker. */
 export const IMAGE_MODEL = "gpt-image-2-2026-04-21";
 export const IMAGE_PROMPT_VERSION = "slide_background_v1";
@@ -70,10 +72,8 @@ export interface SlideForImage {
 const MAX_SUBJECT_CHARS = 320;
 
 function subjectFrom(slide: SlideForImage): string {
-  const text = `${slide.heading.trim()}. ${slide.body.trim()}`
-    .replace(/\s+/g, " ")
-    .slice(0, MAX_SUBJECT_CHARS);
-  return text;
+  const text = `${slide.heading.trim()}. ${slide.body.trim()}`.replace(/\s+/g, " ");
+  return clipText(text, MAX_SUBJECT_CHARS);
 }
 
 export interface BuildSlideImagePromptOptions {
