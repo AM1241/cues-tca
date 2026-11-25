@@ -1642,10 +1642,14 @@ requests failed in about a second with the same `llm_client_error`.
 `text.slice(0, 500)`, which counts UTF-16 code units. An emoji is two of them. When the
 cut lands between the two halves, the prompt carries half an emoji; `JSON.stringify`
 writes it as an escape like `\ud83c`, and OpenAI refuses the whole body. Three posts in
-the 8 largest topics of run `9dbd1a58` have an emoji exactly at the cut (in "Agricoltura
-di precisione e difesa sostenibile" and twice in "Financing the Transition to Resilient
-Farming"). Their texts, run through the old cut, all leave the lone half; through the
-new code, none. Earlier carousels were simply lucky. The cluster labeller has the same
+the 8 largest topics of run `9dbd1a58` have a two-unit character exactly at the cut (in
+"Agricoltura di precisione e difesa sostenibile" and twice in "Financing the Transition
+to Resilient Farming"). Only one is an emoji (👇, U+1F447, left as `\ud83d`). The other
+two are LinkedIn-style bold letters (𝘁 U+1D601 and 𝗼 U+1D5FC, the "Mathematical Sans-Serif
+Bold" letters people paste in because LinkedIn has no bold), both left as `\ud835`. A
+post written in that bold has a two-unit character at every letter, so a cut inside a
+bold passage splits one about half the time. Their texts, run through the old cut, all
+leave the lone half; through the new code, none. Earlier carousels were simply lucky. The cluster labeller has the same
 cut at 400 characters; no label has failed from it so far (`label_failed` is false
 everywhere), but it is the same bug.
 
