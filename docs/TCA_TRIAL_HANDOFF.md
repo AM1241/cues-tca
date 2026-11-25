@@ -1623,3 +1623,64 @@ it", given as the answer to the request for the three steps below):
 
 Not exercised live: a real Anonymise now with a period, which is a paid call and, for the
 last 15 days, would find nothing until those posts are scored.
+
+### 9.10 "The carousel generation process does not seem to work" — 2026-11-25, branch `nov25-gabriele-fixes`
+
+Gabriele's email of 2026-11-25, after testing on 2026-11-24: clustering works "even with a
+large number of posts", but (1) anonymisation "is currently limited to batches of five
+posts at a time", which slows the workflow, and (2) "Create the carousel" fails with
+OpenAI's `400 Invalid body: failed to parse JSON value`.
+
+**What production showed (read-only, 2026-11-25).** On 2026-11-24 g.rivoltella ran
+Collect all (13:33–13:36, 89 new posts), anonymised 157 posts in under five minutes
+(13:42–13:46, one to two seconds a post, about thirty clicks), ran clustering twice
+(13:41, 13:46; the second is run `9dbd1a58`, 9–24 Nov, 15 topics from 63 posts), and
+pressed Create the carousel three times (13:56, 13:59, 14:00). All three publication
+requests failed in about a second with the same `llm_client_error`.
+
+**Cause.** `generate/prompt.ts` cuts each post to 500 characters with
+`text.slice(0, 500)`, which counts UTF-16 code units. An emoji is two of them. When the
+cut lands between the two halves, the prompt carries half an emoji; `JSON.stringify`
+writes it as an escape like `\ud83c`, and OpenAI refuses the whole body. Three posts in
+the 8 largest topics of run `9dbd1a58` have an emoji exactly at the cut (in "Agricoltura
+di precisione e difesa sostenibile" and twice in "Financing the Transition to Resilient
+Farming"). Their texts, run through the old cut, all leave the lone half; through the
+new code, none. Earlier carousels were simply lucky. The cluster labeller has the same
+cut at 400 characters; no label has failed from it so far (`label_failed` is false
+everywhere), but it is the same bug.
+
+**Fix 1 — `7fccd30`.** `_shared/text.ts`: `clipText()` cuts without splitting a pair,
+used by `generate`, `cluster`, `discover-brands` and `slide-images`; `requestJson()`
+makes every string well-formed before serialising, used by `callOpenAi`,
+`callEmbedding` and `callOpenAiImage` as a last line of defence. New tests fail against
+the old code; every touched function's suite passes against the local stack (102 tests,
+80 steps).
+
+**Fix 2 — `6bd2051`.** Topics' "Anonymise now (5)" becomes "Anonymise all N in this
+period", built like Rating's Score all: confirmation with cost and time, ten posts per
+call (same period window as 0035), progress bar, "stop after this batch". Frontend only.
+Checked locally with the worker mocked (76 posts in 8 calls, Stop, an error, a batch
+that fails entirely). Anonymisation still makes one small AI call per post, even with
+anonymisation switched off in Settings (Stage 2 entity extraction always runs).
+
+**Settings found changed on 2026-11-20 09:57 UTC** (no record of who; the operator was
+working in the app that morning, during the call): `min_relevance_score` 50 → 25, which
+is why the step strip says "score 25 or more" and 165 posts went into topics;
+`anonymization_enabled` and `anonymize_companies` false; `voice_style` asks for Italian.
+Nothing was changed back — these are editorial decisions. `output_language` stays NULL.
+
+**Deployed functions before this work (read 2026-11-25):** `generate` v9, `cluster` v7,
+`anonymize-worker` v14, `score-worker` v12, `slide-images` v3, `discover-brands` v7. All
+`verify_jwt` false except `discover-brands`.
+
+**Rollout plan (nothing is live yet; each step needs the operator's explicit go-ahead).**
+No migration. The three steps are independent of each other:
+
+1. Deploy `generate` — fixes Create the carousel. Then Gabriele can retry the 9–24 Nov
+   grouping as it is; nothing has to be redone.
+2. Deploy `cluster` — the same fix for topic names.
+3. Push the frontend (`phase6-frontend-binding` fast-forward) — Anonymise all.
+
+`score-worker`, `anonymize-worker`, `slide-images` and `discover-brands` carry the
+safety net in the repo but get it only at their next deploy; they send whole texts (or,
+for slide images, short slide text), so the risk there is low.
